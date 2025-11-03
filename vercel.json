@@ -5,16 +5,4 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "regions": ["icn1"],
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase_url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "SUPABASE_SERVICE_ROLE_KEY": "@supabase_service_role_key",
-    "OPENAI_API_KEY": "@openai_api_key",
-    "WHISPER_API_KEY": "@whisper_api_key",
-    "NOTION_CLIENT_ID": "@notion_client_id",
-    "NOTION_CLIENT_SECRET": "@notion_client_secret",
-    "SLACK_CLIENT_ID": "@slack_client_id",
-    "SLACK_CLIENT_SECRET": "@slack_client_secret",
-    "NEXT_PUBLIC_APP_URL": "@app_url"
-  }
 }
