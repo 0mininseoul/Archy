@@ -6,16 +6,19 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
+  const returnTo = searchParams.get("returnTo");
+
+  const defaultRedirect = returnTo || "/onboarding";
 
   if (error) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/onboarding?error=slack_auth_failed`
+      `${process.env.NEXT_PUBLIC_APP_URL}${defaultRedirect}?error=slack_auth_failed`
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/onboarding?error=no_code`
+      `${process.env.NEXT_PUBLIC_APP_URL}${defaultRedirect}?error=no_code`
     );
   }
 
@@ -31,7 +34,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Exchange code for access token
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/slack/callback`;
+    const baseRedirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/slack/callback`;
+    const redirectUri = returnTo
+      ? `${baseRedirectUri}?returnTo=${encodeURIComponent(returnTo)}`
+      : baseRedirectUri;
     const { access_token } = await exchangeSlackCode(code, redirectUri);
 
     // For MVP, we'll use a default channel. In production, let user select.
@@ -47,12 +53,12 @@ export async function GET(request: NextRequest) {
       .eq("id", user.id);
 
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/onboarding?slack=connected`
+      `${process.env.NEXT_PUBLIC_APP_URL}${defaultRedirect}?slack=connected`
     );
   } catch (err) {
     console.error("Slack OAuth error:", err);
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/onboarding?error=slack_exchange_failed`
+      `${process.env.NEXT_PUBLIC_APP_URL}${defaultRedirect}?error=slack_exchange_failed`
     );
   }
 }

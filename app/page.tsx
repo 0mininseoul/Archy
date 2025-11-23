@@ -1,4 +1,5 @@
 import { GoogleLoginButton } from "@/components/google-login-button";
+import Image from "next/image";
 
 export default function Home() {
   return (
@@ -7,9 +8,16 @@ export default function Home() {
       <div className="max-w-6xl w-full space-y-12">
         {/* Header */}
         <div className="text-center space-y-6">
-          <h1 className="text-6xl md:text-7xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            Flownote
-          </h1>
+          <div className="flex justify-center">
+            <Image
+              src="/logo.png"
+              alt="Flownote"
+              width={240}
+              height={240}
+              priority
+              className="w-48 h-48 md:w-60 md:h-60"
+            />
+          </div>
           <p className="text-xl md:text-2xl text-gray-600 max-w-2xl mx-auto">
             녹음 한 번 하면 완성되는 <br />
             <span className="font-semibold text-gray-800">자동 문서</span>

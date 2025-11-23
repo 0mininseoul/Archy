@@ -6,19 +6,27 @@ import { useRouter } from "next/navigation";
 export default function SettingsPage() {
   const router = useRouter();
   const [usage, setUsage] = useState({ used: 0, limit: 350 });
+  const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchUsage();
+    fetchUserData();
   }, []);
 
-  const fetchUsage = async () => {
+  const fetchUserData = async () => {
     try {
-      const response = await fetch("/api/user/usage");
-      const data = await response.json();
-      setUsage(data);
+      const [usageResponse, userResponse] = await Promise.all([
+        fetch("/api/user/usage"),
+        fetch("/api/user/profile"),
+      ]);
+
+      const usageData = await usageResponse.json();
+      const userData = await userResponse.json();
+
+      setUsage(usageData);
+      setUserEmail(userData.email || "");
     } catch (error) {
-      console.error("Failed to fetch usage:", error);
+      console.error("Failed to fetch user data:", error);
     } finally {
       setLoading(false);
     }
@@ -105,7 +113,7 @@ export default function SettingsPage() {
                 이메일
               </label>
               <div className="text-gray-900">
-                {loading ? "로딩 중..." : "user@example.com"}
+                {loading ? "로딩 중..." : userEmail || "이메일 정보 없음"}
               </div>
             </div>
             <div>
@@ -152,7 +160,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <button
-                onClick={() => (window.location.href = "/api/auth/notion")}
+                onClick={() =>
+                  (window.location.href = "/api/auth/notion?returnTo=/settings")
+                }
                 className="px-4 py-2 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
               >
                 재연결
@@ -169,7 +179,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <button
-                onClick={() => (window.location.href = "/api/auth/slack")}
+                onClick={() =>
+                  (window.location.href = "/api/auth/slack?returnTo=/settings")
+                }
                 className="px-4 py-2 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
               >
                 재연결
