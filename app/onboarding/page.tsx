@@ -1,14 +1,39 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type OnboardingStep = 1 | 2 | 3;
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
   const [selectedFormat, setSelectedFormat] = useState<string>("meeting");
+  const [notionConnected, setNotionConnected] = useState(false);
+  const [slackConnected, setSlackConnected] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Check for OAuth callback results
+  useEffect(() => {
+    const notion = searchParams.get("notion");
+    const slack = searchParams.get("slack");
+    const error = searchParams.get("error");
+
+    if (notion === "connected") {
+      setNotionConnected(true);
+      setStep(2); // Stay on step 2
+    }
+
+    if (slack === "connected") {
+      setSlackConnected(true);
+      setStep(2); // Stay on step 2
+    }
+
+    if (error) {
+      console.error("OAuth error:", error);
+      // TODO: Show error message to user
+    }
+  }, [searchParams]);
 
   const formats = [
     {
@@ -113,13 +138,35 @@ export default function OnboardingPage() {
                         정리된 문서가 자동으로 저장됩니다
                       </p>
                     </div>
+                    {notionConnected && (
+                      <div className="flex items-center gap-2 text-green-600">
+                        <svg
+                          className="w-5 h-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-medium">연결됨</span>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={handleNotionConnect}
-                    className="w-full py-2 px-4 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
-                  >
-                    Notion 연결하기
-                  </button>
+                  {!notionConnected ? (
+                    <button
+                      onClick={handleNotionConnect}
+                      className="w-full py-2 px-4 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
+                    >
+                      Notion 연결하기
+                    </button>
+                  ) : (
+                    <div className="w-full py-2 px-4 bg-green-50 text-green-700 rounded-lg font-medium text-center">
+                      연결 완료
+                    </div>
+                  )}
                 </div>
 
                 {/* Slack Connection */}
@@ -132,13 +179,35 @@ export default function OnboardingPage() {
                         완료 알림을 받습니다
                       </p>
                     </div>
+                    {slackConnected && (
+                      <div className="flex items-center gap-2 text-green-600">
+                        <svg
+                          className="w-5 h-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-medium">연결됨</span>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={handleSlackConnect}
-                    className="w-full py-2 px-4 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
-                  >
-                    Slack 연결하기
-                  </button>
+                  {!slackConnected ? (
+                    <button
+                      onClick={handleSlackConnect}
+                      className="w-full py-2 px-4 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
+                    >
+                      Slack 연결하기
+                    </button>
+                  ) : (
+                    <div className="w-full py-2 px-4 bg-green-50 text-green-700 rounded-lg font-medium text-center">
+                      연결 완료
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -242,5 +311,13 @@ export default function OnboardingPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <OnboardingContent />
+    </Suspense>
   );
 }
