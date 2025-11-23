@@ -1,27 +1,27 @@
-import { createClient } from "@/lib/supabase/server";
-import { NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@/lib/supabase/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
   if (code) {
-    const supabase = await createClient();
+    const { supabase, response } = createRouteHandlerClient(request);
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
       console.error("Error exchanging code for session:", error);
-      return NextResponse.redirect(
-        `${origin}/auth/auth-code-error?message=${encodeURIComponent(error.message)}`
-      );
+      const errorUrl = new URL("/auth/auth-code-error", origin);
+      errorUrl.searchParams.set("message", error.message);
+      return NextResponse.redirect(errorUrl, response);
     }
 
     if (!data.session) {
       console.error("No session returned after code exchange");
-      return NextResponse.redirect(
-        `${origin}/auth/auth-code-error?message=No session created`
-      );
+      const errorUrl = new URL("/auth/auth-code-error", origin);
+      errorUrl.searchParams.set("message", "No session created");
+      return NextResponse.redirect(errorUrl, response);
     }
 
     const {
@@ -51,9 +51,9 @@ export async function GET(request: Request) {
 
         if (insertError) {
           console.error("Error creating user:", insertError);
-          return NextResponse.redirect(
-            `${origin}/auth/auth-code-error?message=${encodeURIComponent("Failed to create user profile")}`
-          );
+          const errorUrl = new URL("/auth/auth-code-error", origin);
+          errorUrl.searchParams.set("message", "Failed to create user profile");
+          return NextResponse.redirect(errorUrl, response);
         }
       }
     }
@@ -61,15 +61,20 @@ export async function GET(request: Request) {
     const forwardedHost = request.headers.get("x-forwarded-host");
     const isLocalEnv = process.env.NODE_ENV === "development";
 
+    let redirectUrl: string;
     if (isLocalEnv) {
-      return NextResponse.redirect(`${origin}${next}`);
+      redirectUrl = `${origin}${next}`;
     } else if (forwardedHost) {
-      return NextResponse.redirect(`https://${forwardedHost}${next}`);
+      redirectUrl = `https://${forwardedHost}${next}`;
     } else {
-      return NextResponse.redirect(`${origin}${next}`);
+      redirectUrl = `${origin}${next}`;
     }
+
+    return NextResponse.redirect(redirectUrl, response);
   }
 
   // Return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/auth/auth-code-error?message=No authorization code provided`);
+  const errorUrl = new URL("/auth/auth-code-error", origin);
+  errorUrl.searchParams.set("message", "No authorization code provided");
+  return NextResponse.redirect(errorUrl);
 }
