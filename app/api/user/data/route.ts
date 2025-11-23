@@ -1,6 +1,47 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+// GET /api/user/data - Get user connection status
+export async function GET() {
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Get user data
+    const { data: userData, error } = await supabase
+      .from("users")
+      .select("notion_access_token, slack_access_token")
+      .eq("id", user.id)
+      .single();
+
+    if (error) {
+      console.error("Database error:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch user data" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      notionConnected: !!userData?.notion_access_token,
+      slackConnected: !!userData?.slack_access_token,
+    });
+  } catch (error) {
+    console.error("API error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 // DELETE /api/user/data - Delete all user data
 export async function DELETE() {
   try {

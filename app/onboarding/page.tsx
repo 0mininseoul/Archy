@@ -13,20 +13,33 @@ function OnboardingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Check for OAuth callback results
+  // Fetch connection status from database
+  const fetchConnectionStatus = async () => {
+    try {
+      const response = await fetch("/api/user/data");
+      if (response.ok) {
+        const data = await response.json();
+        setNotionConnected(data.notionConnected);
+        setSlackConnected(data.slackConnected);
+      }
+    } catch (error) {
+      console.error("Failed to fetch connection status:", error);
+    }
+  };
+
+  // Check for OAuth callback results and fetch actual connection status
   useEffect(() => {
     const notion = searchParams.get("notion");
     const slack = searchParams.get("slack");
     const error = searchParams.get("error");
 
-    if (notion === "connected") {
-      setNotionConnected(true);
+    // If OAuth callback, fetch updated connection status from database
+    if (notion === "connected" || slack === "connected") {
+      fetchConnectionStatus();
       setStep(2); // Stay on step 2
-    }
-
-    if (slack === "connected") {
-      setSlackConnected(true);
-      setStep(2); // Stay on step 2
+    } else {
+      // On initial load, fetch connection status
+      fetchConnectionStatus();
     }
 
     if (error) {
