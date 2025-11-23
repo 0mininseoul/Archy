@@ -20,3 +20,13 @@ export function formatDurationMinutes(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}분`;
 }
+
+/**
+ * Format date to Korean Standard Time (KST, UTC+9)
+ */
+export function formatKSTDate(date?: Date): string {
+  const targetDate = date || new Date();
+  return targetDate.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+  });
+}

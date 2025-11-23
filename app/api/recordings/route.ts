@@ -5,6 +5,7 @@ import { formatDocument } from "@/lib/services/openai";
 import { createNotionPage } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
 import { FORMAT_PROMPTS } from "@/lib/prompts";
+import { formatKSTDate } from "@/lib/utils";
 
 // POST /api/recordings - Upload and process recording
 export async function POST(request: NextRequest) {
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate title
-    const title = `Flownote - ${new Date().toLocaleString("ko-KR")}`;
+    const title = `Flownote - ${formatKSTDate()}`;
 
     // Upload audio to Supabase Storage
     const fileName = `${user.id}/${Date.now()}.webm`;

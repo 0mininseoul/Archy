@@ -1,4 +1,5 @@
 import { WebClient } from "@slack/web-api";
+import { formatKSTDate } from "../utils";
 
 export async function sendSlackNotification(
   accessToken: string,
@@ -10,7 +11,7 @@ export async function sendSlackNotification(
   const client = new WebClient(accessToken);
 
   const durationMinutes = Math.floor(duration / 60);
-  const date = new Date().toLocaleString("ko-KR");
+  const date = formatKSTDate();
 
   await client.chat.postMessage({
     channel: channelId,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Recording } from "@/types";
-import { formatDurationMinutes } from "@/lib/utils";
+import { formatDurationMinutes, formatKSTDate } from "@/lib/utils";
 
 export default function HistoryPage() {
   const router = useRouter();
@@ -213,7 +213,7 @@ export default function HistoryPage() {
                           <span>{formatDurationMinutes(recording.duration_seconds)}</span>
                           <span>•</span>
                           <span>
-                            {new Date(recording.created_at).toLocaleString("ko-KR")}
+                            {formatKSTDate(new Date(recording.created_at))}
                           </span>
                         </div>
                       </div>

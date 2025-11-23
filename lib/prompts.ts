@@ -1,3 +1,5 @@
+import { formatKSTDate } from "./utils";
+
 export const FORMAT_PROMPTS = {
   meeting: `다음 회의 녹취록을 회의록 형식으로 정리해주세요:
 
@@ -76,7 +78,7 @@ export function buildPrompt(
   customPrompt?: string
 ): string {
   const template = customPrompt || FORMAT_PROMPTS[format];
-  const date = new Date().toLocaleString("ko-KR");
+  const date = formatKSTDate();
 
   return template
     .replace("{{transcript}}", transcript)
