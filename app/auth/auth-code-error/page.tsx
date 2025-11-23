@@ -1,9 +1,10 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 
-export default function AuthCodeError() {
+function AuthCodeErrorContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const message = searchParams.get("message") || "인증 중 오류가 발생했습니다.";
@@ -41,5 +42,19 @@ export default function AuthCodeError() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AuthCodeError() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+          <div className="text-white">로딩 중...</div>
+        </div>
+      }
+    >
+      <AuthCodeErrorContent />
+    </Suspense>
   );
 }
