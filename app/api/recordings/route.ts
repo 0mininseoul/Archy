@@ -341,7 +341,7 @@ async function processRecording(
 
     // Mark as completed
     console.log(`[${recordingId}] Processing completed successfully`);
-    await supabase
+    const { data: updateData, error: updateError } = await supabase
       .from("recordings")
       .update({
         status: "completed",
@@ -349,7 +349,15 @@ async function processRecording(
         error_step: null,
         error_message: null
       })
-      .eq("id", recordingId);
+      .eq("id", recordingId)
+      .select();
+
+    if (updateError) {
+      console.error(`[${recordingId}] Failed to update status to completed:`, updateError);
+      throw new Error(`Status update failed: ${updateError.message}`);
+    }
+
+    console.log(`[${recordingId}] Status updated to completed:`, updateData);
 
   } catch (error) {
     // Catch-all for unexpected errors
