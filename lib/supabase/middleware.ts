@@ -34,6 +34,10 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  console.log("[Middleware] Path:", request.nextUrl.pathname);
+  console.log("[Middleware] User:", user?.id || "No user");
+  console.log("[Middleware] Cookies:", request.cookies.getAll().map(c => c.name).filter(n => n.includes('supabase')));
+
   // Protected routes
   const protectedRoutes = ["/dashboard", "/history", "/settings", "/onboarding"];
   const isProtectedRoute = protectedRoutes.some((route) =>
@@ -41,6 +45,7 @@ export async function updateSession(request: NextRequest) {
   );
 
   if (isProtectedRoute && !user) {
+    console.log("[Middleware] Redirecting to home - no user on protected route");
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

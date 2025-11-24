@@ -1,13 +1,32 @@
-import { createRouteHandlerClient } from "@/lib/supabase/server";
-import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
   if (code) {
-    const { supabase, response } = createRouteHandlerClient(request);
+    const cookieStore = await cookies();
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          },
+        },
+      }
+    );
+
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
@@ -23,6 +42,8 @@ export async function GET(request: NextRequest) {
       errorUrl.searchParams.set("message", "No session created");
       return NextResponse.redirect(errorUrl);
     }
+
+    console.log("[Auth Callback] Session created:", data.session.user.id);
 
     const {
       data: { user },
@@ -70,15 +91,8 @@ export async function GET(request: NextRequest) {
       redirectUrl = `${origin}${next}`;
     }
 
-    // Create redirect response with cookies from the response object
-    const redirectResponse = NextResponse.redirect(redirectUrl);
-
-    // Copy all cookies from the supabase response to the redirect response
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
-    });
-
-    return redirectResponse;
+    console.log("[Auth Callback] Redirecting to:", redirectUrl);
+    return NextResponse.redirect(redirectUrl);
   }
 
   // Return the user to an error page with instructions
