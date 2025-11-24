@@ -1,13 +1,13 @@
-import { createClient } from "@/lib/supabase/server";
-import { NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@/lib/supabase/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
   if (code) {
-    const supabase = await createClient();
+    const { supabase, response } = createRouteHandlerClient(request);
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
@@ -70,7 +70,15 @@ export async function GET(request: Request) {
       redirectUrl = `${origin}${next}`;
     }
 
-    return NextResponse.redirect(redirectUrl);
+    // Create redirect response with cookies from the response object
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+
+    // Copy all cookies from the supabase response to the redirect response
+    response.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+    });
+
+    return redirectResponse;
   }
 
   // Return the user to an error page with instructions
