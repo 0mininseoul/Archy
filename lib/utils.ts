@@ -18,7 +18,8 @@ export function formatDuration(seconds: number): string {
 
 export function formatDurationMinutes(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}분`;
+  const secs = seconds % 60;
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
 /**

@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState({ used: 0, limit: 350 });
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
+  const [notionConnected, setNotionConnected] = useState(false);
   const [notionDatabaseId, setNotionDatabaseId] = useState<string | null>(null);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
   const [databases, setDatabases] = useState<NotionDatabase[]>([]);
@@ -33,6 +34,16 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchUserData();
+  }, []);
+
+  useEffect(() => {
+    // Check if returning from Notion OAuth and should open DB selector
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("notion") === "connected" && params.get("selectDb") === "true") {
+      openDatabaseModal();
+      // Clean up URL
+      window.history.replaceState({}, "", "/settings");
+    }
   }, []);
 
   const fetchUserData = async () => {
@@ -47,6 +58,7 @@ export default function SettingsPage() {
 
       setUsage(usageData);
       setUserEmail(userData.email || "");
+      setNotionConnected(!!userData.notion_access_token);
       setNotionDatabaseId(userData.notion_database_id || null);
     } catch (error) {
       console.error("Failed to fetch user data:", error);
@@ -256,17 +268,25 @@ export default function SettingsPage() {
                 <div>
                   <h3 className="font-semibold text-gray-800">Notion</h3>
                   <p className="text-sm text-gray-600">
-                    정리된 문서가 자동으로 저장됩니다
+                    {notionConnected
+                      ? notionDatabaseId
+                        ? "정리된 문서가 자동으로 저장됩니다"
+                        : "데이터베이스를 선택해주세요"
+                      : "연결하고 데이터베이스를 선택하세요"}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() =>
-                  (window.location.href = "/api/auth/notion?returnTo=/settings")
-                }
+                onClick={() => {
+                  if (notionConnected) {
+                    openDatabaseModal();
+                  } else {
+                    window.location.href = "/api/auth/notion?returnTo=/settings&selectDb=true";
+                  }
+                }}
                 className="px-4 py-2 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-colors"
               >
-                재연결
+                {notionConnected ? "DB 선택" : "연결하기"}
               </button>
             </div>
 
@@ -289,44 +309,6 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-        </div>
-
-        {/* Notion Database Settings */}
-        <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Notion 데이터베이스
-            </h2>
-            <button
-              onClick={openDatabaseModal}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-            >
-              {notionDatabaseId ? "변경" : "설정"}
-            </button>
-          </div>
-          <p className="text-sm text-gray-600">
-            {notionDatabaseId
-              ? "녹음 내용이 저장될 Notion 데이터베이스가 설정되었습니다."
-              : "녹음 내용을 저장할 Notion 데이터베이스를 선택하거나 생성하세요."}
-          </p>
-        </div>
-
-        {/* Format Settings */}
-        <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-800">
-              문서 포맷 설정
-            </h2>
-            <button
-              onClick={() => router.push("/settings/formats")}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-            >
-              포맷 관리
-            </button>
-          </div>
-          <p className="text-sm text-gray-600">
-            기본 포맷을 수정하거나 커스텀 포맷을 만들 수 있습니다
-          </p>
         </div>
 
         {/* Data Management */}

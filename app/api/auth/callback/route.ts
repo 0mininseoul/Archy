@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  let next = searchParams.get("next");
 
   if (code) {
     const cookieStore = await cookies();
@@ -75,6 +75,16 @@ export async function GET(request: Request) {
           const errorUrl = new URL("/auth/auth-code-error", origin);
           errorUrl.searchParams.set("message", "Failed to create user profile");
           return NextResponse.redirect(errorUrl);
+        }
+      }
+
+      // Determine redirect destination based on Notion connection status
+      // Only override if next is not explicitly set
+      if (!next) {
+        if (existingUser?.notion_access_token) {
+          next = "/dashboard";
+        } else {
+          next = "/onboarding";
         }
       }
     }

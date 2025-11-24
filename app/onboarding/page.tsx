@@ -3,11 +3,10 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-type OnboardingStep = 1 | 2 | 3;
+type OnboardingStep = 1 | 2;
 
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
-  const [selectedFormat, setSelectedFormat] = useState<string>("meeting");
   const [notionConnected, setNotionConnected] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
   const router = useRouter();
@@ -48,27 +47,6 @@ function OnboardingContent() {
     }
   }, [searchParams]);
 
-  const formats = [
-    {
-      id: "meeting",
-      name: "회의록 형식",
-      icon: "🎙️",
-      description: "참석자, 주요 안건, 결정 사항, 액션 아이템",
-    },
-    {
-      id: "interview",
-      name: "인터뷰 기록 형식",
-      icon: "📝",
-      description: "Q&A 형식으로 질문과 답변을 정리",
-    },
-    {
-      id: "lecture",
-      name: "강의 요약본 형식",
-      icon: "📚",
-      description: "핵심 개념과 주요 내용을 섹션별로 정리",
-    },
-  ];
-
   const handleNotionConnect = () => {
     // Notion OAuth flow will be implemented
     window.location.href = "/api/auth/notion";
@@ -88,7 +66,7 @@ function OnboardingContent() {
       <div className="max-w-3xl w-full space-y-8">
         {/* Progress Indicator */}
         <div className="flex items-center justify-center gap-4">
-          {[1, 2, 3].map((num) => (
+          {[1, 2].map((num) => (
             <div key={num} className="flex items-center">
               <div
                 className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
@@ -99,7 +77,7 @@ function OnboardingContent() {
               >
                 {num}
               </div>
-              {num < 3 && (
+              {num < 2 && (
                 <div
                   className={`w-16 h-1 ${
                     step > num ? "bg-indigo-600" : "bg-gray-200"
@@ -232,90 +210,9 @@ function OnboardingContent() {
                   이전
                 </button>
                 <button
-                  onClick={() => setStep(3)}
+                  onClick={handleComplete}
                   className="flex-1 glass-button"
                 >
-                  다음
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-6">
-              <div className="text-center space-y-2">
-                <h2 className="text-3xl font-bold text-gray-800">
-                  문서 포맷 선택
-                </h2>
-                <p className="text-gray-600">
-                  기본으로 사용할 문서 형식을 선택하세요
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4">
-                {formats.map((format) => (
-                  <button
-                    key={format.id}
-                    onClick={() => setSelectedFormat(format.id)}
-                    className={`p-6 border-2 rounded-2xl text-left transition-all ${
-                      selectedFormat === format.id
-                        ? "border-indigo-600 bg-indigo-50"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="text-4xl">{format.icon}</div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-800">
-                          {format.name}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          {format.description}
-                        </p>
-                      </div>
-                      <div
-                        className={`w-5 h-5 rounded-full border-2 ${
-                          selectedFormat === format.id
-                            ? "border-indigo-600 bg-indigo-600"
-                            : "border-gray-300"
-                        }`}
-                      >
-                        {selectedFormat === format.id && (
-                          <svg
-                            className="w-full h-full text-white"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="text-center">
-                <button
-                  onClick={() => router.push("/settings/formats")}
-                  className="text-indigo-600 hover:underline"
-                >
-                  커스텀 포맷 만들기 →
-                </button>
-              </div>
-
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setStep(2)}
-                  className="flex-1 py-3 px-4 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                >
-                  이전
-                </button>
-                <button onClick={handleComplete} className="flex-1 glass-button">
                   시작하기
                 </button>
               </div>

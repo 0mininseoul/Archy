@@ -1,17 +1,16 @@
-// WhisperAPI.com integration with fallback to Groq
+// Lemonfox.ai STT integration with fallback to Groq
 export async function transcribeAudio(audioFile: File): Promise<string> {
-  // Try WhisperAPI.com first
+  // Try Lemonfox.ai first
   if (process.env.WHISPER_API_KEY) {
     try {
-      console.log("[Transcription] Attempting WhisperAPI.com...");
+      console.log("[Transcription] Attempting Lemonfox.ai...");
       const formData = new FormData();
       formData.append("file", audioFile);
-      formData.append("language", "ko"); // Auto-detect Korean/English
-      formData.append("diarization", "true"); // Speaker separation
-      formData.append("timestamps", "true");
+      formData.append("language", "ko"); // Korean language
+      formData.append("response_format", "json"); // JSON response
 
       const response = await fetch(
-        "https://api.whisperapi.com/v1/audio/transcriptions",
+        "https://api.lemonfox.ai/v1/audio/transcriptions",
         {
           method: "POST",
           headers: {
@@ -23,15 +22,15 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
 
       if (!response.ok) {
         const error = await response.text();
-        console.error("[Transcription] WhisperAPI.com failed:", error);
-        throw new Error(`WhisperAPI.com error: ${error}`);
+        console.error("[Transcription] Lemonfox.ai failed:", error);
+        throw new Error(`Lemonfox.ai error: ${error}`);
       }
 
       const data = await response.json();
-      console.log("[Transcription] WhisperAPI.com succeeded");
+      console.log("[Transcription] Lemonfox.ai succeeded");
       return data.text;
     } catch (error) {
-      console.error("[Transcription] WhisperAPI.com error:", error);
+      console.error("[Transcription] Lemonfox.ai error:", error);
       // Fall through to Groq
     }
   }

@@ -126,11 +126,9 @@ export async function getNotionDatabases(accessToken: string): Promise<any[]> {
   const notion = new Client({ auth: accessToken });
 
   try {
+    // Note: Notion API no longer supports filtering by "database" in search
+    // We fetch all results and filter client-side
     const response = await notion.search({
-      filter: {
-        property: "object",
-        value: "database" as any,
-      },
       sort: {
         direction: "descending",
         timestamp: "last_edited_time",

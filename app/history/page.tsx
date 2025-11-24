@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Recording } from "@/types";
-import { formatDurationMinutes, formatKSTDate } from "@/lib/utils";
+import { formatDurationMinutes } from "@/lib/utils";
 
 export default function HistoryPage() {
   const router = useRouter();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "processing" | "completed" | "failed">("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   useEffect(() => {
     fetchRecordings();
@@ -42,6 +44,43 @@ export default function HistoryPage() {
       console.error("Failed to delete recording:", error);
       alert("삭제에 실패했습니다.");
     }
+  };
+
+  const startEditingTitle = (id: string, currentTitle: string) => {
+    setEditingId(id);
+    setEditingTitle(currentTitle);
+  };
+
+  const saveTitle = async (id: string) => {
+    if (!editingTitle.trim()) {
+      alert("제목을 입력해주세요.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/recordings/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editingTitle.trim() }),
+      });
+
+      if (response.ok) {
+        const { recording } = await response.json();
+        setRecordings(recordings.map((r) => (r.id === id ? recording : r)));
+        setEditingId(null);
+        setEditingTitle("");
+      } else {
+        throw new Error("Update failed");
+      }
+    } catch (error) {
+      console.error("Failed to update title:", error);
+      alert("제목 수정에 실패했습니다.");
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditingTitle("");
   };
 
   const filteredRecordings = recordings.filter((recording) => {
@@ -106,12 +145,12 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+      <header className="border-b border-gray-200 bg-white/80 backdrop-blur-xl sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 md:px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 md:gap-4">
               <button
                 onClick={() => router.push("/dashboard")}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -130,7 +169,7 @@ export default function HistoryPage() {
                   />
                 </svg>
               </button>
-              <h1 className="text-2xl font-bold text-gray-800">녹음 히스토리</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-gray-800">녹음 히스토리</h1>
             </div>
 
             <button
@@ -162,9 +201,9 @@ export default function HistoryPage() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-4xl mx-auto px-4 md:px-6 py-6 md:py-8">
         {/* Filter */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {[
             { value: "all", label: "전체" },
             { value: "processing", label: "처리중" },
@@ -174,7 +213,7 @@ export default function HistoryPage() {
             <button
               key={item.value}
               onClick={() => setFilter(item.value as any)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                 filter === item.value
                   ? "bg-indigo-600 text-white"
                   : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-200"
@@ -210,35 +249,62 @@ export default function HistoryPage() {
         ) : (
           <div className="space-y-4">
             {filteredRecordings.map((recording) => (
-              <div key={recording.id} className="glass-card p-6">
-                <div className="flex items-start gap-4">
+              <div key={recording.id} className="glass-card p-4 md:p-6">
+                <div className="flex items-start gap-3 md:gap-4">
                   {/* Icon */}
-                  <div className="text-4xl">{getFormatEmoji(recording.format)}</div>
+                  <div className="text-3xl md:text-4xl flex-shrink-0">{getFormatEmoji(recording.format)}</div>
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start justify-between gap-2 md:gap-4">
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold text-gray-800 truncate">
-                          {recording.title}
-                        </h3>
-                        <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
+                        {editingId === recording.id ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              className="w-full px-3 py-2 border border-indigo-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 text-sm md:text-base"
+                              placeholder="제목을 입력하세요"
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => saveTitle(recording.id)}
+                                className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 transition-colors"
+                              >
+                                저장
+                              </button>
+                              <button
+                                onClick={cancelEditing}
+                                className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300 transition-colors"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <h3
+                            className="text-base md:text-lg font-semibold text-gray-800 truncate cursor-pointer hover:text-indigo-600 transition-colors"
+                            onClick={() => startEditingTitle(recording.id, recording.title)}
+                            title="클릭하여 수정"
+                          >
+                            {recording.title}
+                          </h3>
+                        )}
+                        <div className="flex items-center gap-2 md:gap-3 mt-1 text-xs md:text-sm text-gray-600 flex-wrap">
                           <span>
                             {getStatusIcon(recording.status)} {getStatusText(recording.status)}
                           </span>
                           <span>•</span>
                           <span>{formatDurationMinutes(recording.duration_seconds)}</span>
-                          <span>•</span>
-                          <span>
-                            {formatKSTDate(recording.created_at)}
-                          </span>
                         </div>
                       </div>
 
                       {/* Actions */}
                       <button
                         onClick={() => deleteRecording(recording.id)}
-                        className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition-colors"
+                        className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition-colors flex-shrink-0"
                         title="삭제"
                       >
                         <svg
@@ -260,17 +326,17 @@ export default function HistoryPage() {
                     {/* Error Message */}
                     {recording.status === "failed" && recording.error_message && (
                       <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                        <div className="flex items-start gap-2">
-                          <span className="text-red-600 text-sm font-semibold">
+                        <div className="flex items-start gap-2 flex-wrap">
+                          <span className="text-red-600 text-xs md:text-sm font-semibold">
                             ⚠️ 오류 발생
                           </span>
                           {recording.error_step && (
-                            <span className="text-red-600 text-sm">
+                            <span className="text-red-600 text-xs md:text-sm">
                               ({getErrorStepText(recording.error_step)})
                             </span>
                           )}
                         </div>
-                        <p className="text-red-700 text-sm mt-1">
+                        <p className="text-red-700 text-xs md:text-sm mt-1">
                           {recording.error_message}
                         </p>
                       </div>
@@ -278,20 +344,20 @@ export default function HistoryPage() {
 
                     {/* Links */}
                     {recording.status === "completed" && (
-                      <div className="flex gap-2 mt-4">
+                      <div className="flex gap-2 mt-4 flex-wrap">
                         {recording.notion_page_url && (
                           <a
                             href={recording.notion_page_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                           >
                             📔 Notion에서 보기
                           </a>
                         )}
                         <button
                           onClick={() => router.push(`/recordings/${recording.id}`)}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                         >
                           상세 보기
                         </button>
@@ -303,7 +369,7 @@ export default function HistoryPage() {
                       <div className="flex gap-2 mt-4">
                         <button
                           onClick={() => router.push(`/recordings/${recording.id}`)}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="inline-flex items-center gap-2 px-3 md:px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs md:text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                         >
                           전사본 보기
                         </button>

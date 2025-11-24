@@ -8,12 +8,14 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get("error");
   const state = searchParams.get("state");
 
-  // Parse returnTo from state
+  // Parse returnTo and selectDb from state
   let returnTo = "/onboarding";
+  let selectDb = false;
   if (state) {
     try {
       const parsed = JSON.parse(state);
       returnTo = parsed.returnTo || returnTo;
+      selectDb = parsed.selectDb === "true";
     } catch (e) {
       console.error("Failed to parse state:", e);
     }
@@ -58,9 +60,12 @@ export async function GET(request: NextRequest) {
       })
       .eq("id", user.id);
 
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}${returnTo}?notion=connected`
-    );
+    const redirectUrl = new URL(`${process.env.NEXT_PUBLIC_APP_URL}${returnTo}`);
+    redirectUrl.searchParams.set("notion", "connected");
+    if (selectDb) {
+      redirectUrl.searchParams.set("selectDb", "true");
+    }
+    return NextResponse.redirect(redirectUrl.toString());
   } catch (err) {
     console.error("Notion OAuth error:", err);
     return NextResponse.redirect(
