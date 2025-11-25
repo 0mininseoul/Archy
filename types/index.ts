@@ -16,6 +16,7 @@ export interface Recording {
   user_id: string;
   title: string;
   audio_file_path: string;
+  audio_url?: string;
   duration_seconds: number;
   format: RecordingFormat;
   status: RecordingStatus;

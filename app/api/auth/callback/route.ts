@@ -81,7 +81,7 @@ export async function GET(request: Request) {
       // Determine redirect destination based on Notion connection status
       // Only override if next is not explicitly set
       if (!next) {
-        if (existingUser?.notion_access_token) {
+        if (existingUser?.notion_access_token && existingUser?.notion_database_id) {
           next = "/dashboard";
         } else {
           next = "/onboarding";

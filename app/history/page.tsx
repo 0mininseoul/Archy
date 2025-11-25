@@ -323,6 +323,21 @@ export default function HistoryPage() {
                       </button>
                     </div>
 
+                    {/* Audio Player */}
+                    {recording.audio_url && (
+                      <div className="mt-4">
+                        <audio
+                          controls
+                          className="w-full h-10"
+                          preload="metadata"
+                          style={{ maxWidth: "100%" }}
+                        >
+                          <source src={recording.audio_url} type="audio/webm" />
+                          Your browser does not support the audio element.
+                        </audio>
+                      </div>
+                    )}
+
                     {/* Error Message */}
                     {recording.status === "failed" && recording.error_message && (
                       <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">

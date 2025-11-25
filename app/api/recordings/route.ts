@@ -173,7 +173,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ recordings });
+    // Add audio URLs to recordings
+    const recordingsWithUrls = recordings?.map((recording) => {
+      const { data } = supabase.storage
+        .from("recordings")
+        .getPublicUrl(recording.audio_file_path);
+
+      return {
+        ...recording,
+        audio_url: data.publicUrl,
+      };
+    });
+
+    return NextResponse.json({ recordings: recordingsWithUrls });
   } catch (error) {
     console.error("API error:", error);
     return NextResponse.json(

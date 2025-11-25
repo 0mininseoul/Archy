@@ -126,23 +126,66 @@ export async function getNotionDatabases(accessToken: string): Promise<any[]> {
   const notion = new Client({ auth: accessToken });
 
   try {
-    // Note: Notion API no longer supports filtering by "database" in search
-    // We fetch all results and filter client-side
-    const response = await notion.search({
+    const databaseMap = new Map<string, any>();
+
+    // 1. Search for top-level databases
+    const searchResponse = await notion.search({
       sort: {
         direction: "descending",
         timestamp: "last_edited_time",
       },
     });
 
-    return response.results
+    // Add top-level databases
+    searchResponse.results
       .filter((item: any) => item.object === "database")
-      .map((db: any) => ({
-        id: db.id,
-        title: db.title?.[0]?.plain_text || "Untitled",
-        url: db.url,
-        last_edited_time: db.last_edited_time,
-      }));
+      .forEach((db: any) => {
+        databaseMap.set(db.id, {
+          id: db.id,
+          title: db.title?.[0]?.plain_text || "Untitled",
+          url: db.url,
+          last_edited_time: db.last_edited_time,
+        });
+      });
+
+    // 2. Get pages and check for child databases
+    const pages = searchResponse.results.filter((item: any) => item.object === "page");
+
+    // Check each page for child databases
+    for (const page of pages) {
+      try {
+        const blocksResponse = await notion.blocks.children.list({
+          block_id: page.id,
+          page_size: 100,
+        });
+
+        // Find child_database blocks
+        blocksResponse.results
+          .filter((block: any) => block.type === "child_database")
+          .forEach((block: any) => {
+            const dbId = block.id;
+            // Only add if not already in map
+            if (!databaseMap.has(dbId)) {
+              databaseMap.set(dbId, {
+                id: dbId,
+                title: (block as any).child_database?.title || "Untitled",
+                url: `https://notion.so/${dbId.replace(/-/g, "")}`,
+                last_edited_time: (block as any).last_edited_time || page.last_edited_time,
+              });
+            }
+          });
+      } catch (blockError) {
+        // Skip pages where we can't read blocks
+        console.warn(`Could not read blocks for page ${page.id}:`, blockError);
+      }
+    }
+
+    // Convert map to array and sort by last_edited_time
+    return Array.from(databaseMap.values()).sort(
+      (a, b) =>
+        new Date(b.last_edited_time).getTime() -
+        new Date(a.last_edited_time).getTime()
+    );
   } catch (error) {
     console.error("Failed to fetch Notion databases:", error);
     throw new Error("Failed to fetch databases");
