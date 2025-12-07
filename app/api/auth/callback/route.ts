@@ -10,6 +10,9 @@ export async function GET(request: Request) {
   if (code) {
     const cookieStore = await cookies();
 
+    // Store cookies to set on redirect response
+    const cookiesToSetOnResponse: { name: string; value: string; options: Record<string, unknown> }[] = [];
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -21,6 +24,8 @@ export async function GET(request: Request) {
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options);
+              // Also save for redirect response
+              cookiesToSetOnResponse.push({ name, value, options });
             });
           },
         },
@@ -102,7 +107,16 @@ export async function GET(request: Request) {
     }
 
     console.log("[Auth Callback] Redirecting to:", redirectUrl);
-    return NextResponse.redirect(redirectUrl);
+    console.log("[Auth Callback] Setting cookies:", cookiesToSetOnResponse.map(c => c.name));
+
+    const response = NextResponse.redirect(redirectUrl);
+
+    // Set session cookies on redirect response
+    cookiesToSetOnResponse.forEach(({ name, value, options }) => {
+      response.cookies.set(name, value, options as Record<string, unknown>);
+    });
+
+    return response;
   }
 
   // Return the user to an error page with instructions
