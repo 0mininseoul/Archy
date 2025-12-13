@@ -1,11 +1,9 @@
 // Service Worker for Flownote PWA
 
-const CACHE_NAME = 'flownote-v1';
+const CACHE_NAME = 'flownote-v2';
+// Only cache static pages, not protected routes
 const urlsToCache = [
   '/',
-  '/dashboard',
-  '/history',
-  '/settings',
   '/manifest.json'
 ];
 
@@ -22,16 +20,50 @@ self.addEventListener('install', (event) => {
 
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Skip service worker for API routes and auth callbacks
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
+    return;
+  }
+
+  // For protected routes (dashboard, history, settings, onboarding), always use network
+  // to ensure authentication is checked
+  const protectedRoutes = ['/dashboard', '/history', '/settings', '/onboarding'];
+  const isProtectedRoute = protectedRoutes.some(route => url.pathname.startsWith(route));
+
+  if (isProtectedRoute) {
+    event.respondWith(
+      fetch(request, {
+        redirect: 'follow',
+        credentials: 'include'
+      }).catch(() => {
+        // Fallback to cache if network fails
+        return caches.match(request);
+      })
+    );
+    return;
+  }
+
+  // For other routes, try cache first, then network
   event.respondWith(
-    caches.match(event.request)
+    caches.match(request)
       .then((response) => {
         // Cache hit - return response
         if (response) {
           return response;
         }
-        return fetch(event.request);
-      }
-    )
+        // Network request with redirect follow
+        return fetch(request, {
+          redirect: 'follow',
+          credentials: 'include'
+        });
+      })
+      .catch(() => {
+        // If both cache and network fail, return a fallback
+        return new Response('Offline', { status: 503 });
+      })
   );
 });
 
