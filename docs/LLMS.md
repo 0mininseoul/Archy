@@ -21,6 +21,7 @@
 | **Notion 연동** | 정리된 문서를 Notion 페이지로 자동 생성 |
 | **Slack 알림** | 처리 완료 시 Slack 메시지 전송 |
 | **PWA 지원** | 모바일 홈 화면 추가 가능 |
+| **다국어 지원** | 한국어/영어 자동 감지 및 설정 (i18n) |
 
 ---
 
@@ -77,6 +78,10 @@ flownote/
 │
 ├── lib/                          # 유틸리티 및 서비스
 │   ├── supabase/                 # Supabase 클라이언트 (client, server, middleware)
+│   ├── i18n/                     # 다국어 지원 (한국어/영어)
+│   │   ├── context.tsx           # i18n 컨텍스트 및 Provider
+│   │   ├── translations.ts       # 번역 텍스트 정의
+│   │   └── index.ts              # export
 │   ├── services/                 # 외부 API 서비스
 │   │   ├── whisper.ts            # WhisperAPI STT 서비스
 │   │   ├── openai.ts             # OpenAI 문서 정리 서비스
@@ -87,7 +92,10 @@ flownote/
 │   └── utils.ts                  # 공통 유틸리티
 │
 ├── database/                     # 데이터베이스
-│   └── schema.sql                # Supabase PostgreSQL 스키마
+│   ├── schema.sql                # Supabase PostgreSQL 기본 스키마
+│   └── migrations/               # 데이터베이스 마이그레이션
+│       ├── add_language.sql      # 언어 설정 컬럼 추가
+│       └── add_is_onboarded.sql  # 온보딩 완료 플래그 추가
 │
 ├── types/                        # TypeScript 타입 정의
 │
@@ -109,6 +117,8 @@ slack_access_token    TEXT
 slack_channel_id      TEXT
 monthly_minutes_used  INTEGER DEFAULT 0      -- 월 사용량 (분)
 last_reset_at         TIMESTAMP              -- 마지막 리셋 시간
+language              VARCHAR(2) DEFAULT 'ko' -- 언어 설정 (ko|en)
+is_onboarded          BOOLEAN DEFAULT false  -- 온보딩 완료 여부
 created_at            TIMESTAMP
 ```
 
@@ -149,7 +159,7 @@ created_at TIMESTAMP
 ### 5.1 인증 API
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET | `/api/auth/callback` | Google OAuth 콜백 |
+| GET | `/api/auth/callback` | Google OAuth 콜백 (locale 유지 지원) |
 | POST | `/api/auth/signout` | 로그아웃 |
 | GET | `/api/auth/notion/callback` | Notion OAuth 콜백 |
 | GET | `/api/auth/slack/callback` | Slack OAuth 콜백 |
@@ -166,6 +176,9 @@ created_at TIMESTAMP
 | Method | Endpoint | 설명 |
 |--------|----------|------|
 | GET | `/api/user/usage` | 사용량 조회 (분) |
+| GET | `/api/user/language` | 언어 설정 조회 |
+| PUT | `/api/user/language` | 언어 설정 업데이트 (ko|en) |
+| POST | `/api/user/onboarding` | 온보딩 완료 표시 |
 | DELETE | `/api/user/data` | 모든 데이터 삭제 |
 
 ### 5.4 포맷 API
@@ -212,11 +225,11 @@ created_at TIMESTAMP
 
 | 경로 | 설명 | 주요 기능 |
 |------|------|----------|
-| `/` | 랜딩 페이지 | 서비스 소개, Google 로그인 |
+| `/` | 랜딩 페이지 | 서비스 소개, Google 로그인, 다국어 지원 |
 | `/onboarding` | 온보딩 | Notion/Slack 연동, 기본 포맷 선택 |
 | `/dashboard` | 대시보드 | 녹음 버튼, 타이머, 포맷 선택, 사용량 |
 | `/history` | 히스토리 | 녹음 목록, 처리 상태, Notion 링크 |
-| `/settings` | 설정 | 계정 정보, 통합 관리, 데이터 삭제 |
+| `/settings` | 설정 | 계정 정보, 통합 관리, 언어 설정, 데이터 삭제 |
 | `/settings/formats` | 포맷 설정 | 커스텀 포맷 CRUD |
 
 ---
@@ -262,9 +275,18 @@ NEXT_PUBLIC_APP_URL=
 ## 10. 디자인 시스템
 
 - **스타일**: Glassmorphism (반투명 배경, backdrop-blur)
-- **색상**: Indigo (#6366f1) 기본 컬러
+- **색상**: Slate 900 (#0f172a) + Deep Blue (#1e3a5f) 그라데이션
 - **반응형**: 모바일 퍼스트 (320px~)
 - **PWA**: manifest.json, service worker 지원
+
+## 10.1 다국어 지원 (i18n)
+
+- **지원 언어**: 한국어(ko), 영어(en)
+- **자동 감지**: 
+  - Vercel GeoIP 헤더 기반 국가 감지 (KR → 한국어)
+  - Cookie 기반 언어 설정 저장 (`flownote_locale`)
+- **OAuth 콜백**: 로그인 시 locale을 query parameter로 전달하여 언어 설정 유지
+- **Middleware**: 요청마다 locale cookie 설정 및 유지
 
 ---
 
