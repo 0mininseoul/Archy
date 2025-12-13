@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import "./globals.css";
 import { RegisterServiceWorker } from "./register-sw";
+import { I18nProvider, Locale } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "Flownote - 자동 음성 문서화 서비스",
@@ -16,13 +18,18 @@ export const viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Get locale from cookie (set by middleware)
+  const cookieStore = await cookies();
+  const localeCookie = cookieStore.get("flownote_locale")?.value;
+  const initialLocale: Locale = (localeCookie === "en" ? "en" : "ko");
+
   return (
-    <html lang="ko">
+    <html lang={initialLocale}>
       <head>
         <link
           rel="stylesheet"
@@ -32,10 +39,11 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased">
-        <RegisterServiceWorker />
-        {children}
+        <I18nProvider initialLocale={initialLocale}>
+          <RegisterServiceWorker />
+          {children}
+        </I18nProvider>
       </body>
     </html>
   );
 }
-

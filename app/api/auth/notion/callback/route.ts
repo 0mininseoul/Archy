@@ -2,11 +2,40 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeNotionCode } from "@/lib/services/notion";
 
+// Helper function to get the correct app URL
+function getAppUrl(request: NextRequest): string {
+  // Priority:
+  // 1. NEXT_PUBLIC_APP_URL environment variable (for production)
+  // 2. Vercel URL (for preview deployments)
+  // 3. Request origin (for local development)
+
+  if (process.env.NEXT_PUBLIC_APP_URL && process.env.NEXT_PUBLIC_APP_URL !== "http://localhost:3000") {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+
+  // For Vercel deployments, use the VERCEL_URL or request origin
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  // Fallback to request origin
+  const origin = request.headers.get("origin") || request.headers.get("host");
+  if (origin) {
+    const protocol = origin.includes("localhost") ? "http" : "https";
+    return origin.startsWith("http") ? origin : `${protocol}://${origin}`;
+  }
+
+  // Final fallback
+  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
   const state = searchParams.get("state");
+
+  const appUrl = getAppUrl(request);
 
   // Parse returnTo and selectDb from state
   let returnTo = "/onboarding";
@@ -23,13 +52,13 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}${returnTo}?error=notion_auth_failed`
+      `${appUrl}${returnTo}?error=notion_auth_failed`
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}${returnTo}?error=no_code`
+      `${appUrl}${returnTo}?error=no_code`
     );
   }
 
@@ -41,15 +70,15 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/`);
+      return NextResponse.redirect(`${appUrl}/`);
     }
 
     // Exchange code for access token
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/notion/callback`;
-    const { access_token } = await exchangeNotionCode(code, redirectUri);
+    // IMPORTANT: The redirect_uri must match exactly what was used in the initial auth request
+    const redirectUri = `${appUrl}/api/auth/notion/callback`;
+    console.log("[Notion Callback] Using redirect URI:", redirectUri);
 
-    // For MVP, we'll use a default database. In production, let user select.
-    // You'll need to call Notion API to get user's databases and let them choose.
+    const { access_token } = await exchangeNotionCode(code, redirectUri);
 
     // Update user with Notion credentials
     await supabase
@@ -60,7 +89,7 @@ export async function GET(request: NextRequest) {
       })
       .eq("id", user.id);
 
-    const redirectUrl = new URL(`${process.env.NEXT_PUBLIC_APP_URL}${returnTo}`);
+    const redirectUrl = new URL(`${appUrl}${returnTo}`);
     redirectUrl.searchParams.set("notion", "connected");
     if (selectDb) {
       redirectUrl.searchParams.set("selectDb", "true");
@@ -69,7 +98,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error("Notion OAuth error:", err);
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}${returnTo}?error=notion_exchange_failed`
+      `${appUrl}${returnTo}?error=notion_exchange_failed`
     );
   }
 }

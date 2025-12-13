@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 
 interface NotionDatabase {
   id: string;
@@ -19,6 +20,7 @@ interface NotionPage {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { locale, setLocale, t } = useI18n();
 
   // State definitions
   const [usage, setUsage] = useState({ used: 0, limit: 350, total: 0 });
@@ -26,8 +28,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   // Feature states
-  const [apiKey, setApiKey] = useState("");
-  const [isEditingKey, setIsEditingKey] = useState(false);
   const [notionConnected, setNotionConnected] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
@@ -86,13 +86,6 @@ export default function SettingsPage() {
     } else if (service === 'slack') {
       window.location.href = "/api/auth/slack?returnTo=/settings";
     }
-  };
-
-  const handleSaveApiKey = async () => {
-    // In a real app, you would save this to the backend
-    console.log("Saving API Key:", apiKey);
-    setIsEditingKey(false);
-    alert("API Key saved (simulated)");
   };
 
   const openDatabaseModal = async () => {
@@ -217,7 +210,7 @@ export default function SettingsPage() {
       {/* Navbar */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="container-custom h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/")}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/dashboard")}>
             <div className="w-8 h-8 bg-gradient-primary rounded-lg flex items-center justify-center text-white font-bold">
               F
             </div>
@@ -301,77 +294,6 @@ export default function SettingsPage() {
               Integrations
             </h2>
             <div className="space-y-4">
-              {/* OpenAI API Key */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-blue-200 transition-colors">
-                <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                  <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-2xl">
-                    🤖
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900">OpenAI API Key</h3>
-                    <p className="text-sm text-slate-500">
-                      Use your own OpenAI API key for transcription and summarization
-                    </p>
-                  </div>
-                </div>
-                {isEditingKey ? (
-                  <div className="w-full sm:w-auto flex-shrink-0">
-                    <input
-                      type="password"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all text-sm"
-                      placeholder="sk-..."
-                    />
-                    <div className="flex justify-end gap-2 mt-2">
-                      <button
-                        onClick={() => {
-                          if (apiKey) {
-                            setIsEditingKey(false);
-                          }
-                        }}
-                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={handleSaveApiKey}
-                        className="p-2 text-slate-900 hover:bg-slate-50 rounded-lg transition-colors"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full sm:w-auto flex-shrink-0">
-                    {apiKey ? (
-                      <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-                        <div className="font-mono text-slate-600 text-sm">
-                          {apiKey.slice(0, 4)}...{apiKey.slice(-4)}
-                        </div>
-                        <button
-                          onClick={() => setIsEditingKey(true)}
-                          className="text-sm font-bold text-slate-900 hover:text-blue-600 transition-colors"
-                        >
-                          Change Key
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setIsEditingKey(true)}
-                        className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10 hover:shadow-slate-900/20 active:scale-95 w-full"
-                      >
-                        Add API Key
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
               {/* Notion */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-blue-200 transition-colors">
                 <div className="flex items-center gap-4 mb-4 sm:mb-0">
@@ -466,13 +388,45 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Language Settings */}
+          <div className="card p-6">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">
+              {t.settings.language.title}
+            </h2>
+            <p className="text-sm text-slate-500 mb-4">
+              {t.settings.language.description}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setLocale("ko")}
+                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                  locale === "ko"
+                    ? "bg-slate-900 text-white shadow-lg shadow-slate-900/10"
+                    : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                🇰🇷 {t.settings.language.korean}
+              </button>
+              <button
+                onClick={() => setLocale("en")}
+                className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                  locale === "en"
+                    ? "bg-slate-900 text-white shadow-lg shadow-slate-900/10"
+                    : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                🇺🇸 {t.settings.language.english}
+              </button>
+            </div>
+          </div>
+
           {/* Sign Out */}
           <div className="card p-6">
             <button
               onClick={handleSignOut}
               className="w-full py-3 px-4 border border-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors"
             >
-              Sign Out
+              {t.settings.signOut}
             </button>
           </div>
         </div>

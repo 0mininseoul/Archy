@@ -1,6 +1,30 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// Cookie name for language preference
+const LOCALE_COOKIE = "flownote_locale";
+
+// Detect locale based on country (Vercel provides x-vercel-ip-country header)
+function detectLocale(request: NextRequest): "ko" | "en" {
+  // First check if user has a language preference cookie
+  const localeCookie = request.cookies.get(LOCALE_COOKIE)?.value;
+  if (localeCookie === "ko" || localeCookie === "en") {
+    return localeCookie;
+  }
+
+  // Check Vercel's GeoIP header
+  const country = request.headers.get("x-vercel-ip-country");
+
+  // Korean IP -> Korean language
+  if (country === "KR") {
+    return "ko";
+  }
+
+  // All other countries -> English
+  // This includes when country is null (local development)
+  return country ? "en" : "ko"; // Default to Korean for local dev
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -49,6 +73,18 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
+  }
+
+  // Set locale cookie if not already set
+  const existingLocaleCookie = request.cookies.get(LOCALE_COOKIE)?.value;
+  if (!existingLocaleCookie) {
+    const detectedLocale = detectLocale(request);
+    supabaseResponse.cookies.set(LOCALE_COOKIE, detectedLocale, {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365, // 1 year
+      sameSite: "lax",
+    });
+    console.log("[Middleware] Set locale cookie to:", detectedLocale);
   }
 
   return supabaseResponse;

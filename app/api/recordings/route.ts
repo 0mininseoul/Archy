@@ -58,7 +58,10 @@ export async function POST(request: NextRequest) {
     const title = `Flownote - ${formatKSTDate()}`;
 
     // Upload audio to Supabase Storage
-    const fileName = `${user.id}/${Date.now()}.webm`;
+    // Determine file extension from the uploaded file type (supports webm, mp4, ogg)
+    const fileExtension = audioFile.type.includes("mp4") ? "mp4" :
+                          audioFile.type.includes("ogg") ? "ogg" : "webm";
+    const fileName = `${user.id}/${Date.now()}.${fileExtension}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from("recordings")
       .upload(fileName, audioFile);

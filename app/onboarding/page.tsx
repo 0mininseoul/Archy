@@ -57,7 +57,15 @@ function OnboardingContent() {
     window.location.href = "/api/auth/slack";
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    try {
+      // Mark user as onboarded
+      await fetch("/api/user/onboarding", {
+        method: "POST",
+      });
+    } catch (error) {
+      console.error("Failed to update onboarding status:", error);
+    }
     router.push("/dashboard");
   };
 

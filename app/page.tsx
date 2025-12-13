@@ -1,6 +1,11 @@
+"use client";
+
 import { GoogleLoginButton } from "@/components/google-login-button";
+import { useI18n } from "@/lib/i18n";
 
 export default function Home() {
+  const { t } = useI18n();
+
   return (
     <main className="min-h-screen bg-white flex flex-col">
       {/* Navbar */}
@@ -14,10 +19,10 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-4">
             <a href="#features" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
-              Features
+              {t.landing.nav.features}
             </a>
             <a href="#how-it-works" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
-              How it works
+              {t.landing.nav.howItWorks}
             </a>
             <GoogleLoginButton variant="nav" />
           </div>
@@ -33,16 +38,16 @@ export default function Home() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
               </span>
-              Record once, document automatically
+              {t.landing.hero.badge}
             </div>
 
             <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-slate-900 leading-[1.1] animate-slide-up">
-              Turn your voice into <br />
-              <span className="text-transparent bg-clip-text bg-gradient-primary">perfect documents</span>
+              {t.landing.hero.title} <br />
+              <span className="text-transparent bg-clip-text bg-gradient-primary">{t.landing.hero.titleHighlight}</span>
             </h1>
 
             <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed animate-slide-up" style={{ animationDelay: "0.1s" }}>
-              Record meetings, lectures, and interviews. Let AI automatically transcribe, summarize, and organize them into your Notion workspace.
+              {t.landing.hero.description}
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4 animate-slide-up" style={{ animationDelay: "0.2s" }}>
@@ -57,10 +62,10 @@ export default function Home() {
         <div className="container-custom">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <h2 className="text-3xl font-bold text-slate-900 mb-4">
-              Everything you need to capture ideas
+              {t.landing.features.title}
             </h2>
             <p className="text-lg text-slate-600">
-              Stop worrying about taking notes. Focus on the conversation and let Flownote handle the rest.
+              {t.landing.features.description}
             </p>
           </div>
 
@@ -68,20 +73,20 @@ export default function Home() {
             {[
               {
                 icon: "🎙️",
-                title: "Crystal Clear Recording",
-                description: "High-quality web recording with auto-save and cloud backup. Record up to 120 minutes.",
+                title: t.landing.features.recording.title,
+                description: t.landing.features.recording.description,
                 color: "bg-slate-100 text-slate-700"
               },
               {
                 icon: "⚡",
-                title: "Instant Transcription",
-                description: "Powered by Whisper API for 99% accuracy in multiple languages.",
+                title: t.landing.features.transcription.title,
+                description: t.landing.features.transcription.description,
                 color: "bg-blue-50 text-blue-600"
               },
               {
                 icon: "✨",
-                title: "AI Summarization",
-                description: "Get structured meeting notes, action items, and summaries instantly with GPT-4.",
+                title: t.landing.features.summarization.title,
+                description: t.landing.features.summarization.description,
                 color: "bg-slate-800 text-white"
               },
             ].map((feature, idx) => (
@@ -106,10 +111,10 @@ export default function Home() {
         <div className="container-custom">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <h2 className="text-3xl font-bold text-slate-900 mb-4">
-              How it works
+              {t.landing.howItWorks.title}
             </h2>
             <p className="text-lg text-slate-600">
-              From recording to organized document in minutes, not hours.
+              {t.landing.howItWorks.description}
             </p>
           </div>
 
@@ -117,26 +122,26 @@ export default function Home() {
             {[
               {
                 step: "01",
-                title: "Record",
-                description: "Click and start recording your meeting, lecture, or interview.",
+                title: t.landing.howItWorks.steps.record.title,
+                description: t.landing.howItWorks.steps.record.description,
                 icon: "🎤"
               },
               {
                 step: "02",
-                title: "Transcribe",
-                description: "AI automatically converts your audio to accurate text.",
+                title: t.landing.howItWorks.steps.transcribe.title,
+                description: t.landing.howItWorks.steps.transcribe.description,
                 icon: "📝"
               },
               {
                 step: "03",
-                title: "Organize",
-                description: "GPT-4 structures your content into beautiful documents.",
+                title: t.landing.howItWorks.steps.organize.title,
+                description: t.landing.howItWorks.steps.organize.description,
                 icon: "✨"
               },
               {
                 step: "04",
-                title: "Share",
-                description: "Automatically saved to Notion and shared via Slack.",
+                title: t.landing.howItWorks.steps.share.title,
+                description: t.landing.howItWorks.steps.share.description,
                 icon: "🚀"
               },
             ].map((item, idx) => (
@@ -166,18 +171,18 @@ export default function Home() {
         <div className="container-custom">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <h2 className="text-3xl font-bold text-slate-900 mb-4">
-              Seamlessly integrated
+              {t.landing.integrations.title}
             </h2>
             <p className="text-lg text-slate-600">
-              Connect with the tools you already use every day.
+              {t.landing.integrations.description}
             </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-8">
             {[
-              { name: "Notion", icon: "📓", description: "Auto-save documents" },
-              { name: "Slack", icon: "💬", description: "Instant notifications" },
-              { name: "Google", icon: "🔐", description: "Secure login" },
+              { name: "Notion", icon: "📓", description: t.landing.integrations.notion },
+              { name: "Slack", icon: "💬", description: t.landing.integrations.slack },
+              { name: "Google", icon: "🔐", description: t.landing.integrations.google },
             ].map((integration, idx) => (
               <div key={idx} className="card p-8 text-center min-w-[200px] hover:-translate-y-1 transition-transform duration-300">
                 <div className="text-4xl mb-4">{integration.icon}</div>
@@ -193,10 +198,10 @@ export default function Home() {
       <section className="py-24 bg-gradient-primary">
         <div className="container-custom text-center">
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-6">
-            Start capturing your ideas today
+            {t.landing.cta.title}
           </h2>
           <p className="text-lg text-white/80 max-w-2xl mx-auto mb-8">
-            Join thousands of professionals who save hours every week with automated documentation.
+            {t.landing.cta.description}
           </p>
           <GoogleLoginButton variant="primary" />
         </div>
@@ -208,8 +213,8 @@ export default function Home() {
           <div className="flex flex-col md:flex-row justify-between items-start gap-8">
             {/* Left side - Company info */}
             <div className="text-sm text-slate-500 space-y-1">
-              <p className="font-medium text-slate-700">©2025 FLOWNOTE · All rights reserved.</p>
-              <p>FLOWNOTE | CEO: Youngmin Park</p>
+              <p className="font-medium text-slate-700">{t.landing.footer.rights}</p>
+              <p>{t.landing.footer.ceo}</p>
               <p>BNN : 478-59-01063</p>
               <p>tnsb5373@gmail.com</p>
             </div>
@@ -217,8 +222,8 @@ export default function Home() {
             {/* Right side - Links */}
             <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
               <div className="flex gap-8 text-sm text-slate-500">
-                <a href="/privacy" className="hover:text-slate-900 transition-colors">Privacy</a>
-                <a href="/terms" className="hover:text-slate-900 transition-colors">Terms</a>
+                <a href="/privacy" className="hover:text-slate-900 transition-colors">{t.landing.footer.privacy}</a>
+                <a href="/terms" className="hover:text-slate-900 transition-colors">{t.landing.footer.terms}</a>
               </div>
             </div>
           </div>

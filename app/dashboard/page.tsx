@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AudioRecorder } from "@/components/recorder/audio-recorder";
+import { getFileExtension } from "@/hooks/useAudioRecorder";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -12,9 +13,12 @@ export default function DashboardPage() {
     setIsUploading(true);
 
     try {
-      // Convert blob to File
-      const file = new File([blob], `recording-${Date.now()}.webm`, {
-        type: "audio/webm",
+      // Get file extension based on the actual blob type
+      const extension = getFileExtension(blob.type);
+
+      // Convert blob to File with correct extension
+      const file = new File([blob], `recording-${Date.now()}.${extension}`, {
+        type: blob.type,
       });
 
       // Create form data
@@ -30,7 +34,8 @@ export default function DashboardPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Upload failed");
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Upload failed");
       }
 
       const data = await response.json();
@@ -50,7 +55,7 @@ export default function DashboardPage() {
       {/* Navbar */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="container-custom h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/")}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push("/dashboard")}>
             <div className="w-8 h-8 bg-gradient-primary rounded-lg flex items-center justify-center text-white font-bold">
               F
             </div>
@@ -91,18 +96,18 @@ export default function DashboardPage() {
               </div>
               <div className="space-y-2">
                 <h2 className="text-2xl font-bold text-slate-900">
-                  Processing Recording...
+                  변환 중...
                 </h2>
                 <p className="text-slate-500">
-                  Transcribing and generating AI summary. This may take a moment.
+                  음성을 텍스트로 변환하고 AI 요약을 생성하고 있습니다. 잠시만 기다려주세요.
                 </p>
               </div>
             </div>
           ) : (
             <div className="card p-8 md:p-12 shadow-lg animate-slide-up">
               <div className="text-center mb-8">
-                <h1 className="text-2xl font-bold text-slate-900">New Recording</h1>
-                <p className="text-slate-500 mt-2">Select a format and start recording</p>
+                <h1 className="text-2xl font-bold text-slate-900">새 녹음</h1>
+                <p className="text-slate-500 mt-2">포맷을 선택하고 녹음을 시작하세요</p>
               </div>
 
               <AudioRecorder
