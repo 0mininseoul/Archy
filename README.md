@@ -14,6 +14,7 @@ Flownote는 음성 녹음을 자동으로 텍스트로 변환하고, AI가 정�
 - **Notion 연동**: 정리된 문서를 Notion 페이지로 자동 생성
 - **Slack 알림**: 처리 완료 시 Slack 메시지 전송
 - **PWA 지원**: 모바일 홈 화면에 추가 가능
+- **다국어 지원**: 한국어/영어 자동 감지 및 설정
 
 ## 기술 스택
 
@@ -85,9 +86,13 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 ### 2. 데이터베이스 설정
 
-Supabase 대시보드에서 SQL 에디터를 열고 `database/schema.sql` 파일의 내용을 실행하세요.
+Supabase 대시보드에서 SQL 에디터를 열고 다음 파일들을 순서대로 실행하세요:
 
-이 스크립트는 다음을 생성합니다:
+1. `database/schema.sql` - 기본 스키마 생성
+2. `database/migrations/add_language.sql` - 언어 설정 컬럼 추가
+3. `database/migrations/add_is_onboarded.sql` - 온보딩 완료 플래그 추가
+
+기본 스키마는 다음을 생성합니다:
 - `users` 테이블
 - `recordings` 테이블
 - `custom_formats` 테이블
@@ -131,10 +136,11 @@ npm run dev
 │   └── recorder/          # 녹음 관련 컴포넌트
 ├── lib/                   # 유틸리티
 │   ├── supabase/         # Supabase 클라이언트
+│   ├── i18n/             # 다국어 지원 (한국어/영어)
 │   ├── auth.ts           # 인증 헬퍼
 │   └── utils.ts          # 공통 유틸리티
 ├── types/                 # TypeScript 타입 정의
-├── database/              # 데이터베이스 스키마
+├── database/              # 데이터베이스 스키마 및 마이그레이션
 └── public/                # 정적 파일
 ```
 
@@ -144,6 +150,7 @@ npm run dev
 - 서비스 소개
 - Google 로그인 버튼
 - 3가지 사용 사례 (회의록/인터뷰/강의)
+- 다국어 지원 (한국어/영어 자동 감지)
 
 ### 온보딩 (`/onboarding`)
 - **Step 1**: 환영 메시지
@@ -180,6 +187,9 @@ npm run dev
 
 ### 사용자
 - `GET /api/user/usage` - 사용량 조회
+- `GET /api/user/language` - 언어 설정 조회
+- `PUT /api/user/language` - 언어 설정 업데이트
+- `POST /api/user/onboarding` - 온보딩 완료 표시
 - `DELETE /api/user/data` - 모든 데이터 삭제
 
 ### 포맷
@@ -208,6 +218,8 @@ npm run dev
 - [x] 설정 페이지 및 포맷 설정
 - [x] PWA 설정 (manifest.json, service worker)
 - [x] Vercel 배포 설정
+- [x] 다국어 지원 (i18n) - 한국어/영어
+- [x] OAuth 콜백에서 언어 설정 유지
 
 ### 📋 향후 개선 사항
 - [ ] 에러 핸들링 강화
@@ -215,7 +227,6 @@ npm run dev
 - [ ] 성능 최적화 (이미지 최적화, 코드 스플리팅)
 - [ ] 단위 테스트 및 E2E 테스트
 - [ ] Sentry 에러 트래킹
-- [ ] 다국어 지원 (i18n)
 - [ ] 녹음 편집 기능
 - [ ] 팀 공유 기능
 

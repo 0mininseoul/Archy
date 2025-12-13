@@ -79,6 +79,15 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 - Row Level Security 정책
 - Storage 정책
 
+### 4.2.1 데이터베이스 마이그레이션 실행
+
+추가 마이그레이션 파일들을 실행합니다:
+
+1. `database/migrations/add_language.sql` - 사용자 언어 설정 컬럼 추가
+2. `database/migrations/add_is_onboarded.sql` - 온보딩 완료 플래그 추가
+
+각 파일의 내용을 SQL Editor에서 실행합니다.
+
 ### 4.3 Storage Bucket 생성
 
 1. Supabase Dashboard > Storage를 엽니다.
@@ -158,6 +167,12 @@ npm run dev
 1. 히스토리 페이지로 이동합니다.
 2. 녹음 목록을 확인합니다.
 3. 처리 상태를 확인합니다 (처리중/완료/실패).
+
+### 7.4 다국어 지원
+
+1. 랜딩 페이지에서 언어가 자동으로 감지됩니다 (한국 IP → 한국어, 기타 → 영어).
+2. 설정 페이지에서 언어를 변경할 수 있습니다.
+3. OAuth 로그인 후에도 언어 설정이 유지됩니다.
 
 ## 8. 데이터베이스 확인
 
