@@ -17,11 +17,20 @@
   /* 모바일 앱 컨테이너 - 중앙 정렬된 430px 폰 레이아웃 */
   .app-container {
     @apply max-w-[430px] mx-auto min-h-screen bg-white relative;
+    /* iOS Safari 스크롤 문제 해결 */
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    display: flex;
+    flex-direction: column;
   }
 
   /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
   .app-main {
-    @apply pb-20; /* Bottom Tab 높이만큼 패딩 */
+    @apply flex-1 overflow-y-auto;
+    /* Bottom Tab 높이 + safe area 고려 */
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    /* iOS 스크롤 바운스 허용 */
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Sticky Top Header */

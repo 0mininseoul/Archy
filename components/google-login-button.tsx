@@ -34,7 +34,7 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
       case "primary":
         return "btn-primary";
       case "cta":
-        return "inline-flex items-center gap-3 px-8 py-4 bg-white text-slate-900 rounded-xl font-bold text-lg hover:bg-slate-100 transition-all shadow-lg";
+        return "inline-flex items-center gap-2 sm:gap-3 px-6 sm:px-8 py-3 sm:py-4 bg-white text-slate-900 rounded-xl font-bold text-base sm:text-lg hover:bg-slate-100 transition-all shadow-lg min-h-[48px]";
       default:
         return "btn-nav";
     }
