@@ -16,31 +16,39 @@
 @layer components {
   /* 모바일 앱 컨테이너 - 중앙 정렬된 430px 폰 레이아웃 */
   .app-container {
-    @apply max-w-[430px] mx-auto min-h-screen bg-white relative;
-    /* iOS Safari 스크롤 문제 해결 */
-    min-height: 100vh;
-    min-height: -webkit-fill-available;
-    display: flex;
-    flex-direction: column;
+    @apply max-w-[430px] mx-auto bg-white;
+    /* iOS Safari 스크롤 문제 해결 - position 기반 레이아웃 */
+    position: relative;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile browsers */
+    overflow: hidden;
   }
 
   /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
   .app-main {
-    @apply overflow-y-auto;
-    /* flex-1 + height: 0으로 iOS Safari 스크롤 버그 수정 */
-    flex: 1 1 0;
-    min-height: 0;
+    @apply overflow-y-auto overflow-x-hidden;
+    /* position 기반으로 전체 영역 차지 */
+    position: absolute;
+    top: 56px; /* header 높이 */
+    left: 0;
+    right: 0;
+    bottom: 0;
     /* Bottom Tab 높이 + safe area 고려 */
     padding-bottom: calc(80px + env(safe-area-inset-bottom));
     /* iOS 스크롤 바운스 허용 */
     -webkit-overflow-scrolling: touch;
     /* 스크롤 가능하도록 명시 */
-    overscroll-behavior: contain;
+    overscroll-behavior-y: auto;
   }
 
-  /* Sticky Top Header */
+  /* Sticky Top Header - position fixed로 변경 */
   .app-header {
-    @apply sticky top-0 z-50 bg-white border-b border-slate-100 px-4 h-14 flex items-center justify-between;
+    @apply bg-white border-b border-slate-100 px-4 h-14 flex items-center justify-between;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
   }
 
   .app-header-title {

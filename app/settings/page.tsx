@@ -77,14 +77,16 @@ export default function SettingsPage() {
     if (isNotionJustConnected) {
       // Notion 연결 완료 후 URL 파라미터 제거
       window.history.replaceState({}, "", "/settings");
-      // 약간의 지연 후 데이터 다시 가져오기 (DB 저장 완료 대기)
+      // DB 저장 완료 대기 후 데이터 가져오기 (즉시 호출하지 않음)
       setTimeout(() => {
         fetchUserData();
-      }, 500);
+        fetchCustomFormats();
+      }, 800);
+    } else {
+      // 일반적인 경우 즉시 데이터 가져오기
+      fetchUserData();
+      fetchCustomFormats();
     }
-
-    fetchUserData();
-    fetchCustomFormats();
   }, []);
 
   const fetchUserData = async () => {
