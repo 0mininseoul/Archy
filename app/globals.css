@@ -17,16 +17,21 @@
   /* 모바일 앱 컨테이너 - 중앙 정렬된 430px 폰 레이아웃 */
   .app-container {
     @apply max-w-[430px] mx-auto bg-white;
-    min-height: 100vh;
-    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
     position: relative;
+    overflow: hidden;
   }
 
   /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
   .app-main {
-    @apply overflow-y-auto overflow-x-hidden;
-    /* Bottom Tab 높이(64px) + safe area + 여유 공간 */
-    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+    @apply overflow-x-hidden;
+    flex: 1 1 0;
+    overflow-y: auto;
+    /* Bottom Tab 높이(64px) + safe area + 추가 여백 */
+    padding-bottom: calc(120px + env(safe-area-inset-bottom));
     /* iOS 스크롤 */
     -webkit-overflow-scrolling: touch;
   }
@@ -34,6 +39,7 @@
   /* Sticky Top Header */
   .app-header {
     @apply sticky top-0 z-40 bg-white border-b border-slate-100 px-4 h-14 flex items-center justify-between;
+    flex-shrink: 0;
   }
 
   .app-header-title {

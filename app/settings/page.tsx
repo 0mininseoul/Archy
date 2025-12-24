@@ -104,7 +104,6 @@ export default function SettingsPage() {
         hasNotionToken: !!userData.notion_access_token,
         hasSlackToken: !!userData.slack_access_token,
         notionDbId: userData.notion_database_id,
-        saveTarget: userData.notion_save_target,
       });
 
       setUsage({
@@ -117,11 +116,8 @@ export default function SettingsPage() {
       setSlackConnected(!!userData.slack_access_token);
       setNotionDatabaseId(userData.notion_database_id || null);
 
-      // 저장 위치 정보 로드
-      if (userData.notion_save_target) {
-        setSaveTarget(userData.notion_save_target);
-      } else if (userData.notion_database_id) {
-        // 기존 DB ID가 있으면 해당 정보 표시
+      // 기존 DB ID가 있으면 해당 정보 표시
+      if (userData.notion_database_id) {
         const db = databases.find(d => d.id === userData.notion_database_id);
         if (db) {
           setSaveTarget({ type: "database", id: db.id, title: db.title });

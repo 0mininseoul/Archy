@@ -15,9 +15,10 @@ export async function GET() {
     }
 
     // Get user data from users table including connection status
+    // Note: notion_save_target 컬럼이 DB에 없을 수 있으므로 기본 컬럼만 조회
     const { data: userData, error: dbError } = await supabase
       .from("users")
-      .select("notion_access_token, notion_database_id, slack_access_token, notion_save_target")
+      .select("notion_access_token, notion_database_id, slack_access_token")
       .eq("id", user.id)
       .single();
 
@@ -35,7 +36,6 @@ export async function GET() {
       notion_access_token: userData?.notion_access_token || null,
       notion_database_id: userData?.notion_database_id || null,
       slack_access_token: userData?.slack_access_token || null,
-      notion_save_target: userData?.notion_save_target || null,
     });
   } catch (error) {
     console.error("API error:", error);
