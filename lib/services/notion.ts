@@ -235,6 +235,51 @@ export async function createNotionDatabase(
   }
 }
 
+// Create a new standalone page in the workspace
+export async function createNotionStandalonePage(
+  accessToken: string,
+  title: string
+): Promise<string> {
+  const notion = new Client({ auth: accessToken });
+
+  try {
+    // First, find the first accessible page to use as parent
+    const searchResponse = await notion.search({
+      filter: {
+        property: "object",
+        value: "page",
+      },
+      page_size: 1,
+    });
+
+    let parentId: string | undefined;
+    if (searchResponse.results.length > 0) {
+      parentId = searchResponse.results[0].id;
+    }
+
+    if (!parentId) {
+      throw new Error("No accessible pages found in workspace");
+    }
+
+    const response = await notion.pages.create({
+      parent: {
+        type: "page_id",
+        page_id: parentId,
+      },
+      properties: {
+        title: {
+          title: [{ text: { content: title } }],
+        },
+      },
+    });
+
+    return response.id;
+  } catch (error) {
+    console.error("Failed to create Notion page:", error);
+    throw new Error("Failed to create page");
+  }
+}
+
 // Get user's pages (for creating database)
 export async function getNotionPages(accessToken: string): Promise<any[]> {
   const notion = new Client({ auth: accessToken });

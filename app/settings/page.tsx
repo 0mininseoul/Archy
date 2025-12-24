@@ -49,13 +49,8 @@ export default function SettingsPage() {
 
   // Notion database states
   const [notionDatabaseId, setNotionDatabaseId] = useState<string | null>(null);
-  const [showDatabaseModal, setShowDatabaseModal] = useState(false);
   const [databases, setDatabases] = useState<NotionDatabase[]>([]);
   const [pages, setPages] = useState<NotionPage[]>([]);
-  const [modalTab, setModalTab] = useState<"select" | "create">("select");
-  const [selectedPageId, setSelectedPageId] = useState("");
-  const [newDbTitle, setNewDbTitle] = useState("Flownote Recordings");
-  const [modalLoading, setModalLoading] = useState(false);
 
   // Notion 기본 저장 위치 드롭다운
   const [showSaveTargetDropdown, setShowSaveTargetDropdown] = useState(false);
@@ -256,6 +251,7 @@ export default function SettingsPage() {
           databaseId: target.type === "database" ? target.id : null,
           pageId: target.type === "page" ? target.id : null,
           saveTargetType: target.type,
+          title: target.title,
         }),
       });
 
@@ -269,6 +265,96 @@ export default function SettingsPage() {
     }
   };
 
+  // Notion 연결 해제
+  const handleDisconnectNotion = async () => {
+    if (!confirm("Notion 연결을 해제하시겠습니까?")) return;
+
+    try {
+      const response = await fetch("/api/user/notion-database", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setNotionConnected(false);
+        setSaveTarget(null);
+        setNotionDatabaseId(null);
+      }
+    } catch (error) {
+      console.error("Failed to disconnect Notion:", error);
+    }
+  };
+
+  // 신규 페이지 생성
+  const createNewPage = async (title: string) => {
+    if (!title.trim()) return;
+
+    setDropdownLoading(true);
+    try {
+      const response = await fetch("/api/notion/page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+
+      if (response.ok) {
+        const { pageId } = await response.json();
+        await selectSaveTarget({ type: "page", id: pageId, title: title.trim() });
+      } else {
+        alert("페이지 생성에 실패했습니다.");
+      }
+    } catch (error) {
+      console.error("Failed to create page:", error);
+      alert("페이지 생성에 실패했습니다.");
+    } finally {
+      setDropdownLoading(false);
+    }
+  };
+
+  // 신규 데이터베이스 생성
+  const createNewDatabase = async (title: string) => {
+    if (!title.trim()) return;
+
+    setDropdownLoading(true);
+    try {
+      // 먼저 상위 페이지를 생성하고 그 안에 데이터베이스 생성
+      const pageResponse = await fetch("/api/notion/page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+
+      if (pageResponse.ok) {
+        const { pageId } = await pageResponse.json();
+
+        // 생성된 페이지 안에 데이터베이스 생성
+        const dbResponse = await fetch("/api/notion/database", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pageId, title: title.trim() }),
+        });
+
+        if (dbResponse.ok) {
+          const { databaseId } = await dbResponse.json();
+          await selectSaveTarget({ type: "database", id: databaseId, title: title.trim() });
+        } else {
+          alert("데이터베이스 생성에 실패했습니다.");
+        }
+      } else {
+        alert("페이지 생성에 실패했습니다.");
+      }
+    } catch (error) {
+      console.error("Failed to create database:", error);
+      alert("데이터베이스 생성에 실패했습니다.");
+    } finally {
+      setDropdownLoading(false);
+    }
+  };
+
+  // 검색어가 기존 항목과 일치하는지 확인
+  const searchTermMatchesExisting = saveTargetSearch.trim() !== "" &&
+    (filteredDatabases.some(db => db.title.toLowerCase() === saveTargetSearch.toLowerCase()) ||
+     filteredPages.some(page => page.title.toLowerCase() === saveTargetSearch.toLowerCase()));
+
   // 필터링된 결과
   const filteredDatabases = databases.filter(db =>
     db.title.toLowerCase().includes(saveTargetSearch.toLowerCase())
@@ -276,84 +362,6 @@ export default function SettingsPage() {
   const filteredPages = pages.filter(page =>
     page.title.toLowerCase().includes(saveTargetSearch.toLowerCase())
   );
-
-  const openDatabaseModal = async () => {
-    setShowDatabaseModal(true);
-    setModalLoading(true);
-    try {
-      const [dbResponse, pageResponse] = await Promise.all([
-        fetch("/api/notion/databases"),
-        fetch("/api/notion/pages"),
-      ]);
-
-      if (dbResponse.ok) {
-        const dbData = await dbResponse.json();
-        setDatabases(dbData.databases || []);
-      }
-
-      if (pageResponse.ok) {
-        const pageData = await pageResponse.json();
-        setPages(pageData.pages || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch Notion data:", error);
-      alert(t.settings.notionModal.fetchFailed);
-    } finally {
-      setModalLoading(false);
-    }
-  };
-
-  const selectDatabase = async (databaseId: string) => {
-    try {
-      const response = await fetch("/api/user/notion-database", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ databaseId }),
-      });
-
-      if (response.ok) {
-        setNotionDatabaseId(databaseId);
-        setShowDatabaseModal(false);
-        alert(t.settings.notionModal.dbSet);
-      } else {
-        throw new Error("Failed to update database");
-      }
-    } catch (error) {
-      console.error("Failed to set database:", error);
-      alert(t.settings.notionModal.dbSetFailed);
-    }
-  };
-
-  const createDatabase = async () => {
-    if (!selectedPageId) {
-      alert(t.settings.notionModal.selectPageFirst);
-      return;
-    }
-
-    setModalLoading(true);
-    try {
-      const response = await fetch("/api/notion/database", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pageId: selectedPageId,
-          title: newDbTitle,
-        }),
-      });
-
-      if (response.ok) {
-        const { databaseId } = await response.json();
-        await selectDatabase(databaseId);
-      } else {
-        throw new Error("Failed to create database");
-      }
-    } catch (error) {
-      console.error("Failed to create database:", error);
-      alert(t.settings.notionModal.createFailed);
-    } finally {
-      setModalLoading(false);
-    }
-  };
 
   const handleDeleteAllData = async () => {
     const confirmed = confirm(t.settings.data.deleteConfirm);
@@ -460,6 +468,14 @@ export default function SettingsPage() {
                         : t.settings.integrations.notion.notConnected}
                     </p>
                   </div>
+                  {notionConnected && (
+                    <button
+                      onClick={handleDisconnectNotion}
+                      className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
+                    >
+                      해지
+                    </button>
+                  )}
                 </div>
 
                 {notionConnected ? (
@@ -480,26 +496,49 @@ export default function SettingsPage() {
 
                       {/* 드롭다운 메뉴 */}
                       {showSaveTargetDropdown && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-64 overflow-hidden">
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-80 overflow-hidden">
                           {/* 검색 입력 */}
                           <div className="p-2 border-b border-slate-100">
                             <input
                               type="text"
                               value={saveTargetSearch}
                               onChange={(e) => setSaveTargetSearch(e.target.value)}
-                              placeholder="검색..."
+                              placeholder="검색 또는 새로운 이름 입력..."
                               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                               autoFocus
                             />
                           </div>
 
-                          <div className="overflow-y-auto max-h-48">
+                          <div className="overflow-y-auto max-h-52">
                             {dropdownLoading ? (
                               <div className="flex justify-center py-4">
                                 <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
                               </div>
                             ) : (
                               <>
+                                {/* 신규 생성 버튼 - 검색어가 있고 기존 항목과 정확히 일치하지 않을 때 */}
+                                {saveTargetSearch.trim() && !searchTermMatchesExisting && (
+                                  <div className="border-b border-slate-100">
+                                    <div className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50">
+                                      &quot;{saveTargetSearch}&quot; 신규 생성
+                                    </div>
+                                    <button
+                                      onClick={() => createNewPage(saveTargetSearch)}
+                                      className="w-full px-3 py-2.5 text-left text-sm hover:bg-blue-50 flex items-center gap-2 min-h-[44px] text-blue-700"
+                                    >
+                                      <span>+ 📄</span>
+                                      <span>신규 페이지로 추가</span>
+                                    </button>
+                                    <button
+                                      onClick={() => createNewDatabase(saveTargetSearch)}
+                                      className="w-full px-3 py-2.5 text-left text-sm hover:bg-blue-50 flex items-center gap-2 min-h-[44px] text-blue-700"
+                                    >
+                                      <span>+ 📊</span>
+                                      <span>신규 데이터베이스로 추가</span>
+                                    </button>
+                                  </div>
+                                )}
+
                                 {/* 데이터베이스 섹션 */}
                                 {filteredDatabases.length > 0 && (
                                   <div>
@@ -523,7 +562,7 @@ export default function SettingsPage() {
                                 {filteredPages.length > 0 && (
                                   <div>
                                     <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
-                                      페이지 (새 페이지로 추가)
+                                      페이지 (하위 페이지로 추가)
                                     </div>
                                     {filteredPages.map((page) => (
                                       <button
@@ -538,9 +577,9 @@ export default function SettingsPage() {
                                   </div>
                                 )}
 
-                                {filteredDatabases.length === 0 && filteredPages.length === 0 && (
+                                {filteredDatabases.length === 0 && filteredPages.length === 0 && !saveTargetSearch.trim() && (
                                   <div className="px-3 py-4 text-center text-sm text-slate-500">
-                                    검색 결과가 없습니다
+                                    연결된 페이지나 데이터베이스가 없습니다
                                   </div>
                                 )}
                               </>
@@ -562,13 +601,6 @@ export default function SettingsPage() {
                         </div>
                       )}
                     </div>
-
-                    <button
-                      onClick={openDatabaseModal}
-                      className="w-full px-3 py-2.5 text-sm text-slate-600 font-medium hover:bg-slate-50 rounded-lg min-h-[44px]"
-                    >
-                      + 새 데이터베이스 만들기
-                    </button>
                   </div>
                 ) : (
                   <button
@@ -806,94 +838,14 @@ export default function SettingsPage() {
           >
             {t.settings.signOut}
           </button>
+
+          {/* Bottom spacer for scroll */}
+          <div className="h-32" aria-hidden="true" />
         </div>
       </main>
 
       {/* Bottom Tab Navigation */}
       <BottomTab />
-
-      {/* Database Creation Modal */}
-      {showDatabaseModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end justify-center z-50 animate-fade-in">
-          <div className="bg-white rounded-t-2xl w-full max-w-[430px] max-h-[80vh] overflow-hidden shadow-2xl animate-slide-up">
-            {/* Modal Header */}
-            <div className="p-4 border-b border-slate-100">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-slate-900">
-                  새 데이터베이스 만들기
-                </h2>
-                <button
-                  onClick={() => setShowDatabaseModal(false)}
-                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 min-h-[44px] min-w-[44px]"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
-              {modalLoading ? (
-                <div className="flex justify-center py-8">
-                  <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      데이터베이스 이름
-                    </label>
-                    <input
-                      type="text"
-                      value={newDbTitle}
-                      onChange={(e) => setNewDbTitle(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                      placeholder="Flownote Recordings"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      상위 페이지 선택
-                    </label>
-                    {pages.length === 0 ? (
-                      <p className="text-slate-500 text-sm bg-slate-50 p-3 rounded-lg">
-                        페이지가 없습니다. Notion에서 먼저 페이지를 만들어주세요.
-                      </p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
-                        {pages.map((page) => (
-                          <button
-                            key={page.id}
-                            onClick={() => setSelectedPageId(page.id)}
-                            className={`w-full p-3 border rounded-lg transition-all text-left min-h-[44px] ${
-                              selectedPageId === page.id
-                                ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
-                                : "border-slate-200 hover:border-slate-300"
-                            }`}
-                          >
-                            <div className="font-medium text-slate-900 text-sm">{page.title}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={createDatabase}
-                    disabled={!selectedPageId || modalLoading}
-                    className="w-full px-4 py-3 bg-slate-900 text-white rounded-lg font-bold text-sm disabled:bg-slate-300 min-h-[44px]"
-                  >
-                    데이터베이스 만들기
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
