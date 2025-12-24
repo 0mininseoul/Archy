@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { RegisterServiceWorker } from "./register-sw";
 import { I18nProvider, Locale } from "@/lib/i18n";
@@ -49,6 +50,7 @@ export default async function RootLayout({
         <I18nProvider initialLocale={initialLocale}>
           <RegisterServiceWorker />
           {children}
+          <SpeedInsights />
         </I18nProvider>
       </body>
     </html>
