@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+export const runtime = "edge";
+
 // GET /api/user/profile - Get user profile with connection status
 export async function GET() {
   try {

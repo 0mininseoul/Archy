@@ -1,4 +1,14 @@
-import { Client } from "@notionhq/client";
+// Notion API using fetch for Edge Runtime compatibility
+const NOTION_VERSION = "2022-06-28";
+const NOTION_API_BASE = "https://api.notion.com/v1";
+
+function getHeaders(accessToken: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Notion-Version": NOTION_VERSION,
+    "Content-Type": "application/json",
+  };
+}
 
 export async function createNotionPage(
   accessToken: string,
@@ -8,32 +18,39 @@ export async function createNotionPage(
   format: string,
   duration: number
 ): Promise<string> {
-  const notion = new Client({ auth: accessToken });
-
   // Convert markdown content to Notion blocks
-  // Note: Audio files are not stored or attached (only text content is saved)
   const blocks = convertMarkdownToBlocks(content);
 
-  const response = await notion.pages.create({
-    parent: { database_id: databaseId },
-    properties: {
-      title: {
-        title: [{ text: { content: title } }],
+  const response = await fetch(`${NOTION_API_BASE}/pages`, {
+    method: "POST",
+    headers: getHeaders(accessToken),
+    body: JSON.stringify({
+      parent: { database_id: databaseId },
+      properties: {
+        title: {
+          title: [{ text: { content: title } }],
+        },
+        format: {
+          select: { name: format },
+        },
+        duration: {
+          number: duration,
+        },
+        created: {
+          date: { start: new Date().toISOString() },
+        },
       },
-      format: {
-        select: { name: format },
-      },
-      duration: {
-        number: duration,
-      },
-      created: {
-        date: { start: new Date().toISOString() },
-      },
-    },
-    children: blocks as any,
+      children: blocks,
+    }),
   });
 
-  return `https://notion.so/${response.id.replace(/-/g, "")}`;
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Notion API error: ${error.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return `https://notion.so/${data.id.replace(/-/g, "")}`;
 }
 
 function convertMarkdownToBlocks(markdown: string): any[] {
@@ -112,21 +129,29 @@ function convertMarkdownToBlocks(markdown: string): any[] {
 
 // Get user's databases
 export async function getNotionDatabases(accessToken: string): Promise<any[]> {
-  const notion = new Client({ auth: accessToken });
-
   try {
     const databaseMap = new Map<string, any>();
 
     // 1. Search for top-level databases
-    const searchResponse = await notion.search({
-      sort: {
-        direction: "descending",
-        timestamp: "last_edited_time",
-      },
+    const searchResponse = await fetch(`${NOTION_API_BASE}/search`, {
+      method: "POST",
+      headers: getHeaders(accessToken),
+      body: JSON.stringify({
+        sort: {
+          direction: "descending",
+          timestamp: "last_edited_time",
+        },
+      }),
     });
 
+    if (!searchResponse.ok) {
+      throw new Error("Failed to search Notion");
+    }
+
+    const searchData = await searchResponse.json();
+
     // Add top-level databases
-    searchResponse.results
+    searchData.results
       .filter((item: any) => item.object === "database")
       .forEach((db: any) => {
         databaseMap.set(db.id, {
@@ -138,18 +163,25 @@ export async function getNotionDatabases(accessToken: string): Promise<any[]> {
       });
 
     // 2. Get pages and check for child databases
-    const pages = searchResponse.results.filter((item: any) => item.object === "page");
+    const pages = searchData.results.filter((item: any) => item.object === "page");
 
     // Check each page for child databases
     for (const page of pages) {
       try {
-        const blocksResponse = await notion.blocks.children.list({
-          block_id: page.id,
-          page_size: 100,
-        });
+        const blocksResponse = await fetch(
+          `${NOTION_API_BASE}/blocks/${page.id}/children?page_size=100`,
+          {
+            method: "GET",
+            headers: getHeaders(accessToken),
+          }
+        );
+
+        if (!blocksResponse.ok) continue;
+
+        const blocksData = await blocksResponse.json();
 
         // Find child_database blocks
-        blocksResponse.results
+        blocksData.results
           .filter((block: any) => block.type === "child_database")
           .forEach((block: any) => {
             const dbId = block.id;
@@ -157,9 +189,9 @@ export async function getNotionDatabases(accessToken: string): Promise<any[]> {
             if (!databaseMap.has(dbId)) {
               databaseMap.set(dbId, {
                 id: dbId,
-                title: (block as any).child_database?.title || "Untitled",
+                title: block.child_database?.title || "Untitled",
                 url: `https://notion.so/${dbId.replace(/-/g, "")}`,
-                last_edited_time: (block as any).last_edited_time || (page as any).last_edited_time,
+                last_edited_time: block.last_edited_time || page.last_edited_time,
               });
             }
           });
@@ -187,48 +219,56 @@ export async function createNotionDatabase(
   pageId: string,
   title: string = "Flownote Recordings"
 ): Promise<string> {
-  const notion = new Client({ auth: accessToken });
-
   try {
-    const response = await notion.databases.create({
-      parent: {
-        type: "page_id",
-        page_id: pageId,
-      },
-      title: [
-        {
-          type: "text",
-          text: {
-            content: title,
+    const response = await fetch(`${NOTION_API_BASE}/databases`, {
+      method: "POST",
+      headers: getHeaders(accessToken),
+      body: JSON.stringify({
+        parent: {
+          type: "page_id",
+          page_id: pageId,
+        },
+        title: [
+          {
+            type: "text",
+            text: {
+              content: title,
+            },
+          },
+        ],
+        properties: {
+          title: {
+            title: {},
+          },
+          format: {
+            select: {
+              options: [
+                { name: "meeting", color: "blue" },
+                { name: "interview", color: "green" },
+                { name: "lecture", color: "purple" },
+                { name: "custom", color: "gray" },
+              ],
+            },
+          },
+          duration: {
+            number: {
+              format: "number",
+            },
+          },
+          created: {
+            date: {},
           },
         },
-      ],
-      properties: {
-        title: {
-          title: {},
-        },
-        format: {
-          select: {
-            options: [
-              { name: "meeting", color: "blue" },
-              { name: "interview", color: "green" },
-              { name: "lecture", color: "purple" },
-              { name: "custom", color: "gray" },
-            ],
-          },
-        },
-        duration: {
-          number: {
-            format: "number",
-          },
-        },
-        created: {
-          date: {},
-        },
-      },
-    } as any);
+      }),
+    });
 
-    return response.id;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Notion API error: ${error.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.id;
   } catch (error) {
     console.error("Failed to create Notion database:", error);
     throw new Error("Failed to create database");
@@ -240,40 +280,58 @@ export async function createNotionStandalonePage(
   accessToken: string,
   title: string
 ): Promise<string> {
-  const notion = new Client({ auth: accessToken });
-
   try {
     // First, find the first accessible page to use as parent
-    const searchResponse = await notion.search({
-      filter: {
-        property: "object",
-        value: "page",
-      },
-      page_size: 1,
+    const searchResponse = await fetch(`${NOTION_API_BASE}/search`, {
+      method: "POST",
+      headers: getHeaders(accessToken),
+      body: JSON.stringify({
+        filter: {
+          property: "object",
+          value: "page",
+        },
+        page_size: 1,
+      }),
     });
 
+    if (!searchResponse.ok) {
+      throw new Error("Failed to search Notion");
+    }
+
+    const searchData = await searchResponse.json();
+
     let parentId: string | undefined;
-    if (searchResponse.results.length > 0) {
-      parentId = searchResponse.results[0].id;
+    if (searchData.results.length > 0) {
+      parentId = searchData.results[0].id;
     }
 
     if (!parentId) {
       throw new Error("No accessible pages found in workspace");
     }
 
-    const response = await notion.pages.create({
-      parent: {
-        type: "page_id",
-        page_id: parentId,
-      },
-      properties: {
-        title: {
-          title: [{ text: { content: title } }],
+    const response = await fetch(`${NOTION_API_BASE}/pages`, {
+      method: "POST",
+      headers: getHeaders(accessToken),
+      body: JSON.stringify({
+        parent: {
+          type: "page_id",
+          page_id: parentId,
         },
-      },
+        properties: {
+          title: {
+            title: [{ text: { content: title } }],
+          },
+        },
+      }),
     });
 
-    return response.id;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Notion API error: ${error.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.id;
   } catch (error) {
     console.error("Failed to create Notion page:", error);
     throw new Error("Failed to create page");
@@ -282,21 +340,29 @@ export async function createNotionStandalonePage(
 
 // Get user's pages (for creating database)
 export async function getNotionPages(accessToken: string): Promise<any[]> {
-  const notion = new Client({ auth: accessToken });
-
   try {
-    const response = await notion.search({
-      filter: {
-        property: "object",
-        value: "page",
-      },
-      sort: {
-        direction: "descending",
-        timestamp: "last_edited_time",
-      },
+    const response = await fetch(`${NOTION_API_BASE}/search`, {
+      method: "POST",
+      headers: getHeaders(accessToken),
+      body: JSON.stringify({
+        filter: {
+          property: "object",
+          value: "page",
+        },
+        sort: {
+          direction: "descending",
+          timestamp: "last_edited_time",
+        },
+      }),
     });
 
-    return response.results.map((page: any) => ({
+    if (!response.ok) {
+      throw new Error("Failed to search Notion");
+    }
+
+    const data = await response.json();
+
+    return data.results.map((page: any) => ({
       id: page.id,
       title: page.properties?.title?.title?.[0]?.plain_text ||
              page.properties?.Name?.title?.[0]?.plain_text ||
@@ -331,9 +397,9 @@ export async function exchangeNotionCode(
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; workspace_id: string }> {
-  const auth = Buffer.from(
-    `${process.env.NOTION_CLIENT_ID}:${process.env.NOTION_CLIENT_SECRET}`
-  ).toString("base64");
+  // Use btoa for Edge Runtime compatibility instead of Buffer
+  const credentials = `${process.env.NOTION_CLIENT_ID}:${process.env.NOTION_CLIENT_SECRET}`;
+  const auth = btoa(credentials);
 
   const response = await fetch("https://api.notion.com/v1/oauth/token", {
     method: "POST",

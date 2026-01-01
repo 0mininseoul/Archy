@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getNotionDatabases } from "@/lib/services/notion";
 
+export const runtime = "edge";
+
 // GET /api/notion/databases - List user's Notion databases
 export async function GET(request: NextRequest) {
   try {

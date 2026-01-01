@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { createNotionStandalonePage } from "@/lib/services/notion";
 
+export const runtime = "edge";
+
 // POST /api/notion/page - Create a new standalone page
 export async function POST(request: NextRequest) {
   try {

@@ -59,14 +59,13 @@ export default function DashboardPage() {
         throw new Error(errorData.error || "Upload failed");
       }
 
-      const data = await response.json();
-
-      // Redirect to history page
+      // Redirect to history page immediately without resetting state
+      // This prevents the brief flash of the recording screen
       router.push("/history");
     } catch (error) {
       console.error("Error uploading recording:", error);
       alert(t.errors.uploadFailed);
-    } finally {
+      // Only reset uploading state on error
       setIsUploading(false);
     }
   };
