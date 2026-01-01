@@ -104,12 +104,10 @@ export default function DashboardPage() {
         ) : (
           <div className="w-full max-w-sm mx-auto animate-slide-up">
             <div className="card p-6 shadow-lg">
-              <div className="text-center mb-6">
-                <h1 className="text-xl font-bold text-slate-900">{t.dashboard.newRecording}</h1>
-
+              <div className="space-y-4">
                 {/* Integration Warnings */}
                 {(!notionConnected || !slackConnected) && (
-                  <div className="mt-3 space-y-2">
+                  <div className="space-y-2">
                     {!notionConnected && (
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
                         <div className="flex items-start gap-2 text-xs text-amber-800">
@@ -136,17 +134,11 @@ export default function DashboardPage() {
                   </div>
                 )}
 
+                <AudioRecorder
+                  onRecordingComplete={handleRecordingComplete}
+                  format="meeting"
+                />
               </div>
-
-              <p className="text-center text-xs text-slate-500 mt-4 leading-relaxed">
-                음성 녹음해도 어차피 안 들으시죠?<br />
-                음성은 텍스트로 변환된 후 즉시 폐기해 드립니다.
-              </p>
-
-              <AudioRecorder
-                onRecordingComplete={handleRecordingComplete}
-                format="meeting"
-              />
             </div>
           </div>
         )}

@@ -8,6 +8,7 @@ interface UseAudioRecorderReturn {
   duration: number;
   error: string | null;
   isWakeLockActive: boolean;
+  analyserNode: AnalyserNode | null;
   startRecording: () => Promise<void>;
   pauseRecording: () => void;
   resumeRecording: () => void;
@@ -46,6 +47,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -55,6 +57,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const pausedTimeRef = useRef<number>(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const mimeTypeRef = useRef<string>("");
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Request Wake Lock to prevent screen from turning off
   const requestWakeLock = useCallback(async () => {
@@ -131,6 +134,16 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
       });
       streamRef.current = stream;
+
+      // Create AudioContext and AnalyserNode for real-time visualization
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.7;
+      source.connect(analyser);
+      setAnalyserNode(analyser);
 
       // Get supported MIME type
       const mimeType = getSupportedMimeType();
@@ -249,6 +262,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           streamRef.current = null;
         }
 
+        // Close AudioContext
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+          setAnalyserNode(null);
+        }
+
         resolve(blob);
       };
 
@@ -278,6 +298,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     duration,
     error,
     isWakeLockActive,
+    analyserNode,
     startRecording,
     pauseRecording,
     resumeRecording,
