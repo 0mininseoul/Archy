@@ -290,7 +290,7 @@ export function HistoryClient({ initialRecordings }: HistoryClientProps) {
                     ) : (
                       <>
                         <h3
-                          className="text-base font-bold text-slate-900 truncate"
+                          className="text-base font-bold text-slate-900 line-clamp-2"
                           onClick={(e) => {
                             e.stopPropagation();
                             startEditingTitle(recording.id, recording.title);

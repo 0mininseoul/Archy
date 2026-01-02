@@ -4,6 +4,9 @@ import { NextResponse, type NextRequest } from "next/server";
 // Cookie name for language preference
 const LOCALE_COOKIE = "flownote_locale";
 
+// 30 days in seconds for persistent login
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
 // Detect locale based on country (Vercel provides x-vercel-ip-country header)
 function detectLocale(request: NextRequest): "ko" | "en" {
   // First check if user has a language preference cookie
@@ -38,15 +41,22 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
+          cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
           supabaseResponse = NextResponse.next({
             request,
           });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // PWA 자동로그인을 위해 쿠키 옵션 강화
+            supabaseResponse.cookies.set(name, value, {
+              ...options,
+              maxAge: COOKIE_MAX_AGE,
+              sameSite: "lax",
+              secure: process.env.NODE_ENV === "production",
+              path: "/",
+            });
+          });
         },
       },
     }

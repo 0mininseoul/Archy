@@ -222,6 +222,7 @@ async function processRecording(
 
     // Step 2: Format document with AI
     let formattedContent: string;
+    let aiGeneratedTitle: string = title; // 기본값은 원래 제목
     try {
       console.log(`[${recordingId}] Step 2: Formatting document...`);
 
@@ -231,17 +232,28 @@ async function processRecording(
         .update({ processing_step: "formatting" })
         .eq("id", recordingId);
 
-      formattedContent = await formatDocument(transcript, format);
+      const formatResult = await formatDocument(transcript, format);
 
-      if (!formattedContent || formattedContent.trim().length === 0) {
+      if (!formatResult.content || formatResult.content.trim().length === 0) {
         // If formatting fails, use raw transcript
         console.warn(`[${recordingId}] Formatting returned empty, using raw transcript`);
         formattedContent = transcript;
+      } else {
+        formattedContent = formatResult.content;
+      }
+
+      // AI가 생성한 제목이 있으면 사용
+      if (formatResult.title && formatResult.title.trim().length > 0) {
+        aiGeneratedTitle = formatResult.title;
+        console.log(`[${recordingId}] AI generated title: ${aiGeneratedTitle}`);
       }
 
       await supabase
         .from("recordings")
-        .update({ formatted_content: formattedContent })
+        .update({
+          formatted_content: formattedContent,
+          title: aiGeneratedTitle
+        })
         .eq("id", recordingId);
 
       console.log(`[${recordingId}] Formatting completed`);
@@ -290,7 +302,7 @@ async function processRecording(
           notionUrl = await createNotionPage(
             userData.notion_access_token,
             userData.notion_database_id,
-            title,
+            aiGeneratedTitle,
             formattedContent,
             format,
             duration,
@@ -326,7 +338,7 @@ async function processRecording(
         await sendSlackNotification(
           userData.slack_access_token,
           userData.slack_channel_id,
-          title,
+          aiGeneratedTitle,
           duration,
           notionUrl
         );

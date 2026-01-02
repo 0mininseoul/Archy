@@ -2,6 +2,9 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+// 30 days in seconds for persistent login
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
@@ -24,9 +27,17 @@ export async function GET(request: Request) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              // PWA 자동로그인을 위해 쿠키 옵션 강화
+              const enhancedOptions = {
+                ...options,
+                maxAge: COOKIE_MAX_AGE,
+                sameSite: "lax" as const,
+                secure: process.env.NODE_ENV === "production",
+                path: "/",
+              };
+              cookieStore.set(name, value, enhancedOptions);
               // Also save for redirect response
-              cookiesToSetOnResponse.push({ name, value, options });
+              cookiesToSetOnResponse.push({ name, value, options: enhancedOptions });
             });
           },
         },

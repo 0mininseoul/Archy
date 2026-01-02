@@ -1,6 +1,7 @@
 // Service Worker for Flownote PWA
+// v3: Improved session persistence for PWA auto-login
 
-const CACHE_NAME = 'flownote-v2';
+const CACHE_NAME = 'flownote-v3';
 // Only cache static pages, not protected routes
 const urlsToCache = [
   '/',
@@ -9,6 +10,9 @@ const urlsToCache = [
 
 // Install event - cache resources
 self.addEventListener('install', (event) => {
+  // 새 서비스 워커 즉시 활성화
+  self.skipWaiting();
+
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
@@ -71,14 +75,19 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('activate', (event) => {
   const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    Promise.all([
+      // 이전 캐시 삭제
+      caches.keys().then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            if (cacheWhitelist.indexOf(cacheName) === -1) {
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      // 새 서비스 워커가 즉시 모든 클라이언트 제어
+      self.clients.claim()
+    ])
   );
 });
