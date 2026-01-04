@@ -136,6 +136,7 @@ export const translations = {
         transcription: "음성 전사 단계",
         formatting: "AI 포맷팅 단계",
         notion: "Notion 연동 단계",
+        google: "Google Docs 단계",
         slack: "Slack 알림 단계",
         upload: "파일 업로드 단계",
         unknown: "알 수 없는 단계",
@@ -171,6 +172,16 @@ export const translations = {
           configure: "설정",
           connect: "Notion 연결",
         },
+        google: {
+          title: "Google Docs",
+          description: "구글 드라이브에 자동으로 문서 저장",
+          connected: "구글 드라이브에 자동 저장 활성화됨",
+          notConnected: "노트를 구글 문서로 저장하려면 연결하세요",
+          connect: "Google 연결",
+          disconnect: "해지",
+          selectFolder: "저장 폴더를 선택하세요",
+          rootFolder: "내 드라이브 (루트)",
+        },
         slack: {
           title: "Slack",
           description: "요약이 준비되면 알림 받기",
@@ -180,6 +191,8 @@ export const translations = {
       formats: {
         title: "요약 포맷",
         description: "녹음 요약 시 사용할 기본 포맷을 설정하세요",
+        auto: "스마트 포맷",
+        autoDesc: "AI가 미팅/강의를 자동 판단하여 적절한 형식으로 요약",
         default: "기본 포맷",
         defaultDesc: "회의록 형식 (참석자, 주요 안건, 결정 사항, 액션 아이템)",
         custom: "커스텀 포맷",
@@ -238,26 +251,25 @@ export const translations = {
     onboarding: {
       step1: {
         title: "Flownote에 오신 것을 환영합니다",
-        description: "몇 초만에 설정을 완료하세요. 워크플로우를 자동화하기 위해 즐겨 쓰는 도구를 연결합니다.",
+        description: "녹음 한 번으로 완성되는 자동 문서화 서비스입니다.",
         getStarted: "시작하기",
       },
       step2: {
-        title: "서비스 연결",
-        description: "자동화를 위해 Notion과 Slack을 연결하세요",
-        notion: {
-          title: "Notion",
-          description: "요약을 데이터베이스에 자동 저장",
-          connected: "연결됨",
-          configInSettings: "설정에서 구성 가능",
-          connect: "Notion 연결",
+        title: "이런 기능들이 있어요",
+        description: "녹음 후 자동으로 문서가 완성됩니다",
+        autoFormat: {
+          title: "스마트 포맷 감지",
+          description: "AI가 녹음 내용을 분석해 미팅인지 강의인지 자동으로 판단하고, 각 형식에 맞게 요약합니다.",
         },
-        slack: {
-          title: "Slack",
-          description: "준비되면 알림 받기",
-          connected: "연결됨",
-          configInSettings: "설정에서 구성 가능",
-          connect: "Slack 연결",
+        integrations: {
+          title: "서비스 연동",
+          description: "Notion, Google Docs, Slack과 연동하여 자동 저장 및 알림을 받을 수 있습니다.",
         },
+        customFormat: {
+          title: "나만의 포맷",
+          description: "원하는 요약 스타일을 직접 정의할 수도 있습니다.",
+        },
+        settingsTip: "연동 및 포맷 설정은 설정 메뉴에서 언제든 변경할 수 있어요.",
         back: "뒤로",
         skip: "건너뛰기",
         next: "다음",
@@ -428,6 +440,7 @@ export const translations = {
         transcription: "Transcription step",
         formatting: "AI formatting step",
         notion: "Notion integration step",
+        google: "Google Docs step",
         slack: "Slack notification step",
         upload: "File upload step",
         unknown: "Unknown step",
@@ -463,6 +476,16 @@ export const translations = {
           configure: "Configure",
           connect: "Connect Notion",
         },
+        google: {
+          title: "Google Docs",
+          description: "Auto-save documents to Google Drive",
+          connected: "Auto-save to Google Drive enabled",
+          notConnected: "Connect to save notes as Google Docs",
+          connect: "Connect Google",
+          disconnect: "Disconnect",
+          selectFolder: "Select a folder to save",
+          rootFolder: "My Drive (root)",
+        },
         slack: {
           title: "Slack",
           description: "Get notified when summaries are ready",
@@ -472,6 +495,8 @@ export const translations = {
       formats: {
         title: "Summary Format",
         description: "Set the default format for recording summaries",
+        auto: "Smart Format",
+        autoDesc: "AI auto-detects meeting/lecture and formats accordingly",
         default: "Default Format",
         defaultDesc: "Meeting notes format (attendees, agenda, decisions, action items)",
         custom: "Custom Format",
@@ -530,26 +555,25 @@ export const translations = {
     onboarding: {
       step1: {
         title: "Welcome to Flownote",
-        description: "Let's get you set up in just a few seconds. We'll connect your favorite tools to automate your workflow.",
+        description: "One recording, automatic documentation.",
         getStarted: "Get Started",
       },
       step2: {
-        title: "Connect Services",
-        description: "Link Notion and Slack to enable automation",
-        notion: {
-          title: "Notion",
-          description: "Auto-save summaries to your database",
-          connected: "Connected",
-          configInSettings: "Configuration available in Settings",
-          connect: "Connect Notion",
+        title: "Here's what you can do",
+        description: "Your documents are created automatically after recording",
+        autoFormat: {
+          title: "Smart Format Detection",
+          description: "AI analyzes your recording to detect if it's a meeting or lecture, then formats accordingly.",
         },
-        slack: {
-          title: "Slack",
-          description: "Receive notifications when ready",
-          connected: "Connected",
-          configInSettings: "Configuration available in Settings",
-          connect: "Connect Slack",
+        integrations: {
+          title: "Service Integrations",
+          description: "Connect with Notion, Google Docs, and Slack for auto-save and notifications.",
         },
+        customFormat: {
+          title: "Custom Formats",
+          description: "Define your own summary style if you prefer.",
+        },
+        settingsTip: "You can configure integrations and formats anytime in Settings.",
         back: "Back",
         skip: "Skip",
         next: "Next",

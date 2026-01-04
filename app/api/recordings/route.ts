@@ -1,9 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { transcribeAudio } from "@/lib/services/whisper";
-import { formatDocument } from "@/lib/services/openai";
+import { formatDocument, formatDocumentAuto } from "@/lib/services/openai";
 import { createNotionPage } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
+import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
 import { FORMAT_PROMPTS } from "@/lib/prompts";
 import { formatKSTDate } from "@/lib/utils";
 
@@ -220,7 +221,7 @@ async function processRecording(
       return; // Stop processing
     }
 
-    // Step 2: Format document with AI
+    // Step 2: Format document with AI (자동 포맷 감지 또는 지정된 포맷 사용)
     let formattedContent: string;
     let aiGeneratedTitle: string = title; // 기본값은 원래 제목
     try {
@@ -232,7 +233,27 @@ async function processRecording(
         .update({ processing_step: "formatting" })
         .eq("id", recordingId);
 
-      const formatResult = await formatDocument(transcript, format);
+      // 커스텀 포맷이 있는지 확인
+      const { data: defaultFormat } = await supabase
+        .from("custom_formats")
+        .select("prompt")
+        .eq("user_id", userData.id)
+        .eq("is_default", true)
+        .single();
+
+      let formatResult;
+      if (defaultFormat?.prompt) {
+        // 커스텀 포맷이 있으면 기존 방식 사용
+        console.log(`[${recordingId}] Using custom format`);
+        formatResult = await formatDocument(transcript, format, defaultFormat.prompt);
+      } else {
+        // 커스텀 포맷이 없으면 자동 감지 사용
+        console.log(`[${recordingId}] Using auto format detection`);
+        formatResult = await formatDocumentAuto(transcript);
+        if (formatResult.detectedType) {
+          console.log(`[${recordingId}] Detected content type: ${formatResult.detectedType}`);
+        }
+      }
 
       if (!formatResult.content || formatResult.content.trim().length === 0) {
         // If formatting fails, use raw transcript
@@ -331,16 +352,77 @@ async function processRecording(
       }
     }
 
-    // Step 4: Send Slack notification (optional)
-    if (userData.slack_access_token && userData.slack_channel_id && notionUrl) {
+    // Step 4: Create Google Doc (optional)
+    let googleDocUrl = "";
+    if (userData.google_access_token) {
       try {
-        console.log(`[${recordingId}] Step 4: Sending Slack notification...`);
+        console.log(`[${recordingId}] Step 4: Creating Google Doc...`);
+
+        // Get valid access token (refresh if needed)
+        const accessToken = await getValidAccessToken({
+          access_token: userData.google_access_token,
+          refresh_token: userData.google_refresh_token,
+          token_expires_at: userData.google_token_expires_at,
+        });
+
+        // If token was refreshed, update it in the database
+        if (accessToken !== userData.google_access_token) {
+          await supabase
+            .from("users")
+            .update({ google_access_token: accessToken })
+            .eq("id", userData.id);
+        }
+
+        // Convert markdown to plain text for Google Docs
+        const plainTextContent = convertMarkdownToPlainText(formattedContent);
+
+        googleDocUrl = await createGoogleDoc(
+          accessToken,
+          aiGeneratedTitle,
+          plainTextContent,
+          userData.google_folder_id || undefined
+        );
+
+        await supabase
+          .from("recordings")
+          .update({ google_doc_url: googleDocUrl })
+          .eq("id", recordingId);
+
+        console.log(`[${recordingId}] Google Doc created: ${googleDocUrl}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown Google error";
+        console.error(`[${recordingId}] Google Doc creation failed:`, errorMessage);
+
+        // Google failure is not critical - continue processing
+        const { data: currentRecording } = await supabase
+          .from("recordings")
+          .select("error_step")
+          .eq("id", recordingId)
+          .single();
+
+        if (!currentRecording?.error_step) {
+          await supabase
+            .from("recordings")
+            .update({
+              error_step: "google",
+              error_message: `Google Docs 저장 실패: ${errorMessage}`
+            })
+            .eq("id", recordingId);
+        }
+      }
+    }
+
+    // Step 5: Send Slack notification (optional)
+    const documentUrl = notionUrl || googleDocUrl;
+    if (userData.slack_access_token && userData.slack_channel_id && documentUrl) {
+      try {
+        console.log(`[${recordingId}] Step 5: Sending Slack notification...`);
         await sendSlackNotification(
           userData.slack_access_token,
           userData.slack_channel_id,
           aiGeneratedTitle,
           duration,
-          notionUrl
+          documentUrl
         );
         console.log(`[${recordingId}] Slack notification sent`);
       } catch (error) {

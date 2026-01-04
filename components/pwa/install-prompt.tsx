@@ -126,8 +126,26 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
         <div className="space-y-2">
           <h2 className="text-xl font-bold text-slate-900">홈 화면에 추가하기</h2>
           <p className="text-sm text-slate-600">
-            앱처럼 빠르게 접근하고 오프라인에서도 사용할 수 있습니다.
+            앱처럼 빠르게 접근하고 더 안정적으로 사용할 수 있습니다.
           </p>
+        </div>
+
+        {/* Benefits */}
+        <div className="p-3 bg-green-50 border border-green-100 rounded-xl text-left">
+          <div className="space-y-2 text-xs text-green-700">
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>앱처럼 빠르게 실행</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>서비스 연동이 더 안정적으로 작동</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>전체 화면으로 편리하게 사용</span>
+            </div>
+          </div>
         </div>
 
         {deferredPrompt ? (
@@ -139,7 +157,7 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
           </button>
         ) : (
           <div className="p-4 bg-slate-50 rounded-xl text-sm text-slate-600">
-            <p>브라우저 메뉴에서 "홈 화면에 추가"를 선택하세요.</p>
+            <p>브라우저 메뉴에서 &quot;홈 화면에 추가&quot;를 선택하세요.</p>
           </div>
         )}
 
@@ -163,8 +181,26 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
           </div>
           <h2 className="text-xl font-bold text-slate-900">홈 화면에 추가하기</h2>
           <p className="text-sm text-slate-600">
-            앱처럼 빠르게 접근하고 오프라인에서도 사용할 수 있습니다.
+            앱처럼 빠르게 접근하고 더 안정적으로 사용할 수 있습니다.
           </p>
+        </div>
+
+        {/* Benefits */}
+        <div className="p-3 bg-green-50 border border-green-100 rounded-xl">
+          <div className="space-y-2 text-xs text-green-700">
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>앱처럼 빠르게 실행</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>서비스 연동이 더 안정적으로 작동</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>전체 화면으로 편리하게 사용</span>
+            </div>
+          </div>
         </div>
 
         {/* iOS Safari 가이드 */}
@@ -234,8 +270,26 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
           </div>
           <h2 className="text-xl font-bold text-slate-900">홈 화면에 추가하기</h2>
           <p className="text-sm text-slate-600">
-            최상의 경험을 위해 Safari에서 열거나, 아래 방법을 따라주세요.
+            앱처럼 빠르게 접근하고 더 안정적으로 사용할 수 있습니다.
           </p>
+        </div>
+
+        {/* Benefits */}
+        <div className="p-3 bg-green-50 border border-green-100 rounded-xl">
+          <div className="space-y-2 text-xs text-green-700">
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>앱처럼 빠르게 실행</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>서비스 연동이 더 안정적으로 작동</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>전체 화면으로 편리하게 사용</span>
+            </div>
+          </div>
         </div>
 
         {/* iOS Chrome 가이드 */}

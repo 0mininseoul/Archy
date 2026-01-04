@@ -32,14 +32,22 @@ interface CustomFormat {
   created_at: string;
 }
 
+interface GoogleFolder {
+  id: string;
+  name: string;
+}
+
 interface InitialData {
   email: string;
   usage: { used: number; limit: number };
   notionConnected: boolean;
   slackConnected: boolean;
+  googleConnected: boolean;
   notionDatabaseId: string | null;
   notionSaveTargetType: "database" | "page" | null;
   notionSaveTargetTitle: string | null;
+  googleFolderId: string | null;
+  googleFolderName: string | null;
   customFormats: CustomFormat[];
 }
 
@@ -58,7 +66,17 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
   // Feature states
   const [notionConnected, setNotionConnected] = useState(initialData.notionConnected);
   const [slackConnected] = useState(initialData.slackConnected);
+  const [googleConnected, setGoogleConnected] = useState(initialData.googleConnected);
   const [autoSave, setAutoSave] = useState(true);
+
+  // Google Drive folder states
+  const [googleFolders, setGoogleFolders] = useState<GoogleFolder[]>([]);
+  const [googleFolder, setGoogleFolder] = useState<{ id: string | null; name: string | null }>({
+    id: initialData.googleFolderId,
+    name: initialData.googleFolderName,
+  });
+  const [showGoogleFolderDropdown, setShowGoogleFolderDropdown] = useState(false);
+  const [googleFolderLoading, setGoogleFolderLoading] = useState(false);
 
   // Notion database states
   const [notionDatabaseId, setNotionDatabaseId] = useState<string | null>(initialData.notionDatabaseId);
@@ -91,9 +109,10 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const isNotionJustConnected = params.get("notion") === "connected";
+    const isGoogleJustConnected = params.get("google") === "connected";
 
-    if (isNotionJustConnected) {
-      // Notion 연결 완료 후 URL 파라미터 제거
+    if (isNotionJustConnected || isGoogleJustConnected) {
+      // 연결 완료 후 URL 파라미터 제거
       window.history.replaceState({}, "", "/settings");
       // DB 저장 완료 대기 후 데이터 가져오기
       setTimeout(() => {
@@ -118,6 +137,11 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       });
       setNotionConnected(!!userData.notion_access_token);
       setNotionDatabaseId(userData.notion_database_id || null);
+      setGoogleConnected(!!userData.google_access_token);
+      setGoogleFolder({
+        id: userData.google_folder_id || null,
+        name: userData.google_folder_name || null,
+      });
     } catch (error) {
       console.error("Failed to refresh data:", error);
     }
@@ -204,12 +228,72 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     }
   };
 
-  const handleConnect = (service: 'notion' | 'slack') => {
+  const handleConnect = (service: 'notion' | 'slack' | 'google') => {
     if (service === 'notion') {
       window.location.href = "/api/auth/notion?returnTo=/settings";
     } else if (service === 'slack') {
       window.location.href = "/api/auth/slack?returnTo=/settings";
+    } else if (service === 'google') {
+      window.location.href = "/api/auth/google?returnTo=/settings";
     }
+  };
+
+  // Google 연결 해제
+  const handleDisconnectGoogle = async () => {
+    if (!confirm("Google 연결을 해제하시겠습니까?")) return;
+
+    try {
+      const response = await fetch("/api/user/google", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setGoogleConnected(false);
+        setGoogleFolder({ id: null, name: null });
+      }
+    } catch (error) {
+      console.error("Failed to disconnect Google:", error);
+    }
+  };
+
+  // Google 폴더 목록 가져오기
+  const fetchGoogleFolders = async () => {
+    setGoogleFolderLoading(true);
+    try {
+      const response = await fetch("/api/google/folders");
+      if (response.ok) {
+        const data = await response.json();
+        setGoogleFolders(data.folders || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch Google folders:", error);
+    } finally {
+      setGoogleFolderLoading(false);
+    }
+  };
+
+  // Google 폴더 선택
+  const selectGoogleFolder = async (folderId: string | null, folderName: string | null) => {
+    try {
+      const response = await fetch("/api/user/google", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId, folderName }),
+      });
+
+      if (response.ok) {
+        setGoogleFolder({ id: folderId, name: folderName });
+        setShowGoogleFolderDropdown(false);
+      }
+    } catch (error) {
+      console.error("Failed to set Google folder:", error);
+    }
+  };
+
+  // Google 폴더 드롭다운 열기
+  const openGoogleFolderDropdown = () => {
+    setShowGoogleFolderDropdown(true);
+    fetchGoogleFolders();
   };
 
   // 기본 저장 위치 드롭다운 열기
@@ -599,6 +683,111 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
             )}
           </div>
 
+          {/* Google Docs */}
+          <div className="p-3 border border-slate-200 rounded-xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
+                📄
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.google.title}</h3>
+                <p className="text-xs text-slate-500 truncate">
+                  {googleConnected
+                    ? googleFolder.name
+                      ? `저장 위치: ${googleFolder.name}`
+                      : t.settings.integrations.google.selectFolder
+                    : t.settings.integrations.google.notConnected}
+                </p>
+              </div>
+              {googleConnected && (
+                <button
+                  onClick={handleDisconnectGoogle}
+                  className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
+                >
+                  {t.settings.integrations.google.disconnect}
+                </button>
+              )}
+            </div>
+
+            {googleConnected ? (
+              <div className="space-y-2">
+                {/* Google 폴더 선택 드롭다운 */}
+                <div className="relative">
+                  <button
+                    onClick={openGoogleFolderDropdown}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-left text-sm font-medium text-slate-700 flex items-center justify-between min-h-[44px]"
+                  >
+                    <span className="truncate">
+                      {googleFolder.name ? `📁 ${googleFolder.name}` : t.settings.integrations.google.rootFolder}
+                    </span>
+                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {/* 드롭다운 메뉴 */}
+                  {showGoogleFolderDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-64 overflow-hidden">
+                      <div className="overflow-y-auto max-h-52">
+                        {googleFolderLoading ? (
+                          <div className="flex justify-center py-4">
+                            <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
+                          </div>
+                        ) : (
+                          <>
+                            {/* 루트 폴더 (내 드라이브) */}
+                            <button
+                              onClick={() => selectGoogleFolder(null, null)}
+                              className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px] border-b border-slate-100"
+                            >
+                              <span>🏠</span>
+                              <span>{t.settings.integrations.google.rootFolder}</span>
+                            </button>
+
+                            {/* 폴더 목록 */}
+                            {googleFolders.map((folder) => (
+                              <button
+                                key={folder.id}
+                                onClick={() => selectGoogleFolder(folder.id, folder.name)}
+                                className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
+                              >
+                                <span>📁</span>
+                                <span className="truncate">{folder.name}</span>
+                              </button>
+                            ))}
+
+                            {googleFolders.length === 0 && (
+                              <div className="px-3 py-4 text-center text-sm text-slate-500">
+                                폴더가 없습니다
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {/* 닫기 버튼 */}
+                      <div className="p-2 border-t border-slate-100">
+                        <button
+                          onClick={() => setShowGoogleFolderDropdown(false)}
+                          className="w-full py-2 text-sm text-slate-500 font-medium"
+                        >
+                          닫기
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleConnect('google')}
+                className="w-full px-4 py-2.5 bg-slate-900 text-white rounded-lg font-bold text-sm min-h-[44px]"
+              >
+                {t.settings.integrations.google.connect}
+              </button>
+            )}
+          </div>
+
           {/* Slack */}
           <div className="p-3 border border-slate-200 rounded-xl">
             <div className="flex items-center gap-3">
@@ -637,15 +826,20 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
         </div>
 
         <div className="space-y-3">
-          {/* Default Format */}
-          <div className="p-3 border border-slate-200 rounded-xl bg-slate-50">
+          {/* Auto Format - Default */}
+          <div className="p-3 border border-slate-200 rounded-xl bg-gradient-to-r from-purple-50 to-blue-50">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-lg border border-slate-200">
-                📝
+                🎯
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-900 text-sm">{t.settings.formats.default}</h3>
-                <p className="text-xs text-slate-500 truncate">{t.settings.formats.defaultDesc}</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-900 text-sm">{t.settings.formats.auto}</h3>
+                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-600 text-[10px] font-bold rounded-full">
+                    {t.settings.formats.isDefault}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 truncate">{t.settings.formats.autoDesc}</p>
               </div>
             </div>
           </div>
