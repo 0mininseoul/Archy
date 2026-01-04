@@ -70,7 +70,28 @@ export async function GET(request: NextRequest) {
     const tokens = await tokenResponse.json();
     console.log("[Google Callback] Got tokens, updating DB for user:", user.id);
 
-    // Update user with Google credentials
+    // Fetch user info from Google
+    let userName: string | null = null;
+    try {
+      const userInfoResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        {
+          headers: {
+            Authorization: `Bearer ${tokens.access_token}`,
+          },
+        }
+      );
+
+      if (userInfoResponse.ok) {
+        const userInfo = await userInfoResponse.json();
+        userName = userInfo.name || null;
+        console.log("[Google Callback] Got user name:", userName);
+      }
+    } catch (err) {
+      console.error("[Google Callback] Failed to fetch user info:", err);
+    }
+
+    // Update user with Google credentials and name
     const { error: updateError } = await supabase
       .from("users")
       .update({
@@ -79,6 +100,7 @@ export async function GET(request: NextRequest) {
         google_token_expires_at: tokens.expires_in
           ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
           : null,
+        ...(userName && { name: userName }),
       })
       .eq("id", user.id);
 

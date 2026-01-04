@@ -13,6 +13,28 @@ export const metadata: Metadata = {
     icon: "/icons/apple-touch-icon.png",
     apple: "/icons/apple-touch-icon.png",
   },
+  openGraph: {
+    type: "website",
+    locale: "ko_KR",
+    url: "https://flownote.vercel.app",
+    siteName: "Flownote",
+    title: "Flownote - 자동 음성 문서화 서비스",
+    description: "녹음 버튼 하나만 누르면, 자동으로 정리된 문서를 받아볼 수 있는 자동문서화 솔루션",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Flownote - 자동 음성 문서화 서비스",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Flownote - 자동 음성 문서화 서비스",
+    description: "녹음 버튼 하나만 누르면, 자동으로 정리된 문서를 받아볼 수 있는 자동문서화 솔루션",
+    images: ["/og-image.png"],
+  },
 };
 
 export const viewport = {

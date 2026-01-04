@@ -88,6 +88,7 @@ export async function GET(request: Request) {
           id: user.id,
           email: user.email!,
           google_id: user.user_metadata.sub,
+          name: user.user_metadata.full_name || user.user_metadata.name || null,
           is_onboarded: false, // New users haven't completed onboarding
         });
 
