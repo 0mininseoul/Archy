@@ -296,6 +296,29 @@ export const translations = {
       getStarted: "무료로 시작하기",
     },
 
+    // Safari Guide
+    safariGuide: {
+      title: "Safari에서 시작해 주세요",
+      description: "Chrome에서는 일부 기능이 제한될 수 있습니다.",
+      benefits: {
+        title: "Safari에서 시작하면",
+        integration: "Notion, Slack, Google 연동이 정상 작동",
+        pwa: "홈 화면에 앱으로 추가 가능",
+        fullscreen: "전체 화면으로 편리하게 사용",
+      },
+      instructions: {
+        title: "Safari로 이동하는 방법",
+        step1: "아래 링크를 길게 누르세요",
+        step2: "메뉴에서 선택하세요",
+        longPress: "길게 눌러서 메뉴 열기",
+        tapToCopy: "탭하면 복사됩니다",
+        copied: "복사됨!",
+        openInSafari: "Safari에서 열기",
+      },
+      continueInChrome: "일단 Chrome에서 계속하기",
+      limitedFeatures: "(일부 기능이 제한됩니다)",
+    },
+
     // Errors
     errors: {
       uploadFailed: "녹음 업로드에 실패했습니다. 다시 시도해주세요.",
@@ -598,6 +621,29 @@ export const translations = {
     auth: {
       signInWithGoogle: "Get Started",
       getStarted: "Get Started Free",
+    },
+
+    // Safari Guide
+    safariGuide: {
+      title: "Please start in Safari",
+      description: "Some features may be limited in Chrome.",
+      benefits: {
+        title: "Benefits of using Safari",
+        integration: "Notion, Slack, Google integrations work properly",
+        pwa: "Add to home screen as an app",
+        fullscreen: "Use in full screen mode",
+      },
+      instructions: {
+        title: "How to open in Safari",
+        step1: "Long press the link below",
+        step2: "Select from the menu",
+        longPress: "Long press to open menu",
+        tapToCopy: "Tap to copy",
+        copied: "Copied!",
+        openInSafari: "Open in Safari",
+      },
+      continueInChrome: "Continue in Chrome anyway",
+      limitedFeatures: "(Some features will be limited)",
     },
 
     // Errors
