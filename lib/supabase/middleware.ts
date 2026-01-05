@@ -84,6 +84,24 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // If authenticated user tries to access /onboarding, check if already onboarded
+  // This prevents PWA users from seeing onboarding again after completing it
+  if (user && request.nextUrl.pathname.startsWith("/onboarding")) {
+    // Query user's onboarding status
+    const { data: userData } = await supabase
+      .from("users")
+      .select("is_onboarded")
+      .eq("id", user.id)
+      .single();
+
+    if (userData?.is_onboarded) {
+      console.log("[Middleware] User already onboarded, redirecting to dashboard");
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      return NextResponse.redirect(url);
+    }
+  }
+
   // Set locale cookie if not already set
   const existingLocaleCookie = request.cookies.get(LOCALE_COOKIE)?.value;
   if (!existingLocaleCookie) {
