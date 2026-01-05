@@ -20,7 +20,7 @@ export async function GET() {
     // Note: notion_save_target 컬럼이 DB에 없을 수 있으므로 기본 컬럼만 조회
     const { data: userData, error: dbError } = await supabase
       .from("users")
-      .select("notion_access_token, notion_database_id, slack_access_token")
+      .select("notion_access_token, notion_database_id, slack_access_token, google_access_token, google_folder_id, google_folder_name")
       .eq("id", user.id)
       .single();
 
@@ -31,6 +31,7 @@ export async function GET() {
       dbError: dbError?.message,
       hasNotionToken: !!userData?.notion_access_token,
       notionTokenLength: userData?.notion_access_token?.length || 0,
+      hasGoogleToken: !!userData?.google_access_token,
     });
 
     return NextResponse.json({
@@ -38,6 +39,9 @@ export async function GET() {
       notion_access_token: userData?.notion_access_token || null,
       notion_database_id: userData?.notion_database_id || null,
       slack_access_token: userData?.slack_access_token || null,
+      google_access_token: userData?.google_access_token || null,
+      google_folder_id: userData?.google_folder_id || null,
+      google_folder_name: userData?.google_folder_name || null,
     });
   } catch (error) {
     console.error("API error:", error);

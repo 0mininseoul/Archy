@@ -115,8 +115,13 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       // 연결 완료 후 URL 파라미터 제거
       window.history.replaceState({}, "", "/settings");
       // DB 저장 완료 대기 후 데이터 가져오기
-      setTimeout(() => {
-        refreshData();
+      setTimeout(async () => {
+        await refreshData();
+        // Google 연결 직후 폴더 선택 드롭다운 자동으로 열기
+        if (isGoogleJustConnected) {
+          setShowGoogleFolderDropdown(true);
+          fetchGoogleFolders();
+        }
       }, 800);
     }
   }, []);
