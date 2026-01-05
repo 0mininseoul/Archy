@@ -26,6 +26,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Skip service worker for external requests (like Amplitude)
+  if (url.origin !== location.origin) {
+    return;
+  }
+
   // Skip service worker for API routes and auth callbacks
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
     return;
