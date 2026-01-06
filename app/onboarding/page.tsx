@@ -8,8 +8,42 @@ type OnboardingStep = 1 | 2;
 
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
+  const [showReferralInput, setShowReferralInput] = useState(false);
+  const [referralCode, setReferralCode] = useState("");
+  const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [referralMessage, setReferralMessage] = useState("");
   const router = useRouter();
   const { t } = useI18n();
+
+  const handleApplyReferral = async () => {
+    if (!referralCode.trim()) return;
+
+    setReferralStatus("loading");
+    try {
+      const response = await fetch("/api/user/referral", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referralCode: referralCode.trim().toUpperCase() }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setReferralStatus("success");
+        setReferralMessage(t.onboarding.step1.referralSuccess);
+      } else {
+        setReferralStatus("error");
+        if (data.error === "Already referred") {
+          setReferralMessage(t.onboarding.step1.referralAlreadyUsed);
+        } else {
+          setReferralMessage(t.onboarding.step1.referralError);
+        }
+      }
+    } catch (error) {
+      setReferralStatus("error");
+      setReferralMessage(t.onboarding.step1.referralError);
+    }
+  };
 
   // Step 2에 진입하면 온보딩 완료 처리
   useEffect(() => {
@@ -84,6 +118,57 @@ function OnboardingContent() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                   </svg>
                 </button>
+
+                {/* Referral Code Section */}
+                <div className="pt-4 border-t border-slate-100">
+                  <button
+                    onClick={() => setShowReferralInput(!showReferralInput)}
+                    className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mx-auto"
+                  >
+                    {t.onboarding.step1.referralQuestion}
+                    <svg
+                      className={`w-4 h-4 transition-transform ${showReferralInput ? "rotate-180" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {showReferralInput && (
+                    <div className="mt-3 space-y-2 animate-fade-in">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={referralCode}
+                          onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                          placeholder={t.onboarding.step1.referralPlaceholder}
+                          className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent uppercase"
+                          maxLength={8}
+                          disabled={referralStatus === "success" || referralStatus === "loading"}
+                        />
+                        <button
+                          onClick={handleApplyReferral}
+                          disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
+                          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {referralStatus === "loading" ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            t.onboarding.step1.referralApply
+                          )}
+                        </button>
+                      </div>
+
+                      {referralMessage && (
+                        <p className={`text-xs ${referralStatus === "success" ? "text-green-600" : "text-red-500"}`}>
+                          {referralMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

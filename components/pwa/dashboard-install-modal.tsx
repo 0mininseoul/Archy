@@ -153,9 +153,44 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
           </div>
         )}
 
-        {(deviceType === "ios-chrome" || deviceType === "desktop") && (
+        {deviceType === "ios-chrome" && (
+          <div className="bg-slate-50 rounded-lg p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 bg-white rounded-lg flex items-center justify-center text-xs font-bold text-slate-900 border border-slate-200 flex-shrink-0">
+                1
+              </div>
+              <div className="flex-1">
+                <p className="text-sm text-slate-700">
+                  {t.pwaModal.iosChrome.step1}
+                </p>
+                <div className="mt-2 flex justify-end">
+                  <div className="p-1.5 bg-blue-500 rounded-lg">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-6 h-6 bg-white rounded-lg flex items-center justify-center text-xs font-bold text-slate-900 border border-slate-200 flex-shrink-0">
+                2
+              </div>
+              <p className="text-sm text-slate-700 flex-1">
+                {t.pwaModal.iosChrome.step2}
+              </p>
+            </div>
+            <div className="p-2 bg-blue-50 border border-blue-100 rounded-lg">
+              <p className="text-xs text-blue-700">
+                {t.pwaModal.iosChrome.tip}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {deviceType === "desktop" && (
           <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600 text-center">
-            <p>{t.pwaModal.browserNotSupported}</p>
+            <p>{t.pwaModal.desktopMessage}</p>
           </div>
         )}
 

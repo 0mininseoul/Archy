@@ -5,6 +5,7 @@ import { formatDocument, formatDocumentAuto } from "@/lib/services/openai";
 import { createNotionPage } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
+import { sendPushNotification, PushSubscription } from "@/lib/services/push";
 import { FORMAT_PROMPTS } from "@/lib/prompts";
 import { formatKSTDate } from "@/lib/utils";
 
@@ -297,59 +298,51 @@ async function processRecording(
       console.log(`[${recordingId}] Using raw transcript due to formatting error`);
     }
 
-    // Step 3: Create Notion page (optional)
+    // Step 3: Create Notion page (optional - only if fully configured)
     // Note: Audio file is not attached to Notion page (only text content)
     let notionUrl = "";
-    if (userData.notion_access_token) {
-      if (!userData.notion_database_id) {
-        // 노션 연결은 됐지만 저장 위치가 지정되지 않은 경우
-        console.log(`[${recordingId}] Notion connected but no save target set`);
+    const isNotionFullyConfigured = userData.notion_access_token && userData.notion_database_id;
+
+    if (isNotionFullyConfigured) {
+      try {
+        console.log(`[${recordingId}] Step 3: Creating Notion page...`);
+
+        // Update processing_step to 'saving'
+        await supabase
+          .from("recordings")
+          .update({ processing_step: "saving" })
+          .eq("id", recordingId);
+        notionUrl = await createNotionPage(
+          userData.notion_access_token,
+          userData.notion_database_id,
+          aiGeneratedTitle,
+          formattedContent,
+          format,
+          duration,
+          userData.notion_save_target_type || "database"
+        );
+
+        await supabase
+          .from("recordings")
+          .update({ notion_page_url: notionUrl })
+          .eq("id", recordingId);
+
+        console.log(`[${recordingId}] Notion page created: ${notionUrl}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown Notion error";
+        console.error(`[${recordingId}] Notion creation failed:`, errorMessage);
+
+        // Notion failure - record error but continue processing
         await supabase
           .from("recordings")
           .update({
             error_step: "notion",
-            error_message: "노션 저장 위치가 지정되지 않았습니다. 설정에서 저장 위치를 선택해주세요."
+            error_message: `Notion 저장 실패: ${errorMessage}`
           })
           .eq("id", recordingId);
-      } else {
-        try {
-          console.log(`[${recordingId}] Step 3: Creating Notion page...`);
-
-          // Update processing_step to 'saving'
-          await supabase
-            .from("recordings")
-            .update({ processing_step: "saving" })
-            .eq("id", recordingId);
-          notionUrl = await createNotionPage(
-            userData.notion_access_token,
-            userData.notion_database_id,
-            aiGeneratedTitle,
-            formattedContent,
-            format,
-            duration,
-            userData.notion_save_target_type || "database"
-          );
-
-          await supabase
-            .from("recordings")
-            .update({ notion_page_url: notionUrl })
-            .eq("id", recordingId);
-
-          console.log(`[${recordingId}] Notion page created: ${notionUrl}`);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Unknown Notion error";
-          console.error(`[${recordingId}] Notion creation failed:`, errorMessage);
-
-          // Notion failure is not critical - continue processing
-          await supabase
-            .from("recordings")
-            .update({
-              error_step: "notion",
-              error_message: `Notion 저장 실패: ${errorMessage}`
-            })
-            .eq("id", recordingId);
-        }
       }
+    } else {
+      console.log(`[${recordingId}] Notion not configured, skipping...`);
     }
 
     // Step 4: Create Google Doc (optional)
@@ -469,6 +462,39 @@ async function processRecording(
     }
 
     console.log(`[${recordingId}] Status updated to completed:`, updateData);
+
+    // Step 6: Send PWA push notification
+    if (userData.push_enabled && userData.push_subscription) {
+      try {
+        console.log(`[${recordingId}] Step 6: Sending PWA push notification...`);
+
+        // 저장된 서비스에 따라 메시지 구성
+        const savedServices: string[] = [];
+        if (notionUrl) savedServices.push("Notion");
+        if (googleDocUrl) savedServices.push("Google Docs");
+
+        let body = "";
+        if (savedServices.length > 0) {
+          body = `${savedServices.join(", ")}에 저장되었습니다.`;
+        } else {
+          body = "전사 및 요약이 완료되었습니다.";
+        }
+
+        await sendPushNotification(
+          userData.push_subscription as PushSubscription,
+          {
+            title: aiGeneratedTitle,
+            body,
+            url: "/history",
+            recordingId,
+          }
+        );
+        console.log(`[${recordingId}] PWA push notification sent`);
+      } catch (error) {
+        console.error(`[${recordingId}] PWA push notification failed:`, error);
+        // 푸시 알림 실패는 치명적이지 않음
+      }
+    }
 
   } catch (error) {
     // Catch-all for unexpected errors
