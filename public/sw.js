@@ -1,7 +1,7 @@
 // Service Worker for Flownote PWA
-// v4: PWA auto-login improvements with manifest changes
+// v5: Added push notification support
 
-const CACHE_NAME = 'flownote-v4';
+const CACHE_NAME = 'flownote-v5';
 // Only cache static assets, not routes that require auth
 const urlsToCache = [
   '/manifest.json'
@@ -93,5 +93,60 @@ self.addEventListener('activate', (event) => {
       // 새 서비스 워커가 즉시 모든 클라이언트 제어
       self.clients.claim()
     ])
+  );
+});
+
+// Push notification event
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  try {
+    const data = event.data.json();
+    const options = {
+      body: data.body || '녹음이 완료되었습니다.',
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/icon-72x72.png',
+      vibrate: [100, 50, 100],
+      data: {
+        url: data.url || '/history',
+        recordingId: data.recordingId
+      },
+      actions: [
+        {
+          action: 'view',
+          title: '확인하기'
+        }
+      ],
+      tag: 'flownote-recording',
+      renotify: true
+    };
+
+    event.waitUntil(
+      self.registration.showNotification(data.title || 'Flownote', options)
+    );
+  } catch (error) {
+    console.error('Push notification error:', error);
+  }
+});
+
+// Notification click event
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const url = event.notification.data?.url || '/history';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // 이미 열린 창이 있으면 포커스
+      for (const client of windowClients) {
+        if (client.url.includes('/history') || client.url.includes('/dashboard')) {
+          client.focus();
+          client.navigate(url);
+          return;
+        }
+      }
+      // 없으면 새 창 열기
+      return clients.openWindow(url);
+    })
   );
 });

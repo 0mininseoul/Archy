@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { InviteFriends } from "./invite-friends";
 
 interface NotionDatabase {
   id: string;
@@ -49,6 +50,7 @@ interface InitialData {
   googleFolderId: string | null;
   googleFolderName: string | null;
   customFormats: CustomFormat[];
+  pushEnabled: boolean;
 }
 
 interface SettingsClientProps {
@@ -106,6 +108,12 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
   const [newFormatPrompt, setNewFormatPrompt] = useState("");
   const [formatLoading, setFormatLoading] = useState(false);
 
+  // Push notification states
+  const [pushEnabled, setPushEnabled] = useState(initialData.pushEnabled);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const isNotionJustConnected = params.get("notion") === "connected";
@@ -123,6 +131,11 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
           fetchGoogleFolders();
         }
       }, 800);
+    }
+
+    // Check push notification support
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      setPushSupported(true);
     }
   }, []);
 
@@ -161,6 +174,62 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       }
     } catch (error) {
       console.error("Failed to fetch custom formats:", error);
+    }
+  };
+
+  const handleTogglePush = async (enable: boolean) => {
+    setPushLoading(true);
+    setPushError(null);
+
+    try {
+      if (enable) {
+        // Request notification permission
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          setPushError(t.settings.pushNotification.permissionDenied);
+          setPushLoading(false);
+          return;
+        }
+
+        // Get service worker registration
+        const registration = await navigator.serviceWorker.ready;
+
+        // Subscribe to push notifications
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+        });
+
+        // Save subscription to server
+        const response = await fetch("/api/user/push-subscription", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: subscription.toJSON() }),
+        });
+
+        if (response.ok) {
+          // Enable push on server
+          await fetch("/api/user/push-enabled", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: true }),
+          });
+          setPushEnabled(true);
+        }
+      } else {
+        // Disable push on server
+        await fetch("/api/user/push-enabled", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: false }),
+        });
+        setPushEnabled(false);
+      }
+    } catch (error) {
+      console.error("Failed to toggle push notifications:", error);
+      setPushError(t.settings.pushNotification.notSupported);
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -522,11 +591,17 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
         </div>
       </div>
 
+      {/* Invite Friends */}
+      <InviteFriends />
+
       {/* Integrations */}
       <div className="card p-4">
-        <h2 className="text-base font-bold text-slate-900 mb-3">
+        <h2 className="text-base font-bold text-slate-900 mb-1">
           {t.settings.integrations.title}
         </h2>
+        <p className="text-xs text-slate-500 mb-3">
+          {t.settings.integrations.description}
+        </p>
         <div className="space-y-3">
           {/* Notion */}
           <div className="p-3 border border-slate-200 rounded-xl">
@@ -953,6 +1028,36 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
         </div>
       </div>
 
+      {/* Push Notifications */}
+      {pushSupported && (
+        <div className="card p-4">
+          <h2 className="text-base font-bold text-slate-900 mb-3">
+            {t.settings.pushNotification.title}
+          </h2>
+          <div className="flex items-center justify-between p-3 border border-slate-200 rounded-xl">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-slate-900 text-sm">
+                {pushEnabled ? t.settings.pushNotification.enabled : t.settings.pushNotification.disabled}
+              </h3>
+              <p className="text-xs text-slate-500">{t.settings.pushNotification.description}</p>
+              {pushError && (
+                <p className="text-xs text-red-500 mt-1">{pushError}</p>
+              )}
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={pushEnabled}
+                disabled={pushLoading}
+                onChange={(e) => handleTogglePush(e.target.checked)}
+              />
+              <div className={`w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-900 ${pushLoading ? 'opacity-50' : ''}`}></div>
+            </label>
+          </div>
+        </div>
+      )}
+
       {/* Data Management */}
       <div className="card p-4">
         <h2 className="text-base font-bold text-slate-900 mb-3">
@@ -1024,6 +1129,16 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       >
         {t.settings.signOut}
       </button>
+
+      {/* Contact */}
+      <div className="text-center pt-4">
+        <button
+          onClick={() => router.push("/settings/contact")}
+          className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          {t.settings.contact}
+        </button>
+      </div>
 
       {/* Bottom spacer for scroll */}
       <div className="h-32" aria-hidden="true" />

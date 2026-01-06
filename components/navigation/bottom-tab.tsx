@@ -3,7 +3,11 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 
-export function BottomTab() {
+interface BottomTabProps {
+  showSettingsTooltip?: boolean;
+}
+
+export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
@@ -53,14 +57,24 @@ export function BottomTab() {
     <nav className="bottom-tab">
       <div className="bottom-tab-inner">
         {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => router.push(tab.path)}
-            className={`bottom-tab-item ${isActive(tab.path) ? "active" : ""}`}
-          >
-            {tab.icon}
-            <span className="bottom-tab-label">{tab.label}</span>
-          </button>
+          <div key={tab.id} className="relative">
+            {/* Settings tooltip */}
+            {tab.id === "settings" && showSettingsTooltip && (
+              <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 whitespace-nowrap z-10 animate-bounce-slow">
+                <div className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg">
+                  {t.nav.settingsTooltip}
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-indigo-600" />
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => router.push(tab.path)}
+              className={`bottom-tab-item ${isActive(tab.path) ? "active" : ""}`}
+            >
+              {tab.icon}
+              <span className="bottom-tab-label">{tab.label}</span>
+            </button>
+          </div>
         ))}
       </div>
     </nav>
