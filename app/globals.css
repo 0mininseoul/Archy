@@ -159,6 +159,11 @@
     50% { transform: translateX(-50%) translateY(-4px); }
   }
 
+  @keyframes bounce-vertical {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
   .animate-fade-in {
     animation: fade-in 0.3s ease-out;
   }
@@ -173,5 +178,9 @@
 
   .animate-bounce-slow {
     animation: bounce-slow 2s ease-in-out infinite;
+  }
+
+  .animate-bounce-vertical {
+    animation: bounce-vertical 2s ease-in-out infinite;
   }
 }
