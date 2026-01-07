@@ -1,11 +1,22 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { createClient } from "@/lib/supabase/client";
 
 export default function WithdrawCompletePage() {
   const router = useRouter();
   const { t } = useI18n();
+
+  // Sign out when page loads
+  useEffect(() => {
+    const signOut = async () => {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    };
+    signOut();
+  }, []);
 
   return (
     <div className="app-container">

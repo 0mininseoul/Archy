@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 // DELETE - 회원 탈퇴 (데이터 아카이브 후 삭제)
@@ -74,7 +74,8 @@ export async function DELETE(request: Request) {
       .eq("referred_by", user.id);
 
     // 6. Archive user data to withdrawn_users table (using service role to bypass RLS)
-    const { error: archiveError } = await supabase
+    const supabaseAdmin = createServiceRoleClient();
+    const { error: archiveError } = await supabaseAdmin
       .from("withdrawn_users")
       .insert({
         original_user_id: user.id,
@@ -93,7 +94,10 @@ export async function DELETE(request: Request) {
 
     if (archiveError) {
       console.error("Failed to archive user data:", archiveError);
-      // Continue with deletion even if archiving fails
+      return NextResponse.json(
+        { error: "Failed to archive user data" },
+        { status: 500 }
+      );
     }
 
     // 7. Delete all recordings (CASCADE will handle this, but explicit for clarity)
@@ -130,9 +134,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // 10. Sign out from Supabase Auth
-    await supabase.auth.signOut();
-
+    // 10. Return success (sign out will be handled by frontend)
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Withdraw error:", error);
