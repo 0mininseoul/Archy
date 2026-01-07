@@ -77,7 +77,10 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   );
 
-  if (isProtectedRoute && !user) {
+  // Exception: Withdrawal complete page should be accessible without auth
+  const isWithdrawComplete = request.nextUrl.pathname === "/settings/contact/withdraw/complete";
+
+  if (isProtectedRoute && !isWithdrawComplete && !user) {
     console.log("[Middleware] Redirecting to home - no user on protected route");
     const url = request.nextUrl.clone();
     url.pathname = "/";
