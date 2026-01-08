@@ -411,7 +411,13 @@ async function processRecording(
       try {
         console.log(`[${recordingId}] Step 5: Sending Slack notification...`);
 
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
+        let appUrl = "https://flownoteforu.vercel.app";
+        if (process.env.NODE_ENV === "development") {
+          appUrl = "http://localhost:3000";
+        } else if (process.env.NEXT_PUBLIC_APP_URL) {
+          appUrl = process.env.NEXT_PUBLIC_APP_URL;
+        }
+
         const flownoteUrl = `${appUrl}/recordings/${recordingId}`;
 
         await sendSlackNotification(

@@ -72,7 +72,7 @@ export async function updateSession(request: NextRequest) {
   console.log("[Middleware] Cookies:", request.cookies.getAll().map(c => c.name).filter(n => n.includes('supabase')));
 
   // Protected routes
-  const protectedRoutes = ["/dashboard", "/history", "/settings", "/onboarding"];
+  const protectedRoutes = ["/dashboard", "/history", "/settings", "/onboarding", "/recordings"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route)
   );
