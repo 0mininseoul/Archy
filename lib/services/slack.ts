@@ -119,7 +119,7 @@ export function getSlackAuthUrl(redirectUri: string, state?: string): string {
 export async function exchangeSlackCode(
   code: string,
   redirectUri: string
-): Promise<{ access_token: string; team_id: string }> {
+): Promise<{ access_token: string; team_id: string; user_id: string }> {
   const response = await fetch("https://slack.com/api/oauth.v2.access", {
     method: "POST",
     headers: {
@@ -146,5 +146,24 @@ export async function exchangeSlackCode(
   return {
     access_token: data.access_token,
     team_id: data.team.id,
+    user_id: data.authed_user.id,
   };
+}
+
+export async function getSlackDMChannelId(
+  accessToken: string,
+  userId: string
+): Promise<string> {
+  const client = new WebClient(accessToken);
+
+  // conversations.open works for opening a DM with a user
+  const result = await client.conversations.open({
+    users: userId
+  });
+
+  if (!result.ok || !result.channel?.id) {
+    throw new Error(`Failed to open DM channel: ${result.error}`);
+  }
+
+  return result.channel.id;
 }
