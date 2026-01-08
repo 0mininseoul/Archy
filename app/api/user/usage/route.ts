@@ -18,7 +18,7 @@ export async function GET() {
 
     const { data: userData, error } = await supabase
       .from("users")
-      .select("monthly_minutes_used, last_reset_at")
+      .select("monthly_minutes_used, last_reset_at, bonus_minutes")
       .eq("id", user.id)
       .single();
 
@@ -28,7 +28,7 @@ export async function GET() {
 
     return NextResponse.json({
       used: userData.monthly_minutes_used,
-      limit: 350,
+      limit: 350 + (userData.bonus_minutes || 0),
       lastReset: userData.last_reset_at,
     });
   } catch (error) {
