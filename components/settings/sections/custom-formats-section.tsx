@@ -1,0 +1,244 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
+
+interface CustomFormat {
+  id: string;
+  name: string;
+  prompt: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+interface CustomFormatsSectionProps {
+  initialFormats: CustomFormat[];
+}
+
+export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionProps) {
+  const { t } = useI18n();
+
+  const [customFormats, setCustomFormats] = useState<CustomFormat[]>(initialFormats);
+  const [showFormatForm, setShowFormatForm] = useState(false);
+  const [newFormatName, setNewFormatName] = useState("");
+  const [newFormatPrompt, setNewFormatPrompt] = useState("");
+  const [formatLoading, setFormatLoading] = useState(false);
+
+  const fetchCustomFormats = useCallback(async () => {
+    try {
+      const response = await fetch("/api/formats");
+      if (response.ok) {
+        const data = await response.json();
+        setCustomFormats(data.data?.formats || data.formats || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch custom formats:", error);
+    }
+  }, []);
+
+  const handleCreateFormat = useCallback(async () => {
+    if (!newFormatName || !newFormatPrompt) return;
+
+    setFormatLoading(true);
+    try {
+      const response = await fetch("/api/formats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newFormatName,
+          prompt: newFormatPrompt,
+          is_default: false,
+        }),
+      });
+
+      if (response.ok) {
+        await fetchCustomFormats();
+        setShowFormatForm(false);
+        setNewFormatName("");
+        setNewFormatPrompt("");
+        alert(t.settings.formats.saveSuccess);
+      } else {
+        const data = await response.json();
+        alert(data.error || t.settings.formats.saveFailed);
+      }
+    } catch (error) {
+      console.error("Failed to create format:", error);
+      alert(t.settings.formats.saveFailed);
+    } finally {
+      setFormatLoading(false);
+    }
+  }, [newFormatName, newFormatPrompt, t, fetchCustomFormats]);
+
+  const handleDeleteFormat = useCallback(async (id: string) => {
+    if (!confirm(t.settings.formats.deleteConfirm)) return;
+
+    try {
+      const response = await fetch(`/api/formats?id=${id}`, { method: "DELETE" });
+      if (response.ok) {
+        await fetchCustomFormats();
+        alert(t.settings.formats.deleteSuccess);
+      } else {
+        alert(t.settings.formats.deleteFailed);
+      }
+    } catch (error) {
+      console.error("Failed to delete format:", error);
+      alert(t.settings.formats.deleteFailed);
+    }
+  }, [t, fetchCustomFormats]);
+
+  const handleSetDefaultFormat = useCallback(async (id: string) => {
+    try {
+      const response = await fetch("/api/formats", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, is_default: true }),
+      });
+      if (response.ok) {
+        await fetchCustomFormats();
+      }
+    } catch (error) {
+      console.error("Failed to set default format:", error);
+    }
+  }, [fetchCustomFormats]);
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-bold text-slate-900">{t.settings.formats.title}</h2>
+        {customFormats.length < 3 && !showFormatForm && (
+          <button
+            onClick={() => setShowFormatForm(true)}
+            className="px-3 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-xs min-h-[36px]"
+          >
+            {t.settings.formats.addNew}
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {/* Auto Format - Default */}
+        <div className="p-3 border border-slate-200 rounded-xl bg-gradient-to-r from-purple-50 to-blue-50">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-lg border border-slate-200">
+              🎯
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-900 text-sm">{t.settings.formats.auto}</h3>
+                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-600 text-[10px] font-bold rounded-full">
+                  {t.settings.formats.isDefault}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 truncate">{t.settings.formats.autoDesc}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Custom Formats List */}
+        {customFormats.map((format) => (
+          <div
+            key={format.id}
+            className={`p-3 border rounded-xl ${
+              format.is_default
+                ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
+                : "border-slate-200"
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-lg">
+                ✨
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-900 text-sm">{format.name}</h3>
+                  {format.is_default && (
+                    <span className="px-1.5 py-0.5 bg-slate-900 text-white text-[10px] font-bold rounded-full">
+                      {t.settings.formats.isDefault}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{format.prompt}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                {!format.is_default && (
+                  <button
+                    onClick={() => handleSetDefaultFormat(format.id)}
+                    className="px-2 py-1 text-[10px] font-medium text-slate-500 hover:bg-slate-100 rounded-lg min-h-[32px]"
+                  >
+                    {t.settings.formats.setAsDefault}
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDeleteFormat(format.id)}
+                  className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg min-h-[32px] min-w-[32px]"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* New Format Form */}
+        {showFormatForm && (
+          <div className="p-3 border border-slate-200 rounded-xl bg-white space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                {t.settings.formats.formatName}
+              </label>
+              <input
+                type="text"
+                value={newFormatName}
+                onChange={(e) => setNewFormatName(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+                placeholder={t.settings.formats.formatName}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                {t.settings.formats.formatPrompt}
+              </label>
+              <textarea
+                value={newFormatPrompt}
+                onChange={(e) => setNewFormatPrompt(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
+                rows={3}
+                placeholder={t.settings.formats.promptPlaceholder}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowFormatForm(false);
+                  setNewFormatName("");
+                  setNewFormatPrompt("");
+                }}
+                className="flex-1 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium min-h-[44px]"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                onClick={handleCreateFormat}
+                disabled={!newFormatName || !newFormatPrompt || formatLoading}
+                className="flex-1 px-3 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:bg-slate-300 min-h-[44px]"
+              >
+                {formatLoading ? t.common.loading : t.common.save}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {customFormats.length >= 3 && (
+          <p className="text-xs text-slate-500 text-center py-1">{t.settings.formats.maxFormats}</p>
+        )}
+      </div>
+    </div>
+  );
+}

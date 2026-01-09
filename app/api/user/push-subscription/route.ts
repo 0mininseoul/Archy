@@ -1,99 +1,54 @@
-import { createClient } from "@/lib/supabase/server";
-import { NextRequest, NextResponse } from "next/server";
+import { withAuth, successResponse, errorResponse, withErrorHandling } from "@/lib/api";
 import { getVapidPublicKey } from "@/lib/services/push";
+import { PushSubscriptionData } from "@/lib/types/database";
 
-// GET - VAPID public key 조회
-export async function GET() {
+// GET /api/user/push-subscription - Get VAPID public key (no auth required)
+export const GET = withErrorHandling<{ publicKey: string }>(async () => {
   const publicKey = getVapidPublicKey();
 
   if (!publicKey) {
-    return NextResponse.json(
-      { error: "Push notifications not configured" },
-      { status: 503 }
-    );
+    return errorResponse("Push notifications not configured", 503);
   }
 
-  return NextResponse.json({ publicKey });
-}
+  return successResponse({ publicKey });
+});
 
-// POST - 푸시 구독 저장
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+// POST /api/user/push-subscription - Save push subscription
+export const POST = withAuth<{ subscribed: boolean }>(async ({ user, supabase, request }) => {
+  const { subscription } = await request!.json() as { subscription: PushSubscriptionData };
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { subscription } = await request.json();
-
-    if (!subscription || !subscription.endpoint) {
-      return NextResponse.json(
-        { error: "Invalid subscription" },
-        { status: 400 }
-      );
-    }
-
-    // 구독 정보 저장
-    const { error } = await supabase
-      .from("users")
-      .update({
-        push_subscription: subscription,
-        push_enabled: true,
-      })
-      .eq("id", user.id);
-
-    if (error) {
-      console.error("Failed to save push subscription:", error);
-      return NextResponse.json(
-        { error: "Failed to save subscription" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Push subscription error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  if (!subscription || !subscription.endpoint) {
+    return errorResponse("Invalid subscription", 400);
   }
-}
 
-// DELETE - 푸시 구독 삭제
-export async function DELETE() {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("users")
+    .update({
+      push_subscription: subscription,
+      push_enabled: true,
+    })
+    .eq("id", user.id);
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { error } = await supabase
-      .from("users")
-      .update({
-        push_subscription: null,
-        push_enabled: false,
-      })
-      .eq("id", user.id);
-
-    if (error) {
-      console.error("Failed to delete push subscription:", error);
-      return NextResponse.json(
-        { error: "Failed to delete subscription" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Push subscription delete error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  if (error) {
+    return errorResponse("Failed to save subscription", 500);
   }
-}
+
+  return successResponse({ subscribed: true });
+});
+
+// DELETE /api/user/push-subscription - Delete push subscription
+export const DELETE = withAuth<{ unsubscribed: boolean }>(async ({ user, supabase }) => {
+  const { error } = await supabase
+    .from("users")
+    .update({
+      push_subscription: null,
+      push_enabled: false,
+    })
+    .eq("id", user.id);
+
+  if (error) {
+    return errorResponse("Failed to delete subscription", 500);
+  }
+
+  return successResponse({ unsubscribed: true });
+});

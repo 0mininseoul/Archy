@@ -1,39 +1,15 @@
-import { createClient } from "@/lib/supabase/server";
-import { NextRequest, NextResponse } from "next/server";
+import { withAuth, successResponse, errorResponse } from "@/lib/api";
 
 // POST /api/user/onboarding - Mark user as onboarded
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient();
+export const POST = withAuth<{ onboarded: boolean }>(async ({ user, supabase }) => {
+  const { error } = await supabase
+    .from("users")
+    .update({ is_onboarded: true })
+    .eq("id", user.id);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Update user's is_onboarded flag
-    const { error } = await supabase
-      .from("users")
-      .update({ is_onboarded: true })
-      .eq("id", user.id);
-
-    if (error) {
-      console.error("Error updating onboarding status:", error);
-      return NextResponse.json(
-        { error: "Failed to update onboarding status" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("API error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  if (error) {
+    return errorResponse("Failed to update onboarding status", 500);
   }
-}
+
+  return successResponse({ onboarded: true });
+});

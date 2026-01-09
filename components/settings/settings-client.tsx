@@ -1,23 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { InviteFriends } from "./invite-friends";
+import {
+  AccountSection,
+  IntegrationsSection,
+  CustomFormatsSection,
+  PushNotificationSection,
+  DataManagementSection,
+  LanguageSection,
+} from "./sections";
 
-interface NotionDatabase {
-  id: string;
-  title: string;
-  url: string;
-  last_edited_time: string;
-}
-
-interface NotionPage {
-  id: string;
-  title: string;
-  url: string;
-  last_edited_time: string;
-}
+// =============================================================================
+// Types
+// =============================================================================
 
 interface NotionSaveTarget {
   type: "database" | "page";
@@ -31,11 +29,6 @@ interface CustomFormat {
   prompt: string;
   is_default: boolean;
   created_at: string;
-}
-
-interface GoogleFolder {
-  id: string;
-  name: string;
 }
 
 interface InitialData {
@@ -57,38 +50,25 @@ interface SettingsClientProps {
   initialData: InitialData;
 }
 
+// =============================================================================
+// Component
+// =============================================================================
+
 export function SettingsClient({ initialData }: SettingsClientProps) {
   const router = useRouter();
-  const { locale, setLocale, t } = useI18n();
+  const { t } = useI18n();
 
-  // State definitions (initialized with server data)
-  const [usage, setUsage] = useState(initialData.usage);
-  const [userEmail] = useState(initialData.email);
+  // Accordion state (only one section open at a time)
+  const [openSection, setOpenSection] = useState<string | null>(null);
 
-  // Feature states
+  // Push notification support check
+  const [pushSupported, setPushSupported] = useState(false);
+
+  // State for values that can change after OAuth callbacks
   const [notionConnected, setNotionConnected] = useState(initialData.notionConnected);
-  const [slackConnected] = useState(initialData.slackConnected);
   const [googleConnected, setGoogleConnected] = useState(initialData.googleConnected);
-  const [autoSave, setAutoSave] = useState(true);
-
-  // Google Drive folder states
-  const [googleFolders, setGoogleFolders] = useState<GoogleFolder[]>([]);
-  const [googleFolder, setGoogleFolder] = useState<{ id: string | null; name: string | null }>({
-    id: initialData.googleFolderId,
-    name: initialData.googleFolderName,
-  });
-  const [showGoogleFolderDropdown, setShowGoogleFolderDropdown] = useState(false);
-  const [googleFolderLoading, setGoogleFolderLoading] = useState(false);
-
-  // Notion database states
-  const [notionDatabaseId, setNotionDatabaseId] = useState<string | null>(initialData.notionDatabaseId);
-  const [databases, setDatabases] = useState<NotionDatabase[]>([]);
-  const [pages, setPages] = useState<NotionPage[]>([]);
-
-  // Notion 기본 저장 위치 드롭다운
-  const [showSaveTargetDropdown, setShowSaveTargetDropdown] = useState(false);
+  const [usage, setUsage] = useState(initialData.usage);
   const [saveTarget, setSaveTarget] = useState<NotionSaveTarget | null>(() => {
-    // 초기 데이터에서 저장 위치 정보가 있으면 설정
     if (initialData.notionDatabaseId && initialData.notionSaveTargetType && initialData.notionSaveTargetTitle) {
       return {
         type: initialData.notionSaveTargetType,
@@ -98,41 +78,23 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     }
     return null;
   });
-  const [saveTargetSearch, setSaveTargetSearch] = useState("");
-  const [dropdownLoading, setDropdownLoading] = useState(false);
+  const [googleFolder, setGoogleFolder] = useState({
+    id: initialData.googleFolderId,
+    name: initialData.googleFolderName,
+  });
 
-  // Custom format states
-  const [customFormats, setCustomFormats] = useState<CustomFormat[]>(initialData.customFormats);
-  const [showFormatForm, setShowFormatForm] = useState(false);
-  const [newFormatName, setNewFormatName] = useState("");
-  const [newFormatPrompt, setNewFormatPrompt] = useState("");
-  const [formatLoading, setFormatLoading] = useState(false);
-
-  // Push notification states
-  const [pushEnabled, setPushEnabled] = useState(initialData.pushEnabled);
-  const [pushSupported, setPushSupported] = useState(false);
-  const [pushLoading, setPushLoading] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
-
-  // UI State
-  const [openSection, setOpenSection] = useState<string | null>(null);
-
+  // Handle OAuth callback URL params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const isNotionJustConnected = params.get("notion") === "connected";
     const isGoogleJustConnected = params.get("google") === "connected";
 
     if (isNotionJustConnected || isGoogleJustConnected) {
-      // 연결 완료 후 URL 파라미터 제거
       window.history.replaceState({}, "", "/settings");
-      // DB 저장 완료 대기 후 데이터 가져오기
+
+      // Wait for DB save then refresh data
       setTimeout(async () => {
         await refreshData();
-        // Google 연결 직후 폴더 선택 드롭다운 자동으로 열기
-        if (isGoogleJustConnected) {
-          setShowGoogleFolderDropdown(true);
-          fetchGoogleFolders();
-        }
       }, 800);
     }
 
@@ -142,19 +104,7 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     }
   }, []);
 
-  // Auto-request permission if enabled on server but not granted locally
-  useEffect(() => {
-    if (pushEnabled && pushSupported && Notification.permission === "default") {
-      Notification.requestPermission().then((permission) => {
-        if (permission !== "granted") {
-          setPushEnabled(false);
-          handleTogglePush(false);
-        }
-      });
-    }
-  }, [pushEnabled, pushSupported]);
-
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     try {
       const [usageResponse, userResponse] = await Promise.all([
         fetch("/api/user/usage"),
@@ -169,8 +119,16 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
         limit: usageData.limit || 350,
       });
       setNotionConnected(!!userData.notion_access_token);
-      setNotionDatabaseId(userData.notion_database_id || null);
       setGoogleConnected(!!userData.google_access_token);
+
+      if (userData.notion_database_id && userData.notion_save_target_type) {
+        setSaveTarget({
+          type: userData.notion_save_target_type,
+          id: userData.notion_database_id,
+          title: userData.notion_save_target_title || "",
+        });
+      }
+
       setGoogleFolder({
         id: userData.google_folder_id || null,
         name: userData.google_folder_name || null,
@@ -178,993 +136,73 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     } catch (error) {
       console.error("Failed to refresh data:", error);
     }
-  };
+  }, []);
 
-  const fetchCustomFormats = async () => {
-    try {
-      const response = await fetch("/api/formats");
-      if (response.ok) {
-        const data = await response.json();
-        setCustomFormats(data.formats || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch custom formats:", error);
-    }
-  };
-
-  const handleTogglePush = async (enable: boolean) => {
-    // Optimistic Update
-    const previousState = pushEnabled;
-    setPushEnabled(enable);
-    setPushLoading(true);
-    setPushError(null);
-
-    try {
-      if (enable) {
-        // Request notification permission
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") {
-          setPushError(t.settings.pushNotification.permissionDenied);
-          setPushEnabled(previousState);
-          setPushLoading(false);
-          return;
-        }
-
-        // Get service worker registration
-        const registration = await navigator.serviceWorker.ready;
-
-        // Subscribe to push notifications
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-        });
-
-        // Save subscription to server
-        const response = await fetch("/api/user/push-subscription", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription: subscription.toJSON() }),
-        });
-
-        if (response.ok) {
-          // Enable push on server
-          await fetch("/api/user/push-enabled", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ enabled: true }),
-          });
-        } else {
-          throw new Error("Failed to save subscription");
-        }
-      } else {
-        // Disable push on server
-        await fetch("/api/user/push-enabled", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: false }),
-        });
-      }
-    } catch (error) {
-      console.error("Failed to toggle push notifications:", error);
-      setPushError(t.settings.pushNotification.notSupported);
-      setPushEnabled(previousState);
-    } finally {
-      setPushLoading(false);
-    }
-  };
-
-  const handleCreateFormat = async () => {
-    if (!newFormatName || !newFormatPrompt) return;
-
-    setFormatLoading(true);
-    try {
-      const response = await fetch("/api/formats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newFormatName,
-          prompt: newFormatPrompt,
-          is_default: false,
-        }),
-      });
-
-      if (response.ok) {
-        await fetchCustomFormats();
-        setShowFormatForm(false);
-        setNewFormatName("");
-        setNewFormatPrompt("");
-        alert(t.settings.formats.saveSuccess);
-      } else {
-        const data = await response.json();
-        alert(data.error || t.settings.formats.saveFailed);
-      }
-    } catch (error) {
-      console.error("Failed to create format:", error);
-      alert(t.settings.formats.saveFailed);
-    } finally {
-      setFormatLoading(false);
-    }
-  };
-
-  const handleDeleteFormat = async (id: string) => {
-    if (!confirm(t.settings.formats.deleteConfirm)) return;
-
-    try {
-      const response = await fetch(`/api/formats?id=${id}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        await fetchCustomFormats();
-        alert(t.settings.formats.deleteSuccess);
-      } else {
-        alert(t.settings.formats.deleteFailed);
-      }
-    } catch (error) {
-      console.error("Failed to delete format:", error);
-      alert(t.settings.formats.deleteFailed);
-    }
-  };
-
-  const handleSetDefaultFormat = async (id: string) => {
-    try {
-      const response = await fetch("/api/formats", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, is_default: true }),
-      });
-
-      if (response.ok) {
-        await fetchCustomFormats();
-      }
-    } catch (error) {
-      console.error("Failed to set default format:", error);
-    }
-  };
-
-  const handleConnect = (service: 'notion' | 'slack' | 'google') => {
-    if (service === 'notion') {
-      window.location.href = "/api/auth/notion?returnTo=/settings";
-    } else if (service === 'slack') {
-      window.location.href = "/api/auth/slack?returnTo=/settings";
-    } else if (service === 'google') {
-      window.location.href = "/api/auth/google?returnTo=/settings";
-    }
-  };
-
-  const handleDisconnectGoogle = async () => {
-    if (!confirm("Google 연결을 해제하시겠습니까?")) return;
-
-    try {
-      const response = await fetch("/api/user/google", {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        setGoogleConnected(false);
-        setGoogleFolder({ id: null, name: null });
-      }
-    } catch (error) {
-      console.error("Failed to disconnect Google:", error);
-    }
-  };
-
-  const fetchGoogleFolders = async () => {
-    setGoogleFolderLoading(true);
-    try {
-      const response = await fetch("/api/google/folders");
-      if (response.ok) {
-        const data = await response.json();
-        setGoogleFolders(data.folders || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch Google folders:", error);
-    } finally {
-      setGoogleFolderLoading(false);
-    }
-  };
-
-  const selectGoogleFolder = async (folderId: string | null, folderName: string | null) => {
-    try {
-      const response = await fetch("/api/user/google", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderId, folderName }),
-      });
-
-      if (response.ok) {
-        setGoogleFolder({ id: folderId, name: folderName });
-        setShowGoogleFolderDropdown(false);
-      }
-    } catch (error) {
-      console.error("Failed to set Google folder:", error);
-    }
-  };
-
-  const openGoogleFolderDropdown = () => {
-    setShowGoogleFolderDropdown(true);
-    fetchGoogleFolders();
-  };
-
-  const openSaveTargetDropdown = async () => {
-    setShowSaveTargetDropdown(true);
-    setDropdownLoading(true);
-    try {
-      const [dbResponse, pageResponse] = await Promise.all([
-        fetch("/api/notion/databases"),
-        fetch("/api/notion/pages"),
-      ]);
-
-      if (dbResponse.ok) {
-        const dbData = await dbResponse.json();
-        setDatabases(dbData.databases || []);
-      }
-
-      if (pageResponse.ok) {
-        const pageData = await pageResponse.json();
-        setPages(pageData.pages || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch Notion data:", error);
-    } finally {
-      setDropdownLoading(false);
-    }
-  };
-
-  const selectSaveTarget = async (target: NotionSaveTarget) => {
-    try {
-      const response = await fetch("/api/user/notion-database", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          databaseId: target.type === "database" ? target.id : null,
-          pageId: target.type === "page" ? target.id : null,
-          saveTargetType: target.type,
-          title: target.title,
-        }),
-      });
-
-      if (response.ok) {
-        setSaveTarget(target);
-        setShowSaveTargetDropdown(false);
-        setSaveTargetSearch("");
-      }
-    } catch (error) {
-      console.error("Failed to set save target:", error);
-    }
-  };
-
-  const handleDisconnectNotion = async () => {
-    if (!confirm("Notion 연결을 해제하시겠습니까?")) return;
-
-    try {
-      const response = await fetch("/api/user/notion-database", {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        setNotionConnected(false);
-        setSaveTarget(null);
-        setNotionDatabaseId(null);
-      }
-    } catch (error) {
-      console.error("Failed to disconnect Notion:", error);
-    }
-  };
-
-  const createNewPage = async (title: string) => {
-    if (!title.trim()) return;
-
-    setDropdownLoading(true);
-    try {
-      const response = await fetch("/api/notion/page", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim() }),
-      });
-
-      if (response.ok) {
-        const { pageId } = await response.json();
-        await selectSaveTarget({ type: "page", id: pageId, title: title.trim() });
-      } else {
-        alert("페이지 생성에 실패했습니다.");
-      }
-    } catch (error) {
-      console.error("Failed to create page:", error);
-      alert("페이지 생성에 실패했습니다.");
-    } finally {
-      setDropdownLoading(false);
-    }
-  };
-
-  const createNewDatabase = async (title: string) => {
-    if (!title.trim()) return;
-
-    setDropdownLoading(true);
-    try {
-      const pageResponse = await fetch("/api/notion/page", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim() }),
-      });
-
-      if (pageResponse.ok) {
-        const { pageId } = await pageResponse.json();
-
-        const dbResponse = await fetch("/api/notion/database", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pageId, title: title.trim() }),
-        });
-
-        if (dbResponse.ok) {
-          const { databaseId } = await dbResponse.json();
-          await selectSaveTarget({ type: "database", id: databaseId, title: title.trim() });
-        } else {
-          alert("데이터베이스 생성에 실패했습니다.");
-        }
-      } else {
-        alert("페이지 생성에 실패했습니다.");
-      }
-    } catch (error) {
-      console.error("Failed to create database:", error);
-      alert("데이터베이스 생성에 실패했습니다.");
-    } finally {
-      setDropdownLoading(false);
-    }
-  };
-
-  const filteredDatabases = databases.filter(db =>
-    db.title.toLowerCase().includes(saveTargetSearch.toLowerCase())
-  );
-  const filteredPages = pages.filter(page =>
-    page.title.toLowerCase().includes(saveTargetSearch.toLowerCase())
-  );
-
-  const searchTermMatchesExisting = saveTargetSearch.trim() !== "" &&
-    (filteredDatabases.some(db => db.title.toLowerCase() === saveTargetSearch.toLowerCase()) ||
-      filteredPages.some(page => page.title.toLowerCase() === saveTargetSearch.toLowerCase()));
-
-  const handleDeleteAllData = async () => {
-    const confirmed = confirm(t.settings.data.deleteConfirm);
-
-    if (!confirmed) return;
-
-    const doubleCheck = confirm(t.settings.data.deleteDoubleConfirm);
-
-    if (!doubleCheck) return;
-
-    try {
-      const response = await fetch("/api/user/data", {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        alert(t.settings.data.deleteSuccess);
-        router.push("/");
-      } else {
-        throw new Error("Failed to delete data");
-      }
-    } catch (error) {
-      console.error("Failed to delete data:", error);
-      alert(t.settings.data.deleteFailed);
-    }
-  };
-
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     try {
       await fetch("/api/auth/signout", { method: "POST" });
       router.push("/");
     } catch (error) {
       console.error("Failed to sign out:", error);
     }
-  };
+  }, [router]);
 
-  const toggleSection = (section: string) => {
-    setOpenSection(openSection === section ? null : section);
-  };
+  const toggleSection = useCallback((section: string) => {
+    setOpenSection((prev) => (prev === section ? null : section));
+  }, []);
+
+  const handleNotionDisconnect = useCallback(() => {
+    setNotionConnected(false);
+    setSaveTarget(null);
+  }, []);
+
+  const handleGoogleDisconnect = useCallback(() => {
+    setGoogleConnected(false);
+    setGoogleFolder({ id: null, name: null });
+  }, []);
 
   return (
     <div className="space-y-4">
       {/* 1. Account Info */}
-      <div className="card p-4">
-        <h2 className="text-base font-bold text-slate-900 mb-3">
-          {t.settings.account.title}
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">
-              {t.settings.account.email}
-            </label>
-            <div className="text-sm text-slate-900 font-medium">
-              {userEmail || t.settings.account.noEmail}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-2">
-              {t.settings.account.usage}
-            </label>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-700 font-medium">
-                  {usage.used} mins / {usage.limit} mins
-                </span>
-                <span className="text-slate-500">
-                  {Math.round((usage.used / usage.limit) * 100)}%
-                </span>
-              </div>
-              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-slate-900 transition-all duration-500"
-                  style={{ width: `${Math.min((usage.used / usage.limit) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <AccountSection email={initialData.email} usage={usage} />
 
       {/* 2. Integrations */}
-      <div className="card p-4">
-        <h2 className="text-base font-bold text-slate-900 mb-1">
-          {t.settings.integrations.title}
-        </h2>
-        <p className="text-xs text-slate-500 mb-3">
-          {t.settings.integrations.description}
-        </p>
-        <div className="space-y-3">
-          {/* Notion */}
-          <div className="p-3 border border-slate-200 rounded-xl">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-                📔
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.notion.title}</h3>
-                <p className="text-xs text-slate-500 truncate">
-                  {notionConnected
-                    ? saveTarget
-                      ? `저장 위치: ${saveTarget.title}`
-                      : t.settings.integrations.notion.selectDb
-                    : t.settings.integrations.notion.notConnected}
-                </p>
-              </div>
-              {notionConnected && (
-                <button
-                  onClick={handleDisconnectNotion}
-                  className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
-                >
-                  해지
-                </button>
-              )}
-            </div>
-
-            {notionConnected ? (
-              <div className="space-y-2">
-                <div className="relative">
-                  <button
-                    onClick={openSaveTargetDropdown}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-left text-sm font-medium text-slate-700 flex items-center justify-between min-h-[44px]"
-                  >
-                    <span className="truncate">
-                      {saveTarget ? `📁 ${saveTarget.title}` : "기본 저장 위치 선택"}
-                    </span>
-                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-
-                  {showSaveTargetDropdown && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-80 overflow-hidden">
-                      <div className="p-2 border-b border-slate-100">
-                        <input
-                          type="text"
-                          value={saveTargetSearch}
-                          onChange={(e) => setSaveTargetSearch(e.target.value)}
-                          placeholder="검색 또는 새로운 이름 입력..."
-                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
-                          autoFocus
-                        />
-                      </div>
-
-                      <div className="overflow-y-auto max-h-52">
-                        {dropdownLoading ? (
-                          <div className="flex justify-center py-4">
-                            <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-                          </div>
-                        ) : (
-                          <>
-                            {saveTargetSearch.trim() && !searchTermMatchesExisting && (
-                              <div className="border-b border-slate-100">
-                                <div className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50">
-                                  &quot;{saveTargetSearch}&quot; 신규 생성
-                                </div>
-                                <button
-                                  onClick={() => createNewPage(saveTargetSearch)}
-                                  className="w-full px-3 py-2.5 text-left text-sm hover:bg-blue-50 flex items-center gap-2 min-h-[44px] text-blue-700"
-                                >
-                                  <span>+ 📄</span>
-                                  <span>신규 페이지로 추가</span>
-                                </button>
-                                <button
-                                  onClick={() => createNewDatabase(saveTargetSearch)}
-                                  className="w-full px-3 py-2.5 text-left text-sm hover:bg-blue-50 flex items-center gap-2 min-h-[44px] text-blue-700"
-                                >
-                                  <span>+ 📊</span>
-                                  <span>신규 데이터베이스로 추가</span>
-                                </button>
-                              </div>
-                            )}
-
-                            {filteredDatabases.length > 0 ? (
-                              <div>
-                                <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
-                                  데이터베이스 (새 아이템으로 추가)
-                                </div>
-                                {filteredDatabases.map((db) => (
-                                  <button
-                                    key={db.id}
-                                    onClick={() => selectSaveTarget({ type: "database", id: db.id, title: db.title })}
-                                    className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
-                                  >
-                                    <span>📊</span>
-                                    <span className="truncate">{db.title}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            ) : null}
-
-                            {filteredPages.length > 0 && (
-                              <div>
-                                <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
-                                  페이지 (하위 페이지로 추가)
-                                </div>
-                                {filteredPages.map((page) => (
-                                  <button
-                                    key={page.id}
-                                    onClick={() => selectSaveTarget({ type: "page", id: page.id, title: page.title })}
-                                    className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
-                                  >
-                                    <span>📄</span>
-                                    <span className="truncate">{page.title}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {filteredDatabases.length === 0 && filteredPages.length === 0 && !saveTargetSearch.trim() && (
-                              <div className="px-3 py-4 text-center text-sm text-slate-500">
-                                연결된 페이지나 데이터베이스가 없습니다
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      <div className="p-2 border-t border-slate-100">
-                        <button
-                          onClick={() => {
-                            setShowSaveTargetDropdown(false);
-                            setSaveTargetSearch("");
-                          }}
-                          className="w-full py-2 text-sm text-slate-500 font-medium"
-                        >
-                          닫기
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleConnect('notion')}
-                className="w-full px-4 py-2.5 bg-slate-900 text-white rounded-lg font-bold text-sm min-h-[44px]"
-              >
-                {t.settings.integrations.notion.connect}
-              </button>
-            )}
-          </div>
-
-          {/* Google Docs */}
-          <div className="p-3 border border-slate-200 rounded-xl">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-                📄
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.google.title}</h3>
-                <p className="text-xs text-slate-500 truncate">
-                  {googleConnected
-                    ? googleFolder.name
-                      ? `저장 위치: ${googleFolder.name}`
-                      : t.settings.integrations.google.selectFolder
-                    : t.settings.integrations.google.notConnected}
-                </p>
-              </div>
-              {googleConnected && (
-                <button
-                  onClick={handleDisconnectGoogle}
-                  className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
-                >
-                  {t.settings.integrations.google.disconnect}
-                </button>
-              )}
-            </div>
-
-            {googleConnected ? (
-              <div className="space-y-2">
-                <div className="relative">
-                  <button
-                    onClick={openGoogleFolderDropdown}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-left text-sm font-medium text-slate-700 flex items-center justify-between min-h-[44px]"
-                  >
-                    <span className="truncate">
-                      {googleFolder.name ? `📁 ${googleFolder.name}` : t.settings.integrations.google.rootFolder}
-                    </span>
-                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-
-                  {showGoogleFolderDropdown && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-64 overflow-hidden">
-                      <div className="overflow-y-auto max-h-52">
-                        {googleFolderLoading ? (
-                          <div className="flex justify-center py-4">
-                            <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-                          </div>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => selectGoogleFolder(null, null)}
-                              className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px] border-b border-slate-100"
-                            >
-                              <span>🏠</span>
-                              <span>{t.settings.integrations.google.rootFolder}</span>
-                            </button>
-
-                            {googleFolders.map((folder) => (
-                              <button
-                                key={folder.id}
-                                onClick={() => selectGoogleFolder(folder.id, folder.name)}
-                                className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
-                              >
-                                <span>📁</span>
-                                <span className="truncate">{folder.name}</span>
-                              </button>
-                            ))}
-
-                            {googleFolders.length === 0 && (
-                              <div className="px-3 py-4 text-center text-sm text-slate-500">
-                                폴더가 없습니다
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      <div className="p-2 border-t border-slate-100">
-                        <button
-                          onClick={() => setShowGoogleFolderDropdown(false)}
-                          className="w-full py-2 text-sm text-slate-500 font-medium"
-                        >
-                          닫기
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleConnect('google')}
-                className="w-full px-4 py-2.5 bg-slate-900 text-white rounded-lg font-bold text-sm min-h-[44px]"
-              >
-                {t.settings.integrations.google.connect}
-              </button>
-            )}
-          </div>
-
-          {/* Slack */}
-          <div className="p-3 border border-slate-200 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-                💬
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.slack.title}</h3>
-                <p className="text-xs text-slate-500">{t.settings.integrations.slack.description}</p>
-              </div>
-              <button
-                onClick={() => handleConnect('slack')}
-                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[44px]"
-              >
-                {slackConnected ? t.settings.integrations.slack.reconnect : "연결"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <IntegrationsSection
+        notionConnected={notionConnected}
+        slackConnected={initialData.slackConnected}
+        googleConnected={googleConnected}
+        initialSaveTarget={saveTarget}
+        initialGoogleFolder={googleFolder}
+        onNotionDisconnect={handleNotionDisconnect}
+        onGoogleDisconnect={handleGoogleDisconnect}
+      />
 
       {/* 3. Custom Formats */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-bold text-slate-900">
-            {t.settings.formats.title}
-          </h2>
-          {customFormats.length < 3 && !showFormatForm && (
-            <button
-              onClick={() => setShowFormatForm(true)}
-              className="px-3 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-xs min-h-[36px]"
-            >
-              {t.settings.formats.addNew}
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          {/* Auto Format - Default */}
-          <div className="p-3 border border-slate-200 rounded-xl bg-gradient-to-r from-purple-50 to-blue-50">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-lg border border-slate-200">
-                🎯
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-sm">{t.settings.formats.auto}</h3>
-                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-600 text-[10px] font-bold rounded-full">
-                    {t.settings.formats.isDefault}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 truncate">{t.settings.formats.autoDesc}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Custom Formats List */}
-          {customFormats.map((format) => (
-            <div
-              key={format.id}
-              className={`p-3 border rounded-xl ${format.is_default
-                ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
-                : "border-slate-200"
-                }`}
-            >
-              <div className="flex items-start gap-2">
-                <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-lg">
-                  ✨
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-slate-900 text-sm">{format.name}</h3>
-                    {format.is_default && (
-                      <span className="px-1.5 py-0.5 bg-slate-900 text-white text-[10px] font-bold rounded-full">
-                        {t.settings.formats.isDefault}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{format.prompt}</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  {!format.is_default && (
-                    <button
-                      onClick={() => handleSetDefaultFormat(format.id)}
-                      className="px-2 py-1 text-[10px] font-medium text-slate-500 hover:bg-slate-100 rounded-lg min-h-[32px]"
-                    >
-                      기본값
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDeleteFormat(format.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg min-h-[32px] min-w-[32px]"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {/* New Format Form */}
-          {showFormatForm && (
-            <div className="p-3 border border-slate-200 rounded-xl bg-white space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  {t.settings.formats.formatName}
-                </label>
-                <input
-                  type="text"
-                  value={newFormatName}
-                  onChange={(e) => setNewFormatName(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                  placeholder={t.settings.formats.formatName}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  {t.settings.formats.formatPrompt}
-                </label>
-                <textarea
-                  value={newFormatPrompt}
-                  onChange={(e) => setNewFormatPrompt(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none resize-none"
-                  rows={3}
-                  placeholder={t.settings.formats.promptPlaceholder}
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setShowFormatForm(false);
-                    setNewFormatName("");
-                    setNewFormatPrompt("");
-                  }}
-                  className="flex-1 px-3 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium min-h-[44px]"
-                >
-                  {t.common.cancel}
-                </button>
-                <button
-                  onClick={handleCreateFormat}
-                  disabled={!newFormatName || !newFormatPrompt || formatLoading}
-                  className="flex-1 px-3 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:bg-slate-300 min-h-[44px]"
-                >
-                  {formatLoading ? t.common.loading : t.common.save}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {customFormats.length >= 3 && (
-            <p className="text-xs text-slate-500 text-center py-1">
-              {t.settings.formats.maxFormats}
-            </p>
-          )}
-        </div>
-      </div>
+      <CustomFormatsSection initialFormats={initialData.customFormats} />
 
       {/* 4. Invite Friends */}
       <InviteFriends />
 
       {/* 5. Push Notifications (Accordion) */}
       {pushSupported && (
-        <div className="card p-0 overflow-hidden">
-          <button
-            onClick={() => toggleSection("push")}
-            className="w-full bg-white flex items-center justify-between p-4"
-          >
-            <span className="font-bold text-slate-900 text-base">{t.settings.pushNotification.title}</span>
-            <svg
-              className={`w-5 h-5 text-slate-400 transition-transform ${openSection === "push" ? "rotate-180" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {openSection === "push" && (
-            <div className="p-4 border-t border-slate-100 animate-slide-down">
-              <div className="flex items-center justify-between p-3 border border-slate-200 rounded-xl">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-slate-900 text-sm">
-                    {pushEnabled ? t.settings.pushNotification.enabled : t.settings.pushNotification.disabled}
-                  </h3>
-                  <p className="text-xs text-slate-500">{t.settings.pushNotification.description}</p>
-                  {pushError && (
-                    <p className="text-xs text-red-500 mt-1">{pushError}</p>
-                  )}
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={pushEnabled}
-                    disabled={pushLoading}
-                    onChange={(e) => handleTogglePush(e.target.checked)}
-                  />
-                  <div className={`w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-900`}></div>
-                </label>
-              </div>
-            </div>
-          )}
-        </div>
+        <PushNotificationSection
+          initialEnabled={initialData.pushEnabled}
+          isOpen={openSection === "push"}
+          onToggle={() => toggleSection("push")}
+        />
       )}
 
       {/* 6. Data Management (Accordion) */}
-      <div className="card p-0 overflow-hidden">
-        <button
-          onClick={() => toggleSection("data")}
-          className="w-full bg-white flex items-center justify-between p-4"
-        >
-          <span className="font-bold text-slate-900 text-base">{t.settings.data.title}</span>
-          <svg
-            className={`w-5 h-5 text-slate-400 transition-transform ${openSection === "data" ? "rotate-180" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {openSection === "data" && (
-          <div className="p-4 border-t border-slate-100 animate-slide-down space-y-3">
-            <div className="flex items-center justify-between p-3 border border-slate-200 rounded-xl">
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-900 text-sm">{t.settings.data.autoDelete}</h3>
-                <p className="text-xs text-slate-500">{t.settings.data.autoDeleteDesc}</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={autoSave}
-                  onChange={(e) => setAutoSave(e.target.checked)}
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-900"></div>
-              </label>
-            </div>
-
-            <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
-              <h3 className="font-bold text-red-700 text-sm mb-1">{t.settings.data.danger}</h3>
-              <p className="text-xs text-red-600 mb-3">{t.settings.data.dangerDesc}</p>
-              <button
-                onClick={handleDeleteAllData}
-                className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-medium min-h-[44px]"
-              >
-                {t.settings.data.deleteAll}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <DataManagementSection
+        isOpen={openSection === "data"}
+        onToggle={() => toggleSection("data")}
+      />
 
       {/* 7. Language (Accordion) */}
-      <div className="card p-0 overflow-hidden">
-        <button
-          onClick={() => toggleSection("language")}
-          className="w-full bg-white flex items-center justify-between p-4"
-        >
-          <span className="font-bold text-slate-900 text-base">{t.settings.language.title}</span>
-          <svg
-            className={`w-5 h-5 text-slate-400 transition-transform ${openSection === "language" ? "rotate-180" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {openSection === "language" && (
-          <div className="p-4 border-t border-slate-100 animate-slide-down">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setLocale("ko")}
-                className={`flex-1 px-3 py-3 rounded-xl font-medium text-sm transition-all min-h-[44px] ${locale === "ko"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-700"
-                  }`}
-              >
-                한국어
-              </button>
-              <button
-                onClick={() => setLocale("en")}
-                className={`flex-1 px-3 py-3 rounded-xl font-medium text-sm transition-all min-h-[44px] ${locale === "en"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-700"
-                  }`}
-              >
-                English
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <LanguageSection
+        isOpen={openSection === "language"}
+        onToggle={() => toggleSection("language")}
+      />
 
       {/* 8. Sign Out */}
       <button

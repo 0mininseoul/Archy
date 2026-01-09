@@ -1,141 +1,96 @@
-import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
-import { NextRequest, NextResponse } from "next/server";
+import { withAuth, successResponse, errorResponse } from "@/lib/api";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 
-// GET - 내 레퍼럴 코드 조회
-export async function GET() {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+const REFERRAL_BONUS_MINUTES = 350;
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: userData, error } = await supabase
-      .from("users")
-      .select("referral_code, bonus_minutes")
-      .eq("id", user.id)
-      .single();
-
-    if (error) {
-      console.error("Failed to get referral code:", error);
-      return NextResponse.json(
-        { error: "Failed to get referral code" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      referralCode: userData.referral_code,
-      bonusMinutes: userData.bonus_minutes || 0,
-    });
-  } catch (error) {
-    console.error("Referral GET error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
+interface ReferralInfo {
+  referralCode: string | null;
+  bonusMinutes: number;
 }
 
-// POST - 레퍼럴 코드 입력 (보너스 지급)
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { referralCode } = await request.json();
-
-    if (!referralCode || referralCode.length !== 8) {
-      return NextResponse.json(
-        { error: "Invalid format", code: "INVALID_FORMAT" },
-        { status: 400 }
-      );
-    }
-
-    // 현재 유저 정보 확인
-    const { data: currentUser } = await supabase
-      .from("users")
-      .select("referred_by, referral_code")
-      .eq("id", user.id)
-      .single();
-
-    // 이미 레퍼럴 코드를 입력한 경우
-    if (currentUser?.referred_by) {
-      return NextResponse.json(
-        { error: "Referral code already used", code: "ALREADY_USED" },
-        { status: 400 }
-      );
-    }
-
-    // 자기 자신의 코드인 경우
-    if (currentUser?.referral_code === referralCode.toUpperCase()) {
-      return NextResponse.json(
-        { error: "Cannot use your own referral code", code: "SELF_REFERRAL" },
-        { status: 400 }
-      );
-    }
-
-    // 레퍼럴 코드로 추천인 찾기 (RLS 우회를 위해 admin client 사용)
-    const supabaseAdmin = createServiceRoleClient();
-    const { data: referrer, error: referrerError } = await supabaseAdmin
-      .from("users")
-      .select("id, bonus_minutes")
-      .eq("referral_code", referralCode.toUpperCase())
-      .single();
-
-    if (referrerError || !referrer) {
-      return NextResponse.json(
-        { error: "Referral code not found", code: "NOT_FOUND" },
-        { status: 404 }
-      );
-    }
-
-    // 트랜잭션처럼 처리 (순차적으로)
-    // 1. 현재 유저에게 보너스 지급 및 referred_by 설정
-    const { error: userUpdateError } = await supabase
-      .from("users")
-      .update({
-        referred_by: referrer.id,
-        bonus_minutes: 350,
-      })
-      .eq("id", user.id);
-
-    if (userUpdateError) {
-      console.error("Failed to update user:", userUpdateError);
-      return NextResponse.json(
-        { error: "Failed to apply referral" },
-        { status: 500 }
-      );
-    }
-
-    // 2. 추천인에게도 보너스 지급 (RLS 우회를 위해 admin client 사용)
-    const { error: referrerUpdateError } = await supabaseAdmin
-      .from("users")
-      .update({
-        bonus_minutes: (referrer.bonus_minutes || 0) + 350,
-      })
-      .eq("id", referrer.id);
-
-    if (referrerUpdateError) {
-      console.error("Failed to update referrer:", referrerUpdateError);
-      // 이미 현재 유저에게는 적용됐으므로 에러 반환하지 않음
-    }
-
-    return NextResponse.json({
-      success: true,
-      bonusMinutes: 350,
-      message: "Referral applied successfully! You and your friend both received 350 bonus minutes.",
-    });
-  } catch (error) {
-    console.error("Referral POST error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
+interface ReferralApplyResult {
+  bonusMinutes: number;
+  message: string;
 }
+
+// GET /api/user/referral - Get my referral code
+export const GET = withAuth<ReferralInfo>(async ({ user, supabase }) => {
+  const { data: userData, error } = await supabase
+    .from("users")
+    .select("referral_code, bonus_minutes")
+    .eq("id", user.id)
+    .single();
+
+  if (error) {
+    return errorResponse("Failed to get referral code", 500);
+  }
+
+  return successResponse({
+    referralCode: userData?.referral_code ?? null,
+    bonusMinutes: userData?.bonus_minutes || 0,
+  });
+});
+
+// POST /api/user/referral - Apply referral code (give bonus)
+export const POST = withAuth<ReferralApplyResult>(async ({ user, supabase, request }) => {
+  const { referralCode } = await request!.json();
+
+  if (!referralCode || referralCode.length !== 8) {
+    return errorResponse("Invalid format", 400);
+  }
+
+  // Check current user info
+  const { data: currentUser } = await supabase
+    .from("users")
+    .select("referred_by, referral_code")
+    .eq("id", user.id)
+    .single();
+
+  // Already used a referral code
+  if (currentUser?.referred_by) {
+    return errorResponse("Referral code already used", 400);
+  }
+
+  // Can't use own code
+  if (currentUser?.referral_code === referralCode.toUpperCase()) {
+    return errorResponse("Cannot use your own referral code", 400);
+  }
+
+  // Find referrer using admin client (bypass RLS)
+  const supabaseAdmin = createServiceRoleClient();
+  const { data: referrer, error: referrerError } = await supabaseAdmin
+    .from("users")
+    .select("id, bonus_minutes")
+    .eq("referral_code", referralCode.toUpperCase())
+    .single();
+
+  if (referrerError || !referrer) {
+    return errorResponse("Referral code not found", 404);
+  }
+
+  // Update current user with bonus and referred_by
+  const { error: userUpdateError } = await supabase
+    .from("users")
+    .update({
+      referred_by: referrer.id,
+      bonus_minutes: REFERRAL_BONUS_MINUTES,
+    })
+    .eq("id", user.id);
+
+  if (userUpdateError) {
+    return errorResponse("Failed to apply referral", 500);
+  }
+
+  // Give bonus to referrer (using admin client to bypass RLS)
+  await supabaseAdmin
+    .from("users")
+    .update({
+      bonus_minutes: (referrer.bonus_minutes || 0) + REFERRAL_BONUS_MINUTES,
+    })
+    .eq("id", referrer.id);
+
+  return successResponse({
+    bonusMinutes: REFERRAL_BONUS_MINUTES,
+    message: `Referral applied successfully! You and your friend both received ${REFERRAL_BONUS_MINUTES} bonus minutes.`,
+  });
+});
