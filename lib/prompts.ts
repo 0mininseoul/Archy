@@ -1,189 +1,45 @@
 import { formatKSTDate } from "./utils";
-import fs from "fs";
-import path from "path";
 
-// 마크다운 파일에서 포맷 템플릿 읽기
-function loadFormatTemplate(filename: string): string {
-  try {
-    const filePath = path.join(process.cwd(), "lib", "formats", filename);
-    return fs.readFileSync(filePath, "utf-8");
-  } catch (error) {
-    console.error(`Failed to load format template: ${filename}`, error);
-    return "";
-  }
-}
-
-// 미팅 포맷 프롬프트 생성
-function buildMeetingPrompt(transcript: string): string {
-  const template = loadFormatTemplate("meeting.md");
-  const date = formatKSTDate();
-
-  return `당신은 전문 회의록 작성자입니다. 다음 회의 녹취록을 보고 구조화된 회의록을 작성해주세요.
-
-## 녹취록
-${transcript}
-
-## 작성 지침
-1. 회의 정보(일시, 참석자, 목적)를 추출하세요
-2. 주요 안건과 논의 내용을 정리하세요
-3. 결정 사항을 명확히 기록하세요
-4. **액션 아이템은 반드시 담당자와 기한을 포함해서 작성하세요** (이것이 가장 중요합니다)
-5. 다음 회의 일정이 언급되었다면 기록하세요
-6. 각 섹션 제목 앞에 적절한 이모지를 사용하세요
-
-## 중요: 출력 형식
-반드시 아래 형식으로 응답해주세요:
-
-[TITLE]
-(회의 내용을 요약하는 간결한 제목, 예: "마케팅 전략 회의", "프로젝트 킥오프 미팅")
-[/TITLE]
-[CONTENT]
-(아래 템플릿을 참고하여 작성된 회의록)
-[/CONTENT]
-
-## 템플릿 참고
-${template.replace(/\{\{date\}\}/g, date)}`;
-}
-
-// 강의 포맷 프롬프트 생성
-function buildLecturePrompt(transcript: string): string {
-  const template = loadFormatTemplate("lecture.md");
-  const date = formatKSTDate();
-
-  return `당신은 전문 강의 노트 작성자입니다. 다음 강의 녹취록을 보고 학습에 최적화된 강의 노트를 작성해주세요.
-
-## 녹취록
-${transcript}
-
-## 작성 지침
-1. 강의 정보(주제, 강사)를 추출하세요
-2. 학습 목표를 정리하세요
-3. 내용을 논리적인 섹션으로 구분하세요
-4. 핵심 개념을 표로 정리하세요
-5. 가장 중요한 요점 5개를 정리하세요
-6. 각 섹션 제목 앞에 적절한 이모지를 사용하세요
-
-## 중요: 출력 형식
-반드시 아래 형식으로 응답해주세요:
-
-[TITLE]
-(강의 내용을 요약하는 간결한 제목, 예: "React 기초 강의", "마케팅 전략 세미나")
-[/TITLE]
-[CONTENT]
-(아래 템플릿을 참고하여 작성된 강의 노트)
-[/CONTENT]
-
-## 템플릿 참고
-${template.replace(/\{\{date\}\}/g, date)}`;
-}
-
-// 콘텐츠 유형 판단을 위한 프롬프트
-export const CONTENT_TYPE_DETECTION_PROMPT = `다음 녹취록의 내용을 분석하여 어떤 유형의 콘텐츠인지 판단해주세요.
+// Universal Prompt for flexible summarization
+const UNIVERSAL_PROMPT = `당신은 전문 에디터이자 콘텐츠 요약 전문가입니다. 
+주어진 녹취록을 분석하여 핵심 내용을 파악하고, 읽기 쉬운 마크다운 문서로 정리해주세요.
 
 ## 녹취록
 {{transcript}}
 
-## 판단 기준
-- **meeting**: 여러 명이 참여하여 안건을 논의하고, 결정 사항이나 액션 아이템이 있는 경우
-  - 키워드: 회의, 미팅, 논의, 결정, 담당자, 다음 주까지, 진행 상황, 보고, 의견
-  - 특징: 대화 참여자가 2명 이상, 질문과 답변이 오가는 형태, 업무 관련 논의
+## 필수 요구사항
+다음 규칙을 엄격히 준수하세요:
 
-- **lecture**: 한 명이 주로 설명하고, 학습이나 정보 전달이 목적인 경우
-  - 키워드: 수업, 강의, 오늘 배울, 정리하면, 예를 들어, 중요한 점, 개념, 이론
-  - 특징: 일방향 설명이 주를 이룸, 교육적 내용, 개념 설명
+1. **제목**: 문서의 내용을 한 줄로 명확하게 요약하는 제목을 작성하세요.
+2. **3줄 핵심 요약**: 제목 바로 아래에, 전체 내용을 관통하는 **가장 중요한 3가지 핵심 내용**을 요약해서 적어주세요. 이 부분은 반드시 있어야 합니다.
+3. **유연한 본문 구성**: 3줄 요약 이후의 내용은 녹취록의 성격(회의, 강의, 인터뷰, 일반 대화 등)에 따라 자유롭게 구성하세요.
+   - **회의라면**: 안건, 결정 사항, 액션 아이템(담당자/기한 포함) 위주로 정리.
+   - **강의라면**: 학습 목표, 주요 개념, 핵심 요점 위주로 정리.
+   - **단순 대화라면**: 주요 대화 흐름이나 결론 위주로 정리.
+   - **억지스러운 구조화 금지**: 내용이 없는데 억지로 '다음 회의'나 '액션 아이템' 섹션을 만들지 마세요.
 
-## 응답 형식
-반드시 다음 중 하나만 응답하세요 (따옴표나 다른 텍스트 없이):
-meeting
-lecture`;
-
-// 레거시 포맷 (하위 호환성 유지) - 동적으로 생성
-export const FORMAT_PROMPTS = {
-  meeting: "meeting", // placeholder - 실제로는 buildMeetingPrompt 사용
-  interview: `다음 인터뷰 녹취록을 Q&A 형식으로 정리해주세요:
-
-{{transcript}}
-
-## 중요: 출력 형식
-반드시 아래 형식으로 응답해주세요:
+## 출력 형식
+반드시 아래 형식을 지켜주세요:
 
 [TITLE]
-(인터뷰 내용을 요약하는 간결한 제목, 예: "신입사원 온보딩 인터뷰", "CEO 인터뷰")
+(제목)
 [/TITLE]
 [CONTENT]
-(아래 템플릿을 참고하여 작성된 인터뷰 정리)
-[/CONTENT]
+### 📌 3줄 핵심 요약
+- (핵심 1)
+- (핵심 2)
+- (핵심 3)
 
-## 템플릿:
+(이후 내용은 자유롭게 마크다운으로 작성... 적절한 이모지 사용 권장)
+[/CONTENT]`;
 
-# 🎙️ 인터뷰 정리
-
-## 📅 인터뷰 개요
-- **일시**: {{date}}
-- **인터뷰이**: [추출]
-- **주제**: [추출]
-
----
-
-## 💬 질문과 답변
-
-### ❓ Q1. [질문]
-> **A.** [답변 요약]
-
-### ❓ Q2. [질문]
-> **A.** [답변 요약]
-
----
-
-## 💡 핵심 인사이트
-- [인사이트 1]
-- [인사이트 2]
-- [인사이트 3]`,
-
-  lecture: "lecture", // placeholder - 실제로는 buildLecturePrompt 사용
-};
-
-export type ContentType = "meeting" | "lecture";
-
-export function buildPrompt(
-  format: keyof typeof FORMAT_PROMPTS,
-  transcript: string,
-  customPrompt?: string
-): string {
-  // 커스텀 프롬프트가 있으면 그대로 사용
-  if (customPrompt) {
-    const date = formatKSTDate();
-    return customPrompt
-      .replace(/\{\{transcript\}\}/g, transcript)
-      .replace(/\{\{date\}\}/g, date);
-  }
-
-  // 포맷에 따라 마크다운 파일 기반 프롬프트 생성
-  if (format === "meeting") {
-    return buildMeetingPrompt(transcript);
-  } else if (format === "lecture") {
-    return buildLecturePrompt(transcript);
-  }
-
-  // 인터뷰 등 기타 포맷
-  const template = FORMAT_PROMPTS[format];
+export function buildUniversalPrompt(transcript: string): string {
   const date = formatKSTDate();
-  return template
-    .replace(/\{\{transcript\}\}/g, transcript)
-    .replace(/\{\{date\}\}/g, date);
+  return UNIVERSAL_PROMPT
+    .replace("{{transcript}}", transcript)
+    .replace("{{date}}", date); // date might not be used in the new prompt but kept for future potential use or if we add it back. Currently the prompt text doesn't have {{date}}, but good to keep the util import.
 }
 
-export function buildDetectionPrompt(transcript: string): string {
-  return CONTENT_TYPE_DETECTION_PROMPT.replace("{{transcript}}", transcript);
-}
+// Deprecated: Kept types for compatibility if needed elsewhere, or can be removed if fully refactored.
+// For now, removing unused types/exports as per plan.
 
-export function buildFormatPrompt(
-  contentType: ContentType,
-  transcript: string
-): string {
-  if (contentType === "meeting") {
-    return buildMeetingPrompt(transcript);
-  } else {
-    return buildLecturePrompt(transcript);
-  }
-}

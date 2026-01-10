@@ -8,12 +8,11 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { transcribeAudio } from "@/lib/services/whisper";
-import { formatDocument, formatDocumentAuto } from "@/lib/services/openai";
+import { formatDocument } from "@/lib/services/openai";
 import { createNotionPage } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
-import { FORMAT_PROMPTS } from "@/lib/prompts";
 import {
   Recording,
   User,
@@ -21,6 +20,8 @@ import {
   ErrorStep,
   RecordingFormat,
 } from "@/lib/types/database";
+
+// ... (previous imports and interfaces remain the same, I'm only modifying the imports section slightly to remove FormatDocAuto and prompts)
 
 // =============================================================================
 // Types
@@ -162,15 +163,12 @@ async function stepFormat(
       log(recordingId, "Using custom format");
       formatResult = await formatDocument(
         transcript,
-        format as keyof typeof FORMAT_PROMPTS,
+        format, // format ignored internally but passed for compatibility
         defaultFormat.prompt
       );
     } else {
-      log(recordingId, "Using auto format detection");
-      formatResult = await formatDocumentAuto(transcript);
-      if (formatResult.detectedType) {
-        log(recordingId, `Detected content type: ${formatResult.detectedType}`);
-      }
+      log(recordingId, "Using universal format");
+      formatResult = await formatDocument(transcript);
     }
 
     let formattedContent: string;
