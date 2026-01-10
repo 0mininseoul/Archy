@@ -240,7 +240,7 @@ async function stepNotionSave(
       userData.notion_database_id,
       title,
       content,
-      format as keyof typeof FORMAT_PROMPTS,
+      format,
       duration,
       userData.notion_save_target_type || "database"
     );
