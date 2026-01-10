@@ -45,8 +45,6 @@ export function HistoryClient({ initialRecordings, pushEnabled, slackConnected }
   }, [recordings]);
 
   const handleHideRecording = useCallback(async (id: string) => {
-    if (!confirm("이 녹음을 삭제하시겠습니까?")) return;
-
     try {
       const response = await fetch(`/api/recordings/${id}`, {
         method: "PATCH",

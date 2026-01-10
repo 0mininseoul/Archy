@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Recording } from "@/types";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import Image from "next/image";
 
 // =============================================================================
 // Types
