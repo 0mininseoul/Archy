@@ -161,19 +161,134 @@ async function createNotionPageWithTitleOnly(
   return `https://notion.so/${data.id.replace(/-/g, "")}`;
 }
 
+// Helper to parse inline formatting (currently only bold)
+function parseRichText(text: string): any[] {
+  const parts: any[] = [];
+  let currentText = "";
+  let isBold = false;
+  let i = 0;
+
+  while (i < text.length) {
+    if (text.slice(i, i + 2) === "**") {
+      if (currentText) {
+        parts.push({
+          text: { content: currentText },
+          annotations: { bold: isBold },
+        });
+        currentText = "";
+      }
+      isBold = !isBold;
+      i += 2;
+    } else {
+      currentText += text[i];
+      i++;
+    }
+  }
+
+  if (currentText) {
+    parts.push({
+      text: { content: currentText },
+      annotations: { bold: isBold },
+    });
+  }
+
+  return parts.length > 0 ? parts : [{ text: { content: text } }];
+}
+
 function convertMarkdownToBlocks(markdown: string): any[] {
   const lines = markdown.split("\n");
   const blocks: any[] = [];
+  let inTable = false;
+  let tableRows: any[] = [];
 
-  for (const line of lines) {
-    if (!line.trim()) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim(); // trim to handle indentation
+
+    // Skip empty lines unless they are breaking a table
+    if (!line) {
+      if (inTable) {
+        // End of table
+        if (tableRows.length > 0) {
+          blocks.push({
+            type: "table",
+            table: {
+              table_width: 3, // Default, will be updated based on first row
+              has_column_header: true,
+              has_row_header: false,
+              children: tableRows
+            }
+          });
+        }
+        inTable = false;
+        tableRows = [];
+      }
+      continue;
+    }
+
+    // Table detection
+    if (line.startsWith("|")) {
+      // Table separator row (ignore |---|)
+      if (line.match(/^\|[\s-]+\|/)) {
+        continue;
+      }
+
+      const cells = line
+        .split("|")
+        .filter((cell, index, arr) => {
+          // Filter out the empty strings from split at start/end if they exist
+          // Usually | a | b | splits to ["", " a ", " b ", ""]
+          return index !== 0 && index !== arr.length - 1;
+        })
+        .map(cell => ({
+          type: "text",
+          text: { content: cell.trim() },
+          annotations: { bold: false } // Simple text for table cells for now
+        }));
+
+      if (cells.length > 0) {
+        const rowBlock = {
+          type: "table_row",
+          table_row: {
+            cells: cells.map(cell => [cell])
+          }
+        };
+
+        if (!inTable) {
+          inTable = true;
+          // Update table width based on first row
+          // We can't set width here easily because we need to wrap it in the table block later
+          // But Notion API requires table_width at creation. 
+          // We'll set it when pushing the table block.
+        }
+        tableRows.push(rowBlock);
+      }
+      continue;
+    }
+
+    // If we were in a table but now line doesn't start with |, table ended
+    if (inTable) {
+      if (tableRows.length > 0) {
+        blocks.push({
+          type: "table",
+          table: {
+            table_width: tableRows[0].table_row.cells.length,
+            has_column_header: true,
+            has_row_header: false,
+            children: tableRows
+          }
+        });
+      }
+      inTable = false;
+      tableRows = [];
+    }
+
 
     // Heading 2
     if (line.startsWith("## ")) {
       blocks.push({
         type: "heading_2",
         heading_2: {
-          rich_text: [{ text: { content: line.replace("## ", "") } }],
+          rich_text: parseRichText(line.replace("## ", "")),
         },
       });
     }
@@ -182,7 +297,7 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       blocks.push({
         type: "heading_3",
         heading_3: {
-          rich_text: [{ text: { content: line.replace("### ", "") } }],
+          rich_text: parseRichText(line.replace("### ", "")),
         },
       });
     }
@@ -191,7 +306,7 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       blocks.push({
         type: "bulleted_list_item",
         bulleted_list_item: {
-          rich_text: [{ text: { content: line.replace("- ", "") } }],
+          rich_text: parseRichText(line.replace("- ", "")),
         },
       });
     }
@@ -200,7 +315,7 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       blocks.push({
         type: "numbered_list_item",
         numbered_list_item: {
-          rich_text: [{ text: { content: line.replace(/^\d+\. /, "") } }],
+          rich_text: parseRichText(line.replace(/^\d+\. /, "")),
         },
       });
     }
@@ -210,13 +325,7 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       blocks.push({
         type: "to_do",
         to_do: {
-          rich_text: [
-            {
-              text: {
-                content: line.replace(/^- \[(x| )\] /, ""),
-              },
-            },
-          ],
+          rich_text: parseRichText(line.replace(/^- \[(x| )\] /, "")),
           checked,
         },
       });
@@ -226,10 +335,23 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       blocks.push({
         type: "paragraph",
         paragraph: {
-          rich_text: [{ text: { content: line } }],
+          rich_text: parseRichText(line),
         },
       });
     }
+  }
+
+  // Flush remaining table
+  if (inTable && tableRows.length > 0) {
+    blocks.push({
+      type: "table",
+      table: {
+        table_width: tableRows[0].table_row.cells.length,
+        has_column_header: true,
+        has_row_header: false,
+        children: tableRows
+      }
+    });
   }
 
   return blocks;

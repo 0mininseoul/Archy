@@ -90,6 +90,9 @@ export async function getGoogleDriveFolders(accessToken: string): Promise<Array<
 /**
  * Google Docs 문서 생성
  */
+/**
+ * Google Docs 문서 생성
+ */
 export async function createGoogleDoc(
   accessToken: string,
   title: string,
@@ -121,35 +124,31 @@ export async function createGoogleDoc(
   const documentId = doc.documentId;
   console.log("[Google] Created doc:", documentId);
 
-  // 2. 문서에 내용 추가
-  const updateResponse = await fetch(
-    `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        requests: [
-          {
-            insertText: {
-              location: { index: 1 },
-              text: content,
-            },
-          },
-        ],
-      }),
-    }
-  );
+  // 2. 마크다운 파싱 및 배치 요청 생성
+  const requests = parseMarkdownToRequests(content); // No starting index needed for empty doc (starts at 1)
 
-  if (!updateResponse.ok) {
-    const error = await updateResponse.text();
-    console.error("[Google] Failed to update doc:", error);
-    // 문서는 생성됐으므로 URL 반환
+  // 3. 배치 업데이트 실행
+  if (requests.length > 0) {
+    const updateResponse = await fetch(
+      `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requests }),
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const error = await updateResponse.text();
+      console.error("[Google] Failed to update doc:", error);
+      // 문서는 생성됐으므로 URL 반환 (내용은 없을 수 있음)
+    }
   }
 
-  // 3. 폴더로 이동 (지정된 경우)
+  // 4. 폴더로 이동 (지정된 경우)
   if (folderId) {
     try {
       // 먼저 현재 부모 폴더 조회
@@ -195,32 +194,168 @@ export async function createGoogleDoc(
 }
 
 /**
- * Markdown을 Google Docs 형식의 텍스트로 변환
- * (간단한 변환 - 마크다운 기호 제거)
+ * 마크다운을 Google Docs API 요청으로 변환
+ */
+function parseMarkdownToRequests(markdown: string): any[] {
+  const requests: any[] = [];
+  let currentIndex = 1; // Google Docs starts at index 1
+
+  const lines = markdown.split("\n");
+
+  // First pass: Construct the full text insertion
+  // We insert line by line to track indices for styling
+
+  // Actually, inserting one big block is efficient but makes styling harder to map if we strip chars.
+  // Strategy: Parse line, clean it, insert it, apply style to the inserted range.
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let textToInsert = line;
+    let styleType = "NORMAL_TEXT";
+    let isList = false;
+    let listType = "BULLET"; // Default
+
+    // 1. Identify Line Type & Strip Markers
+    if (line.startsWith("## ")) {
+      styleType = "HEADING_2";
+      textToInsert = line.substring(3);
+    } else if (line.startsWith("### ")) {
+      styleType = "HEADING_3";
+      textToInsert = line.substring(4);
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      isList = true;
+      textToInsert = line.substring(2);
+    } else if (/^\d+\. /.test(line)) {
+      isList = true;
+      listType = "NUMBERED"; // Simplification: Usage same as bullet
+      textToInsert = line.replace(/^\d+\. /, "");
+    } else if (line.startsWith("- [ ] ") || line.startsWith("- [x] ")) {
+      // Checkboxes as bullets for now
+      isList = true;
+      textToInsert = line.replace(/^- \[(x| )\] /, (match) => match.includes("x") ? "[v] " : "[ ] ");
+    }
+
+    // Handle Table Separators (Simple skip)
+    if (line.match(/^\|[\s-]+\|/)) continue;
+
+    // Handle Table Rows (Simple conversion to text with spaces)
+    if (line.startsWith("|")) {
+      textToInsert = line.replace(/\|/g, " | ").trim(); // Naive table handling
+    }
+
+    // Newline at the end
+    textToInsert += "\n";
+
+    // 2. Handle Inline Bold (**text**) within this line
+    // We need to insert text in chunks to apply styles correctly?
+    // Or insert full line then apply styles to ranges? -> Ranges is better.
+
+    // Clean inline formatting markers from textToInsert for final output?
+    // If we remove **, indices shift. 
+    // Let's Parse inline bold first to get ranges relative to the CLEANED string.
+
+    const { cleanText, boldRanges } = parseInlineBold(textToInsert);
+
+    // 3. Insert Text
+    requests.push({
+      insertText: {
+        text: cleanText,
+        location: { index: currentIndex },
+      },
+    });
+
+    const startIndex = currentIndex;
+    const endIndex = currentIndex + cleanText.length;
+
+    // 4. Apply Paragraph Style (Heading)
+    if (styleType !== "NORMAL_TEXT") {
+      requests.push({
+        updateParagraphStyle: {
+          range: {
+            startIndex: startIndex,
+            endIndex: endIndex, // Style applies to the whole paragraph including newline
+          },
+          paragraphStyle: {
+            namedStyleType: styleType,
+          },
+          fields: "namedStyleType",
+        },
+      });
+    }
+
+    // 5. Apply List Style
+    if (isList) {
+      requests.push({
+        createParagraphBullets: {
+          range: {
+            startIndex: startIndex,
+            endIndex: endIndex,
+          },
+          bulletPreset: listType === "NUMBERED" ? "NUMBERED_DECIMAL_ALPHA_ROMAN" : "BULLET_DISC_CIRCLE_SQUARE",
+        },
+      });
+    }
+
+    // 6. Apply Inline Bold Styles
+    for (const range of boldRanges) {
+      requests.push({
+        updateTextStyle: {
+          range: {
+            startIndex: startIndex + range.start,
+            endIndex: startIndex + range.end
+          },
+          textStyle: {
+            bold: true
+          },
+          fields: "bold"
+        }
+      });
+    }
+
+    // Update Index
+    currentIndex += cleanText.length;
+  }
+
+  return requests;
+}
+
+/**
+ * Helper: Parse **text** and return cleaned text + bold ranges
+ */
+function parseInlineBold(text: string): { cleanText: string, boldRanges: { start: number, end: number }[] } {
+  let cleanText = "";
+  const boldRanges: { start: number, end: number }[] = [];
+
+  let i = 0;
+  let isBold = false;
+  let boldStart = 0;
+
+  while (i < text.length) {
+    if (text.slice(i, i + 2) === "**") {
+      if (isBold) {
+        // End bold
+        isBold = false;
+        boldRanges.push({ start: boldStart, end: cleanText.length });
+      } else {
+        // Start bold
+        isBold = true;
+        boldStart = cleanText.length;
+      }
+      i += 2; // Skip **
+    } else {
+      cleanText += text[i];
+      i++;
+    }
+  }
+
+  return { cleanText, boldRanges };
+}
+
+
+/**
+ * Deprecated: Old plaintext converter
  */
 export function convertMarkdownToPlainText(markdown: string): string {
-  return markdown
-    // 헤더 기호 제거
-    .replace(/^#{1,6}\s+/gm, "")
-    // 볼드/이탤릭 기호 제거
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/_([^_]+)_/g, "$1")
-    // 링크를 텍스트로 변환
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // 코드 블록 기호 제거
-    .replace(/```[^\n]*\n/g, "")
-    .replace(/```/g, "")
-    .replace(/`([^`]+)`/g, "$1")
-    // 인용 기호 제거
-    .replace(/^>\s+/gm, "")
-    // 리스트 기호 정리
-    .replace(/^[-*+]\s+/gm, "• ")
-    // 수평선 제거
-    .replace(/^---+$/gm, "")
-    // 테이블 구분선 제거 (간단한 처리)
-    .replace(/^\|[-:|\s]+\|$/gm, "")
-    // 연속 빈 줄 정리
-    .replace(/\n{3,}/g, "\n\n");
+  // Keep for compatibility if needed elsewhere, but createGoogleDoc uses parseMarkdownToRequests now
+  return markdown.replace(/\*\*/g, "");
 }

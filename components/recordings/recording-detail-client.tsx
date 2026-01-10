@@ -3,6 +3,8 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Recording } from "@/types";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -80,118 +82,70 @@ export function RecordingDetailClient({ recording }: RecordingDetailClientProps)
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Navbar */}
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div className="container-custom h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/history")}
-              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-all"
-              title="Back"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <div className="flex items-center gap-2">
-              <Image
-                src="/icons/archy logo.png"
-                alt="Archy"
-                width={32}
-                height={32}
-                className="rounded-lg"
-              />
-              <span className="text-xl font-bold text-slate-900">Archy</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-all"
-              title="Dashboard"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => router.push("/settings")}
-              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full transition-all"
-              title="Settings"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-          </div>
+    <div className="app-container">
+      {/* Header */}
+      <header className="app-header max-w-[430px] mx-auto w-full left-0 right-0">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.back()}
+            className="p-2 -ml-2 text-slate-500 hover:text-slate-900 rounded-full transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h1 className="text-lg font-bold text-slate-900 truncate max-w-[200px]">{recording.title}</h1>
         </div>
-      </nav>
+
+        {recording.notion_page_url && (
+          <a
+            href={recording.notion_page_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 text-slate-500 hover:text-slate-900 rounded-full transition-colors"
+            title="Notion에서 보기"
+          >
+            <Image
+              src="/icons/notion-logo.svg"
+              alt="Notion"
+              width={20}
+              height={20}
+              className="opacity-60 hover:opacity-100 transition-opacity"
+            />
+          </a>
+        )}
+      </header>
 
       {/* Main Content */}
-      <main className="container-custom py-8 flex-1">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="card p-6 mb-6">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div className="flex-1">
-                <h1 className="text-2xl font-bold text-slate-900 mb-2">{recording.title}</h1>
-                <div className="flex items-center gap-3 text-sm text-slate-500">
-                  <span className="flex items-center gap-1.5">
-                    {getStatusIcon(recording.status)} {getStatusText(recording.status)}
-                  </span>
-                  <span className="w-1 h-1 rounded-full bg-slate-300" />
-                  <span>{formatDurationMinutes(recording.duration_seconds)}</span>
-                  <span className="w-1 h-1 rounded-full bg-slate-300" />
-                  <span>{new Date(recording.created_at).toLocaleDateString("ko-KR")}</span>
-                </div>
-              </div>
-              {recording.notion_page_url && (
-                <a
-                  href={recording.notion_page_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all"
-                >
-                  <span>Notion에서 보기</span>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                    />
-                  </svg>
-                </a>
-              )}
+      <main className="app-main bg-slate-50">
+        <div className="px-mobile py-4 space-y-4">
+
+          {/* Info Card */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
+              <span className="flex items-center gap-1">
+                {getStatusIcon(recording.status)} {getStatusText(recording.status)}
+              </span>
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span>{formatDurationMinutes(recording.duration_seconds)}</span>
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span>{new Date(recording.created_at).toLocaleDateString("ko-KR")}</span>
             </div>
-            <p className="mt-4 text-xs text-slate-400">
+            <p className="text-[11px] text-slate-400">
               * 오디오 파일은 저장되지 않으며, 텍스트 변환 후 즉시 폐기됩니다.
             </p>
           </div>
 
           {/* Content Tabs */}
           {(recording.transcript || recording.formatted_content) && (
-            <div className="mb-4">
-              <div className="flex gap-2 border-b border-slate-200">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="flex border-b border-slate-100">
                 {recording.formatted_content && (
                   <button
                     onClick={() => setViewMode("formatted")}
-                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === "formatted"
-                        ? "border-slate-900 text-slate-900"
-                        : "border-transparent text-slate-500 hover:text-slate-700"
+                    className={`flex-1 py-3 text-sm font-medium transition-colors ${viewMode === "formatted"
+                        ? "bg-slate-50 text-slate-900 border-b-2 border-slate-900"
+                        : "text-slate-400 hover:text-slate-600"
                       }`}
                   >
                     정리된 문서
@@ -200,89 +154,76 @@ export function RecordingDetailClient({ recording }: RecordingDetailClientProps)
                 {recording.transcript && (
                   <button
                     onClick={() => setViewMode("transcript")}
-                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === "transcript"
-                        ? "border-slate-900 text-slate-900"
-                        : "border-transparent text-slate-500 hover:text-slate-700"
+                    className={`flex-1 py-3 text-sm font-medium transition-colors ${viewMode === "transcript"
+                        ? "bg-slate-50 text-slate-900 border-b-2 border-slate-900"
+                        : "text-slate-400 hover:text-slate-600"
                       }`}
                   >
                     원본 전사본
                   </button>
                 )}
               </div>
-            </div>
-          )}
 
-          {/* Complete Failure */}
-          {recording.status === "failed" && !recording.transcript && !recording.formatted_content && (
-            <div className="card p-6">
-              <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
-                <h3 className="text-red-600 font-semibold mb-2">처리 실패</h3>
-                <p className="text-red-700 text-sm">
-                  {getUserFriendlyErrorMessage(recording.error_step, recording.error_message)}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Content */}
-          {(recording.transcript || recording.formatted_content) && (
-            <div className="card p-6">
-              {recording.error_step === "notion" && (
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-                  <p className="text-sm text-amber-700">
+              <div className="p-4 min-h-[300px]">
+                {/* Error Message */}
+                {recording.error_step && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600">
                     {getUserFriendlyErrorMessage(recording.error_step, recording.error_message)}
-                  </p>
-                </div>
-              )}
+                  </div>
+                )}
 
-              {viewMode === "formatted" && recording.formatted_content ? (
-                <div>
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-slate-900">정리된 문서</h3>
-                    <button
-                      onClick={() => handleCopy(recording.formatted_content || "")}
-                      className="text-sm text-slate-500 hover:text-slate-700"
-                    >
-                      복사
-                    </button>
+                {/* Main Content Area */}
+                {viewMode === "formatted" && recording.formatted_content ? (
+                  <div>
+                    <div className="flex justify-end mb-2">
+                      <button
+                        onClick={() => handleCopy(recording.formatted_content || "")}
+                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        복사
+                      </button>
+                    </div>
+                    <div className="prose prose-sm prose-slate max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {recording.formatted_content}
+                      </ReactMarkdown>
+                    </div>
                   </div>
-                  <div className="prose max-w-none">
-                    <pre className="whitespace-pre-wrap text-sm text-slate-700 font-sans bg-slate-50 p-4 rounded-lg border border-slate-200">
-                      {recording.formatted_content}
-                    </pre>
+                ) : viewMode === "transcript" && recording.transcript ? (
+                  <div>
+                    <div className="flex justify-end mb-2">
+                      <button
+                        onClick={() => handleCopy(recording.transcript || "")}
+                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        복사
+                      </button>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-600 leading-relaxed">
+                      {recording.transcript}
+                    </p>
                   </div>
-                </div>
-              ) : viewMode === "transcript" && recording.transcript ? (
-                <div>
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-slate-900">원본 전사본</h3>
-                    <button
-                      onClick={() => handleCopy(recording.transcript || "")}
-                      className="text-sm text-slate-500 hover:text-slate-700"
-                    >
-                      복사
-                    </button>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm">
+                    <p>콘텐츠를 불러올 수 없습니다.</p>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <pre className="whitespace-pre-wrap text-sm text-slate-700 font-sans">{recording.transcript}</pre>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-slate-500">콘텐츠를 불러올 수 없습니다.</p>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 
-          {/* Still Processing */}
-          {recording.status === "processing" && !recording.transcript && !recording.formatted_content && (
-            <div className="card p-12 text-center">
-              <div className="flex justify-center mb-4">
-                <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">처리 중...</h3>
-              <p className="text-slate-500">음성을 텍스트로 변환하고 있습니다. 잠시만 기다려주세요.</p>
+          {/* Processing State */}
+          {recording.status === "processing" && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin mb-4" />
+              <p className="text-slate-900 font-medium mb-1">처리 중...</p>
+              <p className="text-xs text-slate-500">잠시만 기다려주세요.</p>
             </div>
           )}
         </div>
