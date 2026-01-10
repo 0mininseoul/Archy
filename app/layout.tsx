@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
-import { RegisterServiceWorker } from "./register-sw";
 import { I18nProvider, Locale } from "@/lib/i18n";
-import AmplitudeAnalytics from "@/components/AmplitudeAnalytics";
+import { pretendard } from "@/lib/fonts";
+import { ClientProviders } from "./client-providers";
 
 export const metadata: Metadata = {
   title: "Flownote - 자동 음성 문서화 서비스",
@@ -58,12 +58,8 @@ export default async function RootLayout({
   const initialLocale: Locale = (localeCookie === "en" ? "en" : "ko");
 
   return (
-    <html lang={initialLocale}>
+    <html lang={initialLocale} className={pretendard.variable}>
       <head>
-        <link
-          rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
-        />
         {/* iOS PWA Support */}
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
         <link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon.png" />
@@ -73,10 +69,9 @@ export default async function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Flownote" />
       </head>
-      <body className="font-sans antialiased">
+      <body className={`${pretendard.className} antialiased`}>
         <I18nProvider initialLocale={initialLocale}>
-          <RegisterServiceWorker />
-          <AmplitudeAnalytics />
+          <ClientProviders />
           {children}
           <SpeedInsights />
         </I18nProvider>

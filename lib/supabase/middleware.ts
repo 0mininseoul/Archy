@@ -27,7 +27,32 @@ function detectLocale(request: NextRequest): "ko" | "en" {
   return "ko";
 }
 
+// Public pages that don't need authentication or session check
+// Skip auth for these to significantly improve TTFB
+const PUBLIC_PAGES = ["/", "/privacy", "/terms"];
+
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // Fast path for public pages - skip Supabase auth check entirely
+  if (PUBLIC_PAGES.includes(pathname)) {
+    const response = NextResponse.next({ request });
+
+    // Only set locale cookie if not already set
+    const existingLocaleCookie = request.cookies.get(LOCALE_COOKIE)?.value;
+    if (!existingLocaleCookie) {
+      const detectedLocale = detectLocale(request);
+      response.cookies.set(LOCALE_COOKIE, detectedLocale, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365, // 1 year
+        sameSite: "lax",
+      });
+      console.log("[Middleware] Public page - set locale cookie to:", detectedLocale);
+    }
+
+    return response;
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
