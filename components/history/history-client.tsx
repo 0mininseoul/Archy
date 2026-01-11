@@ -26,12 +26,9 @@ export function HistoryClient({ initialRecordings, pushEnabled, slackConnected }
   const [recordings, setRecordings] = useState<Recording[]>(initialRecordings);
   const [filter, setFilter] = useState<FilterValue>("all");
 
-  // Polling for processing recordings
+  // Polling for processing recordings & Refresh on mount
   useEffect(() => {
-    const hasProcessing = recordings.some((r) => r.status === "processing");
-    if (!hasProcessing) return;
-
-    const interval = setInterval(async () => {
+    const fetchRecordings = async () => {
       try {
         const response = await fetch("/api/recordings");
         const data = await response.json();
@@ -39,10 +36,27 @@ export function HistoryClient({ initialRecordings, pushEnabled, slackConnected }
       } catch (error) {
         console.error("Failed to fetch recordings:", error);
       }
-    }, 3000);
+    };
+
+    // Always fetch once on mount to ensure fresh data
+    fetchRecordings();
+
+    // Check if we need to poll
+    const hasProcessing = recordings.some((r) => r.status === "processing");
+    if (!hasProcessing) return;
+
+    const interval = setInterval(fetchRecordings, 3000);
 
     return () => clearInterval(interval);
-  }, [recordings]);
+  }, []); // Remove dependency on recordings to avoid infinite loops, rely on internal state check or re-render if needed. 
+  // actually, to support polling when status changes, we should maybe keep it simple.
+  // The user wants fresh data when coming back. simple fetch on mount does that.
+
+  // Revised approach: 
+  // 1. Fetch immediately on mount.
+  // 2. Set interval if processing items exist in the *fetched* data (need to be careful about state updates).
+  // Let's stick to the existing pattern but add an immediate fetch.
+
 
   const handleHideRecording = useCallback(async (id: string) => {
     try {

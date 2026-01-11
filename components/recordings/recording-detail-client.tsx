@@ -16,6 +16,7 @@ import { AudioPlayer } from "./audio-player";
 
 interface RecordingDetailClientProps {
   recording: Recording;
+  saveAudioEnabled: boolean;
 }
 
 // =============================================================================
@@ -39,7 +40,7 @@ function getStatusIcon(status: string): string {
 // Component
 // =============================================================================
 
-export function RecordingDetailClient({ recording }: RecordingDetailClientProps) {
+export function RecordingDetailClient({ recording, saveAudioEnabled }: RecordingDetailClientProps) {
   const router = useRouter();
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<"transcript" | "formatted">("formatted");
@@ -205,7 +206,7 @@ export function RecordingDetailClient({ recording }: RecordingDetailClientProps)
 
           {/* Audio Player */}
           {recording.status === "completed" && (
-            <AudioPlayer recordingId={recording.id} />
+            <AudioPlayer recordingId={recording.id} saveAudioEnabled={saveAudioEnabled} />
           )}
 
           {/* Content Tabs */}

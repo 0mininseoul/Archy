@@ -5,9 +5,10 @@ import { useI18n } from "@/lib/i18n";
 
 interface AudioPlayerProps {
   recordingId: string;
+  saveAudioEnabled: boolean;
 }
 
-export function AudioPlayer({ recordingId }: AudioPlayerProps) {
+export function AudioPlayer({ recordingId, saveAudioEnabled }: AudioPlayerProps) {
   const { locale } = useI18n();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [hasAudio, setHasAudio] = useState<boolean | null>(null); // null = loading
@@ -106,6 +107,11 @@ export function AudioPlayer({ recordingId }: AudioPlayerProps) {
 
   // No audio available
   if (!hasAudio) {
+    // If audio storage is disabled by user, don't show the warning
+    if (!saveAudioEnabled) {
+      return null;
+    }
+
     return (
       <div className="bg-slate-50 p-4 rounded-xl">
         <div className="flex items-center gap-2 text-slate-400 text-sm">

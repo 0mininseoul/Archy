@@ -150,11 +150,11 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       mimeTypeRef.current = mimeType;
       console.log("[Recorder] Using MIME type:", mimeType);
 
-      // Create MediaRecorder with low bitrate for storage efficiency
-      // 32kbps is sufficient for speech (meetings, lectures, interviews)
+      // Create MediaRecorder with higher bitrate for better quality
+      // 128kbps is standard for music and general audio
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType,
-        audioBitsPerSecond: 32000,
+        audioBitsPerSecond: 128000,
       });
 
       mediaRecorderRef.current = mediaRecorder;

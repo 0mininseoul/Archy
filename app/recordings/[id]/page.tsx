@@ -26,9 +26,18 @@ export default async function RecordingDetailPage({ params }: PageProps) {
     .eq("user_id", user.id)
     .single();
 
+  // Fetch user settings
+  const { data: userSettings } = await supabase
+    .from("users")
+    .select("save_audio_enabled")
+    .eq("id", user.id)
+    .single();
+
+  const saveAudioEnabled = userSettings?.save_audio_enabled ?? false;
+
   if (error || !recording) {
     notFound();
   }
 
-  return <RecordingDetailClient recording={recording} />;
+  return <RecordingDetailClient recording={recording} saveAudioEnabled={saveAudioEnabled} />;
 }
