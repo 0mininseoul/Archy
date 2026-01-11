@@ -163,10 +163,12 @@ export async function DELETE(
       );
     }
 
-    // Delete audio file from storage
-    await supabase.storage
-      .from("recordings")
-      .remove([recording.audio_file_path]);
+    // Delete audio file from storage (if exists)
+    if (recording.audio_file_path) {
+      await supabase.storage
+        .from("recordings")
+        .remove([recording.audio_file_path]);
+    }
 
     // Delete recording record
     const { error } = await supabase

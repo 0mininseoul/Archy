@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Archy is an automated voice documentation service built with Next.js 14 (App Router). Users record audio, which is transcribed via Groq Whisper API, formatted by OpenAI GPT-4o-mini, and saved to Notion with optional Slack notifications. The app is a PWA with multilingual support (Korean/English).
+Archy is an automated voice documentation service built with Next.js 14 (App Router). Users record audio, which is transcribed via Groq Whisper API, formatted by OpenAI GPT-4o-mini, and saved to Notion/Google Docs with optional Slack notifications. The app is a PWA with multilingual support (Korean/English).
 
 **Critical: Audio files are NOT stored.** They are sent directly to Groq API for transcription, then discarded. Only text (transcripts and formatted content) is persisted in the database.
 
@@ -31,62 +31,104 @@ npx tsc --noEmit
 
 ### Tech Stack
 - **Frontend**: Next.js 14 App Router, React 19, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes (serverless)
+- **Backend**: Next.js API Routes (serverless, Edge runtime where applicable)
 - **Database**: Supabase (PostgreSQL with Row Level Security)
 - **Auth**: Supabase Auth with Google OAuth
-- **External APIs**: Groq Whisper (STT), OpenAI GPT-4o-mini (formatting), Notion API, Slack API
+- **External APIs**: Groq Whisper (STT), OpenAI GPT-4o-mini (formatting), Notion API, Google Docs/Drive API, Slack API
+- **Push Notifications**: Web Push with VAPID keys
 
 ### Directory Structure
 
 ```
 app/
-├── api/              # API Routes
-│   ├── recordings/   # Recording CRUD + processing
-│   ├── formats/      # Custom format templates
-│   ├── user/         # User data, usage, language, onboarding
-│   ├── auth/         # OAuth callbacks (Google, Notion, Slack)
-│   └── notion/       # Notion database/page operations
-├── dashboard/        # Main recording interface
-├── history/          # Recording list with status
-├── settings/         # Account, integrations, formats
-└── onboarding/       # 3-step setup flow
+├── api/                    # API Routes
+│   ├── recordings/         # Recording CRUD + processing
+│   ├── formats/            # Custom format templates
+│   ├── user/               # User data, usage, language, onboarding, referral, push
+│   ├── auth/               # OAuth callbacks (Google, Notion, Slack)
+│   ├── notion/             # Notion database/page operations
+│   └── google/             # Google Drive folder operations
+├── dashboard/              # Main recording interface
+├── history/                # Recording list with status & filters
+├── recordings/[id]/        # Recording detail page
+├── settings/               # Account, integrations, formats
+│   ├── formats/            # Custom format editor
+│   └── contact/            # Contact & account withdrawal
+│       └── withdraw/       # Withdrawal flow
+├── onboarding/             # 3-step setup flow
+├── privacy/                # Privacy policy
+└── terms/                  # Terms of service
 
 lib/
-├── supabase/         # Client/server/middleware for Supabase
-├── services/         # External API integrations
-│   ├── whisper.ts    # Groq Whisper Large V3 STT
-│   ├── openai.ts     # GPT-4o-mini formatting
-│   ├── notion.ts     # Notion OAuth + page creation
-│   └── slack.ts      # Slack OAuth + notifications
-├── i18n/             # Korean/English translations
-├── prompts.ts        # Document formatting prompts
-└── auth.ts           # Auth helper functions
+├── api/                    # API utilities (withAuth, response helpers)
+├── supabase/               # Client/server/middleware for Supabase
+├── services/               # External API integrations
+│   ├── whisper.ts          # Groq Whisper Large V3 STT
+│   ├── openai.ts           # GPT-4o-mini formatting
+│   ├── notion.ts           # Notion OAuth + page creation
+│   ├── google.ts           # Google Docs/Drive integration
+│   ├── slack.ts            # Slack OAuth + notifications
+│   ├── push.ts             # Web push notifications
+│   └── recording-processor.ts  # Orchestrates all processing steps
+├── i18n/                   # Korean/English translations
+├── types/                  # TypeScript types & constants
+├── prompts.ts              # Universal AI formatting prompt
+├── utils.ts                # Utility functions
+└── auth.ts                 # Auth helper functions
 
 components/
-├── recorder/         # Audio recording UI
-├── history/          # Recording list components
-├── settings/         # Settings page components
-└── ...               # Other UI components
+├── dashboard/              # Recording interface components
+├── history/                # Recording list components
+│   └── sections/           # RecordingCard, FilterChips, EmptyState
+├── navigation/             # BottomTab navigation
+├── pwa/                    # PWA install prompts
+├── recorder/               # Audio recording UI
+├── recordings/             # Recording detail components
+└── settings/               # Settings page components
+    └── sections/           # Account, Integrations, CustomFormats
 
 database/
-├── schema.sql        # Base schema (users, recordings, custom_formats)
-└── migrations/       # Incremental migrations (run in order)
+├── schema.sql              # Base schema (users, recordings, custom_formats, withdrawn_users)
+└── migrations/             # Incremental migrations (run in order)
 ```
 
 ### Database Schema
 
-Three main tables (PostgreSQL with RLS):
-- **users**: Auth, integrations (Notion/Slack tokens), usage tracking
-- **recordings**: Metadata, status, transcript, formatted_content, error tracking
-- **custom_formats**: User-defined document templates
+Four main tables (PostgreSQL with RLS):
 
-**Key fields:**
-- `recordings.audio_file_path`: Nullable (audio not stored)
-- `recordings.status`: 'processing' | 'completed' | 'failed'
-- `recordings.error_step`: Tracks which stage failed (upload, transcription, formatting, notion, slack)
-- `users.notion_save_target_type`: 'database' | 'page' (where to save in Notion)
-- `users.language`: 'ko' | 'en'
-- `users.is_onboarded`: Boolean flag
+**users**
+- Auth & profile (email, name, language, is_onboarded)
+- Notion integration (access_token, database_id, page_id, save_target_type)
+- Slack integration (access_token, channel_id)
+- Google integration (access_token, refresh_token, token_expires_at, folder_id, folder_name)
+- Push notifications (push_subscription JSONB, push_enabled)
+- Referral system (referral_code, referred_by, bonus_minutes)
+- Usage tracking (monthly_minutes_used, last_reset_at)
+
+**recordings**
+- Metadata (title, format_type, duration_seconds)
+- Content (transcript, formatted_content)
+- Status tracking (status, processing_step, error_step, error_message)
+- Integrations (notion_page_id, notion_page_url, google_doc_url)
+- Features (is_hidden, is_pinned)
+
+**custom_formats**
+- User-defined document templates (name, prompt, is_default)
+- Max 3 per user
+
+**withdrawn_users**
+- Anonymized withdrawal statistics (no PII)
+- Stores withdrawal reason, account age, integration usage, referral stats
+- JSONB user_data snapshot for audit
+
+### Key Constants
+
+```typescript
+export const MONTHLY_MINUTES_LIMIT = 350;      // Base free tier (minutes)
+export const MAX_CUSTOM_FORMATS = 3;           // Max custom formats per user
+export const REFERRAL_BONUS_MINUTES = 350;     // Bonus per successful referral
+// Total available = MONTHLY_MINUTES_LIMIT + bonus_minutes
+```
 
 ### Recording Processing Flow
 
@@ -94,9 +136,11 @@ Three main tables (PostgreSQL with RLS):
 2. Create recording record with `status: 'processing'`
 3. Background async processing (no queue - production should use one):
    - **Transcription**: Send audio File to Groq Whisper API → get text
-   - **Formatting**: Send transcript to OpenAI with format prompt → get formatted doc
-   - **Notion**: Create page in user's database/page
+   - **Formatting**: Send transcript to OpenAI with universal prompt → get formatted doc with title
+   - **Notion**: Create page in user's database/page (if configured)
+   - **Google Docs**: Create doc in user's Drive folder (if configured)
    - **Slack**: Send notification (if configured)
+   - **Push**: Send web push notification (if enabled)
 4. Update recording status to 'completed' or 'failed'
 5. Update user's monthly usage (`monthly_minutes_used`)
 
@@ -123,75 +167,204 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
 ### PWA Configuration
 
-- `public/manifest.json`: App metadata, icons, theme
-- `public/sw.js`: Service worker for offline capability
+- `public/manifest.json`: App metadata, icons, theme, shortcuts
+- `public/sw.js`: Service worker for offline capability & push notifications
+- `app/register-sw.tsx`: Service worker registration
 - Icons in `public/icons/` and `public/logos/`
 
-## Key Patterns
+## API Routes - Complete List
 
-### Error Handling in Processing
-The `processRecording()` function (in `/api/recordings/route.ts`) updates the recording with specific error steps:
-```typescript
-error_step: 'transcription' | 'formatting' | 'notion' | 'slack'
-```
-This allows users to see exactly where processing failed.
+### Recording Management
+- `POST /api/recordings` - Create & process recording (checks monthly limit + bonus)
+- `GET /api/recordings` - List all recordings (sorted by is_pinned DESC, created_at DESC)
+- `GET /api/recordings/[id]` - Get recording details
+- `PATCH /api/recordings/[id]` - Update title, is_hidden, or is_pinned
+- `DELETE /api/recordings/[id]` - Delete recording
 
-### Format Prompts
-- Three default formats: 'meeting', 'interview', 'lecture'
-- Prompts in `lib/prompts.ts` use `{{transcript}}` and `{{date}}` placeholders
-- Users can create custom formats with their own prompts
+### Format Management
+- `GET /api/formats` - List custom formats
+- `POST /api/formats` - Create custom format (max 3 per user)
+- `PUT /api/formats` - Update or set as default
+- `DELETE /api/formats` - Delete format
 
-### Monthly Usage Tracking
-- Stored in `users.monthly_minutes_used`
-- Checked before creating new recording (350-minute limit)
-- Updated after successful transcription
-- Reset monthly via `last_reset_at` timestamp
+### User Management
+- `GET /api/user/data` - Get connection status
+- `DELETE /api/user/data` - Reset all integrations & data
+- `GET /api/user/profile` - Get profile with integration status
+- `GET /api/user/language` - Get user language
+- `PUT /api/user/language` - Set language (ko/en)
+- `GET /api/user/onboarding` - Check onboarding status
+- `PUT /api/user/onboarding` - Mark as onboarded
+- `GET /api/user/usage` - Get monthly usage stats
+- `GET /api/user/referral` - Get referral code & bonus minutes
+- `POST /api/user/referral` - Apply referral code
+- `DELETE /api/user/withdraw` - Initiate account withdrawal
 
-### OAuth Flows
-- **Notion**: Requires `pages:read`, `pages:write` scopes; stores access token + database/page ID
-- **Slack**: Requires `chat:write`, `channels:read`, `groups:read` scopes; stores access token + channel ID
-- All OAuth callbacks preserve language settings via URL params
+### Notion Integration
+- `GET /api/auth/notion` - Initiate OAuth
+- `GET /api/auth/notion/callback` - Handle callback
+- `GET /api/notion/database` - Get target database
+- `GET /api/notion/databases` - List accessible databases
+- `POST /api/notion/page` - Create page in database
+- `GET /api/notion/pages` - List pages
+
+### Google Integration
+- `GET /api/auth/google` - Initiate OAuth
+- `GET /api/auth/google/callback` - Handle callback
+- `GET /api/google/folders` - List Google Drive folders
+- `PUT /api/user/google` - Update folder settings
+- `DELETE /api/user/google` - Disconnect Google
+
+### Slack Integration
+- `GET /api/auth/slack` - Initiate OAuth
+- `GET /api/auth/slack/callback` - Handle callback
+
+### Push Notifications
+- `GET /api/user/push-subscription` - Get VAPID public key
+- `POST /api/user/push-subscription` - Save subscription
+- `DELETE /api/user/push-subscription` - Unsubscribe
+
+### Audio Storage
+- `GET /api/user/audio-storage` - Get audio storage setting
+- `PATCH /api/user/audio-storage` - Toggle audio storage setting
+- `GET /api/recordings/[id]/audio` - Get signed URL for audio playback
+
+### Auth
+- `GET /api/auth/callback` - Supabase OAuth callback
+- `GET /api/auth/signout` - Sign out
+
+## Key Features
+
+### Recording Pinning
+- Records can be pinned to appear at top of history list
+- `is_pinned` boolean field in recordings table
+- Swipe right gesture on recording card to pin/unpin
+
+### Swipe Gestures on Recording Cards
+- **Left swipe (80px)**: Delete action with visual feedback
+- **Right swipe (80px)**: Pin/unpin action
+- Min swipe distance: 50px, max swipe range: ±80px
+- Touch devices only
+
+### Google Docs Integration
+- Users can save recordings as Google Docs
+- OAuth flow with token refresh handling
+- Folder selection in Google Drive
+- `google_doc_url` stored in recording
+
+### Referral System
+- Unique 8-character referral codes (e.g., "AB12CD34")
+- Auto-generated on first signup using PostgreSQL trigger
+- 350 bonus minutes per successful referral (both parties)
+- Cannot use own referral code
+- Share via Kakao Talk or clipboard
+
+### Web Push Notifications
+- Notifications when recording processing completes
+- VAPID-based subscription management
+- Handles expired subscriptions gracefully
+
+### Audio Storage (Optional)
+- Users can opt-in to save audio files in Supabase Storage
+- Default is OFF (opt-in via Settings > Data Management)
+- Audio recorded at 32kbps for storage efficiency
+- Signed URLs for secure playback (1 hour expiry)
+- Old recordings without audio show "no audio" message
+- Audio deleted when recording is deleted
+
+### Account Withdrawal (GDPR Compliant)
+- Users can withdraw with optional reason
+- Full data snapshot archived to `withdrawn_users`
+- All user data deleted (recordings, formats, auth)
+- Referral links unlinked to prevent FK issues
+
+### Universal AI Formatting Prompt
+- Single adaptive prompt in `lib/prompts.ts`
+- Auto-generates title + 3-line bullet summary
+- Flexible body structure with markdown headers
+- Adapts to content type (meeting, interview, lecture, etc.)
 
 ## Database Management
 
 ### Initial Setup
 1. Run `database/schema.sql` in Supabase SQL Editor
-2. Run migrations in order:
-   - `add_language.sql`
-   - `add_is_onboarded.sql`
-   - `make_audio_file_path_nullable.sql`
-   - `add_notion_save_target_fields.sql`
-   - `add_processing_step.sql`
-   - `add_error_tracking.sql`
+2. Run migrations in order (see below)
+
+### Migration Order
+1. `add_language.sql` - User language preference (ko/en)
+2. `add_is_onboarded.sql` - Onboarding completion flag
+3. `make_audio_file_path_nullable.sql` - Audio not stored, path nullable
+4. `add_notion_save_target_fields.sql` - Notion database/page target selection
+5. `add_processing_step.sql` - Track processing stage
+6. `add_error_tracking.sql` - Error step & message for debugging
+7. `add_push_notification.sql` - Push subscription & enabled flag
+8. `add_referral_system.sql` - Referral code, referred_by, bonus_minutes
+9. `add_google_integration.sql` - Google OAuth tokens & folder settings
+10. `add_user_name.sql` - User display name field
+11. `add_withdrawn_users_table.sql` - Withdrawal archive table
+12. `update_withdrawn_users_add_data.sql` - Store full user snapshot (JSONB)
+13. `update_withdrawn_users_add_name.sql` - Store user name separately
+14. `add_audio_storage_setting.sql` - User audio storage preference (opt-in, default false)
 
 ### Adding Migrations
 - Create new file in `database/migrations/`
-- Update README.md and SETUP.md with migration order
+- Update this file with migration order
 - Test locally before production deployment
 
 ## Environment Variables
 
 Required:
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-- `GROQ_API_KEY` (Whisper STT)
-- `OPENAI_API_KEY` (GPT-4o-mini)
-- `NOTION_CLIENT_ID`, `NOTION_CLIENT_SECRET`, `NOTION_REDIRECT_URI`
-- `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI`
-- `NEXT_PUBLIC_APP_URL`
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
 
-Optional:
-- `WHISPER_API_KEY` (alternative STT provider, not currently used)
+# AI APIs
+GROQ_API_KEY=...           # Whisper STT
+OPENAI_API_KEY=...         # GPT-4o-mini
+
+# Notion OAuth
+NOTION_CLIENT_ID=...
+NOTION_CLIENT_SECRET=...
+NOTION_REDIRECT_URI=...
+
+# Slack OAuth
+SLACK_CLIENT_ID=...
+SLACK_CLIENT_SECRET=...
+SLACK_REDIRECT_URI=...
+
+# Google OAuth
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=...
+
+# Push Notifications (VAPID)
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=...
+
+# App
+NEXT_PUBLIC_APP_URL=...
+
+# Kakao (for referral sharing)
+NEXT_PUBLIC_KAKAO_JS_KEY=...
+```
 
 See `.env.example` for full structure.
 
 ## Common Gotchas
 
-1. **Audio files are not stored**: Don't try to read from `audio_file_path` - it's nullable and unused
+1. **Audio files are optional**: `audio_file_path` is nullable - only populated when user has `save_audio_enabled: true`
 2. **Background processing is not queued**: In production, replace the async `processRecording()` call with a proper queue (e.g., BullMQ, Inngest)
 3. **RLS is enabled**: Always filter by `user_id` in queries; Supabase policies enforce this
 4. **OAuth redirects**: Must match exactly in provider settings (no trailing slash differences)
 5. **Korean language**: Groq Whisper uses `language: "ko"` parameter for better Korean accuracy
 6. **Service worker**: Changes to `sw.js` may require hard refresh or cache clear in browser
+7. **Bonus minutes are additive**: Total available = 350 + bonus_minutes from referrals
+8. **Google tokens expire**: Service auto-refreshes tokens using refresh_token
+9. **Referral codes auto-generate**: Via PostgreSQL trigger on user creation
+10. **Recording pinning**: Sorted by is_pinned DESC, then created_at DESC
 
 ## Testing Guidelines
 
@@ -230,19 +403,46 @@ For each update, provide:
 
 **Recording flow:**
 - [ ] Record short audio (10-20 seconds), verify transcription
-- [ ] Check formatted output in database and Notion
+- [ ] Check formatted output in database and Notion/Google Docs
 - [ ] Verify `monthly_minutes_used` increments correctly
 - [ ] Test with different format types (meeting, interview, lecture, custom)
 - [ ] Test error handling: try without Notion/API credentials
 - [ ] Check recording status updates in History page
+- [ ] Test recording pinning via swipe gesture
 
-**Integration features (Notion/Slack):**
+**Swipe Gestures:**
+- [ ] Right swipe (>50px) pins/unpins recording
+- [ ] Left swipe (>50px) opens delete confirmation
+- [ ] Visual feedback during swipe
+- [ ] Works on touch devices only
+
+**Integration features (Notion/Slack/Google):**
 - [ ] Complete OAuth flow from Settings page
 - [ ] Verify tokens saved to database
 - [ ] Trigger integration (e.g., create recording → check Slack notification)
-- [ ] Verify result in external service (Notion page created, Slack message sent)
+- [ ] Verify result in external service (Notion page, Slack message, Google Doc)
 - [ ] Test disconnect and reconnect flow
 - [ ] Test with missing/revoked credentials
+- [ ] Verify Google token refresh works
+
+**Referral System:**
+- [ ] New users get unique 8-char referral code
+- [ ] Can apply referral code (max once per account)
+- [ ] Both users receive 350 bonus minutes
+- [ ] Cannot use own code
+- [ ] Bonus minutes increase monthly limit
+- [ ] Share via Kakao Talk works
+
+**Push Notifications:**
+- [ ] Subscribe/unsubscribe flow works
+- [ ] Notifications sent on processing complete
+- [ ] Expired subscriptions handled gracefully
+
+**Account Withdrawal:**
+- [ ] User data archived to withdrawn_users
+- [ ] Account deletion complete
+- [ ] Can re-signup as new user
+- [ ] Referral links unlinked properly
 
 **Authentication:**
 - [ ] Sign up with new account

@@ -35,6 +35,9 @@ export interface User {
   push_subscription?: PushSubscriptionData | null;
   push_enabled: boolean;
 
+  // Audio Storage
+  save_audio_enabled: boolean;
+
   // Usage & Limits
   monthly_minutes_used: number;
   last_reset_at: string;

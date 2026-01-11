@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { Recording } from "@/types";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { AudioPlayer } from "./audio-player";
 
 // =============================================================================
 // Types
@@ -191,7 +192,7 @@ export function RecordingDetailClient({ recording }: RecordingDetailClientProps)
 
           {/* Info Card */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
+            <div className="flex items-center gap-3 text-xs text-slate-500">
               <span className="flex items-center gap-1">
                 {getStatusIcon(recording.status)} {getStatusText(recording.status)}
               </span>
@@ -200,10 +201,12 @@ export function RecordingDetailClient({ recording }: RecordingDetailClientProps)
               <span className="w-1 h-1 rounded-full bg-slate-300" />
               <span>{new Date(recording.created_at).toLocaleDateString("ko-KR")}</span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              * 오디오 파일은 저장되지 않으며, 텍스트 변환 후 즉시 폐기됩니다.
-            </p>
           </div>
+
+          {/* Audio Player */}
+          {recording.status === "completed" && (
+            <AudioPlayer recordingId={recording.id} />
+          )}
 
           {/* Content Tabs */}
           {(recording.transcript || recording.formatted_content) && (

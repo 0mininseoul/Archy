@@ -126,13 +126,43 @@ export function PushNotificationSection({
 interface DataManagementSectionProps {
   isOpen: boolean;
   onToggle: () => void;
+  initialAudioStorageEnabled: boolean;
 }
 
-export function DataManagementSection({ isOpen, onToggle }: DataManagementSectionProps) {
+export function DataManagementSection({
+  isOpen,
+  onToggle,
+  initialAudioStorageEnabled,
+}: DataManagementSectionProps) {
   const { t } = useI18n();
   const router = useRouter();
 
   const [autoSave, setAutoSave] = useState(true);
+  const [audioStorageEnabled, setAudioStorageEnabled] = useState(initialAudioStorageEnabled);
+  const [audioStorageLoading, setAudioStorageLoading] = useState(false);
+
+  const handleToggleAudioStorage = useCallback(async (enable: boolean) => {
+    const previousState = audioStorageEnabled;
+    setAudioStorageEnabled(enable);
+    setAudioStorageLoading(true);
+
+    try {
+      const response = await fetch("/api/user/audio-storage", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enable }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update setting");
+      }
+    } catch (error) {
+      console.error("Failed to toggle audio storage:", error);
+      setAudioStorageEnabled(previousState);
+    } finally {
+      setAudioStorageLoading(false);
+    }
+  }, [audioStorageEnabled]);
 
   const handleDeleteAllData = useCallback(async () => {
     if (!confirm(t.settings.data.deleteConfirm)) return;
@@ -168,6 +198,25 @@ export function DataManagementSection({ isOpen, onToggle }: DataManagementSectio
 
       {isOpen && (
         <div className="p-4 border-t border-slate-100 animate-slide-down space-y-3">
+          {/* Audio Storage Toggle */}
+          <div className="flex items-center justify-between p-3 border border-slate-200 rounded-xl">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-slate-900 text-sm">{t.settings.data.audioStorage}</h3>
+              <p className="text-xs text-slate-500">{t.settings.data.audioStorageDesc}</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={audioStorageEnabled}
+                disabled={audioStorageLoading}
+                onChange={(e) => handleToggleAudioStorage(e.target.checked)}
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-900" />
+            </label>
+          </div>
+
+          {/* Auto Delete Toggle */}
           <div className="flex items-center justify-between p-3 border border-slate-200 rounded-xl">
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.data.autoDelete}</h3>
@@ -184,6 +233,7 @@ export function DataManagementSection({ isOpen, onToggle }: DataManagementSectio
             </label>
           </div>
 
+          {/* Danger Zone */}
           <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
             <h3 className="font-bold text-red-700 text-sm mb-1">{t.settings.data.danger}</h3>
             <p className="text-xs text-red-600 mb-3">{t.settings.data.dangerDesc}</p>

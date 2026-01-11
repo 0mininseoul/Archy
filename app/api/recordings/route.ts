@@ -35,6 +35,9 @@ export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "stat
       return errorResponse("Monthly usage limit exceeded", 403);
     }
 
+    // Check if audio storage is enabled
+    const saveAudioEnabled = userData.save_audio_enabled ?? false;
+
     // Generate title
     const title = `Archy - ${formatKSTDate()}`;
 
@@ -44,7 +47,7 @@ export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "stat
       .insert({
         user_id: user.id,
         title,
-        audio_file_path: null, // Audio files are not stored
+        audio_file_path: null, // Will be updated if audio is stored
         duration_seconds: duration,
         format,
         status: "processing",
@@ -54,6 +57,33 @@ export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "stat
 
     if (recordingError) {
       return errorResponse("Failed to create recording", 500);
+    }
+
+    // Upload audio to storage if enabled
+    if (saveAudioEnabled) {
+      try {
+        const extension = audioFile.name.split('.').pop() || 'webm';
+        const audioFilePath = `${user.id}/${recording.id}/audio.${extension}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("recordings")
+          .upload(audioFilePath, audioFile, {
+            contentType: audioFile.type,
+            upsert: false,
+          });
+
+        if (!uploadError) {
+          await supabase
+            .from("recordings")
+            .update({ audio_file_path: audioFilePath })
+            .eq("id", recording.id);
+        } else {
+          console.error("[Audio Storage] Upload failed:", uploadError);
+        }
+      } catch (err) {
+        console.error("[Audio Storage] Error:", err);
+        // Continue processing - audio storage failure shouldn't fail the recording
+      }
     }
 
     // Process in background (in production, use a queue like BullMQ or Inngest)

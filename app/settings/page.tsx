@@ -18,7 +18,7 @@ export default async function SettingsPage() {
   const [{ data: userData }, { data: formatsData }] = await Promise.all([
     supabase
       .from("users")
-      .select("monthly_minutes_used, notion_access_token, notion_database_id, notion_save_target_type, notion_save_target_title, slack_access_token, google_access_token, google_folder_id, google_folder_name, push_enabled, bonus_minutes")
+      .select("monthly_minutes_used, notion_access_token, notion_database_id, notion_save_target_type, notion_save_target_title, slack_access_token, google_access_token, google_folder_id, google_folder_name, push_enabled, bonus_minutes, save_audio_enabled")
       .eq("id", user.id)
       .single(),
     supabase
@@ -44,6 +44,7 @@ export default async function SettingsPage() {
     googleFolderName: userData?.google_folder_name || null,
     customFormats: formatsData || [],
     pushEnabled: userData?.push_enabled || false,
+    audioStorageEnabled: userData?.save_audio_enabled || false,
   };
 
   return (

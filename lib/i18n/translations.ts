@@ -234,6 +234,8 @@ export const translations = {
       },
       data: {
         title: "데이터 관리",
+        audioStorage: "오디오 저장",
+        audioStorageDesc: "녹음 파일을 저장하여 나중에 다시 들을 수 있습니다",
         autoDelete: "자동 삭제",
         autoDeleteDesc: "30일이 지난 녹음을 자동으로 삭제합니다",
         danger: "위험 구역",
@@ -638,6 +640,8 @@ export const translations = {
       },
       data: {
         title: "Data Management",
+        audioStorage: "Audio Storage",
+        audioStorageDesc: "Save recordings to listen again later",
         autoDelete: "Auto-deletion",
         autoDeleteDesc: "Automatically delete recordings older than 30 days",
         danger: "Danger Zone",

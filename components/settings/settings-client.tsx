@@ -44,6 +44,7 @@ interface InitialData {
   googleFolderName: string | null;
   customFormats: CustomFormat[];
   pushEnabled: boolean;
+  audioStorageEnabled: boolean;
 }
 
 interface SettingsClientProps {
@@ -196,6 +197,7 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       <DataManagementSection
         isOpen={openSection === "data"}
         onToggle={() => toggleSection("data")}
+        initialAudioStorageEnabled={initialData.audioStorageEnabled}
       />
 
       {/* 7. Language (Accordion) */}
