@@ -6,12 +6,14 @@ import { useI18n } from "@/lib/i18n";
 interface AudioPlayerProps {
   recordingId: string;
   saveAudioEnabled: boolean;
+  hasAudioFile: boolean;
 }
 
-export function AudioPlayer({ recordingId, saveAudioEnabled }: AudioPlayerProps) {
+export function AudioPlayer({ recordingId, saveAudioEnabled, hasAudioFile }: AudioPlayerProps) {
   const { locale } = useI18n();
+  // If we know there's audio, start with null (loading). If we know there isn't, start with false.
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [hasAudio, setHasAudio] = useState<boolean | null>(null); // null = loading
+  const [hasAudio, setHasAudio] = useState<boolean | null>(hasAudioFile ? null : false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -20,6 +22,9 @@ export function AudioPlayer({ recordingId, saveAudioEnabled }: AudioPlayerProps)
 
   // Fetch audio URL
   useEffect(() => {
+    // Skip if we already know there is no audio file
+    if (!hasAudioFile) return;
+
     const fetchAudioUrl = async () => {
       try {
         const response = await fetch(`/api/recordings/${recordingId}/audio`);
@@ -48,7 +53,7 @@ export function AudioPlayer({ recordingId, saveAudioEnabled }: AudioPlayerProps)
     };
 
     fetchAudioUrl();
-  }, [recordingId, locale]);
+  }, [recordingId, locale, hasAudioFile]);
 
   // Audio event handlers
   const handleTimeUpdate = useCallback(() => {
@@ -106,7 +111,7 @@ export function AudioPlayer({ recordingId, saveAudioEnabled }: AudioPlayerProps)
   }
 
   // No audio available
-  if (!hasAudio) {
+  if (hasAudio === false) {
     // If audio storage is disabled by user, don't show the warning
     if (!saveAudioEnabled) {
       return null;

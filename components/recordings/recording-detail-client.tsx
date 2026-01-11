@@ -206,7 +206,11 @@ export function RecordingDetailClient({ recording, saveAudioEnabled }: Recording
 
           {/* Audio Player */}
           {recording.status === "completed" && (
-            <AudioPlayer recordingId={recording.id} saveAudioEnabled={saveAudioEnabled} />
+            <AudioPlayer
+              recordingId={recording.id}
+              saveAudioEnabled={saveAudioEnabled}
+              hasAudioFile={!!recording.audio_file_path}
+            />
           )}
 
           {/* Content Tabs */}
