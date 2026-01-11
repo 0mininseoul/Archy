@@ -3,7 +3,7 @@ import webpush from 'web-push';
 // VAPID 키 설정
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
-const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:tnsb5373@gmail.com';
+const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:contact@ascentum.co.kr';
 
 if (vapidPublicKey && vapidPrivateKey) {
   webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);

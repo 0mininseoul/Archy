@@ -189,7 +189,7 @@ export default function PrivacyPolicyPage() {
                 바랍니다.
               </p>
               <p className="mt-2 text-gray-600">
-                이메일: privacy@archy.com
+                이메일: contact@ascentum.co.kr
               </p>
             </div>
           </section>

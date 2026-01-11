@@ -8,7 +8,7 @@ export default function ContactPage() {
   const router = useRouter();
   const { t } = useI18n();
 
-  const developerEmail = "tnsb5373@gmail.com";
+  const developerEmail = "contact@ascentum.co.kr";
 
   return (
     <div className="app-container">

@@ -236,7 +236,7 @@ export function LandingClient() {
                             <p className="font-medium text-slate-700">{t.landing.footer.rights}</p>
                             <p>{t.landing.footer.ceo}</p>
                             <p>BNN : 478-59-01063</p>
-                            <p>tnsb5373@gmail.com</p>
+                            <p>contact@ascentum.co.kr</p>
                         </div>
 
                         {/* Right side - Links */}
