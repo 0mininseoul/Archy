@@ -42,7 +42,7 @@
 
 1. [Notion Developers](https://www.notion.so/my-integrations)에서 새 통합을 생성합니다.
 2. OAuth 설정:
-   - Redirect URIs: `https://[your-domain].vercel.app/api/auth/notion/callback`
+   - Redirect URIs: `https://www.archynotes.com/api/auth/notion/callback`
    - Capabilities: Read content, Update content, Insert content
 
 **필요한 정보:**
@@ -53,7 +53,7 @@
 
 1. [Slack API](https://api.slack.com/apps)에서 새 앱을 생성합니다.
 2. OAuth & Permissions:
-   - Redirect URLs: `https://[your-domain].vercel.app/api/auth/slack/callback`
+   - Redirect URLs: `https://www.archynotes.com/api/auth/slack/callback`
    - Scopes: `chat:write`, `channels:read`, `groups:read`
 3. Install App to Workspace
 
@@ -109,15 +109,15 @@ GROQ_API_KEY=your_groq_api_key
 # Notion
 NOTION_CLIENT_ID=your_notion_client_id
 NOTION_CLIENT_SECRET=your_notion_secret
-NOTION_REDIRECT_URI=https://your-domain.vercel.app/api/auth/notion/callback
+NOTION_REDIRECT_URI=https://www.archynotes.com/api/auth/notion/callback
 
 # Slack
 SLACK_CLIENT_ID=your_slack_client_id
 SLACK_CLIENT_SECRET=your_slack_secret
-SLACK_REDIRECT_URI=https://your-domain.vercel.app/api/auth/slack/callback
+SLACK_REDIRECT_URI=https://www.archynotes.com/api/auth/slack/callback
 
 # App URL
-NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app
+NEXT_PUBLIC_APP_URL=https://www.archynotes.com
 ```
 
 ### 4. 도메인 설정 (선택사항)
@@ -135,27 +135,27 @@ NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app
 **Google OAuth:**
 - Google Cloud Console > APIs & Services > Credentials
 - 승인된 리디렉션 URI에 추가:
-  - `https://your-domain.vercel.app`
+  - `https://www.archynotes.com`
   - `https://[your-project-ref].supabase.co/auth/v1/callback`
 
 **Notion:**
 - Notion Integration Settings
-- Redirect URIs: `https://your-domain.vercel.app/api/auth/notion/callback`
+- Redirect URIs: `https://www.archynotes.com/api/auth/notion/callback`
 
 **Slack:**
 - Slack App Settings > OAuth & Permissions
-- Redirect URLs: `https://your-domain.vercel.app/api/auth/slack/callback`
+- Redirect URLs: `https://www.archynotes.com/api/auth/slack/callback`
 
 ### 2. Supabase 설정 업데이트
 
 Supabase Dashboard > Authentication > URL Configuration:
-- Site URL: `https://your-domain.vercel.app`
+- Site URL: `https://www.archynotes.com`
 - Redirect URLs에 추가:
-  - `https://your-domain.vercel.app/**`
+  - `https://www.archynotes.com/**`
 
 ### 3. 배포 확인
 
-1. `https://your-domain.vercel.app`에 접속합니다.
+1. `https://www.archynotes.com`에 접속합니다.
 2. Google 로그인을 테스트합니다.
 3. 녹음 기능을 테스트합니다.
 4. Notion/Slack 연동을 테스트합니다.

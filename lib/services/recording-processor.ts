@@ -357,7 +357,7 @@ async function stepSlackNotify(
   log(recordingId, "Step 5: Sending Slack notification...");
 
   try {
-    let appUrl = "https://archynote.vercel.app";
+    let appUrl = "https://www.archynotes.com";
     if (process.env.NODE_ENV === "development") {
       appUrl = "http://localhost:3000";
     } else if (process.env.NEXT_PUBLIC_APP_URL) {
