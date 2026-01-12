@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
@@ -17,7 +17,14 @@ import { AudioPlayer } from "./audio-player";
 interface RecordingDetailClientProps {
   recording: Recording;
   saveAudioEnabled: boolean;
+  isOwner: boolean;
 }
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const PRODUCTION_DOMAIN = "https://www.archynotes.com";
 
 // =============================================================================
 // Utility Functions
@@ -40,18 +47,33 @@ function getStatusIcon(status: string): string {
 // Component
 // =============================================================================
 
-export function RecordingDetailClient({ recording, saveAudioEnabled }: RecordingDetailClientProps) {
+export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: RecordingDetailClientProps) {
   const router = useRouter();
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<"transcript" | "formatted">("formatted");
   const [isEditing, setIsEditing] = useState(false);
   const [recordingTitle, setRecordingTitle] = useState(recording.title);
   const [editingTitle, setEditingTitle] = useState("");
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const startEditing = useCallback(() => {
+    if (!isOwner) return;
     setIsEditing(true);
     setEditingTitle(recordingTitle);
-  }, [recordingTitle]);
+    setShowMenu(false);
+  }, [recordingTitle, isOwner]);
 
   const cancelEditing = useCallback(() => {
     setIsEditing(false);
@@ -83,6 +105,13 @@ export function RecordingDetailClient({ recording, saveAudioEnabled }: Recording
       alert("제목 변경에 실패했습니다.");
     }
   }, [recording.id, editingTitle]);
+
+  const handleCopyLink = useCallback(() => {
+    const shareUrl = `${PRODUCTION_DOMAIN}/recordings/${recording.id}`;
+    navigator.clipboard.writeText(shareUrl);
+    alert("링크가 복사되었습니다!");
+    setShowMenu(false);
+  }, [recording.id]);
 
   const getStatusText = useCallback((status: string) => {
     switch (status) {
@@ -159,37 +188,99 @@ export function RecordingDetailClient({ recording, saveAudioEnabled }: Recording
               </button>
             </div>
           ) : (
-            <h1
-              onClick={startEditing}
-              className="text-lg font-bold text-slate-900 truncate flex-1 cursor-pointer hover:opacity-70 transition-opacity"
-            >
+            <h1 className="text-lg font-bold text-slate-900 truncate flex-1">
               {recordingTitle}
             </h1>
           )}
         </div>
 
-        {!isEditing && recording.notion_page_url && (
-          <a
-            href={recording.notion_page_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 text-slate-500 hover:text-slate-900 rounded-full transition-colors flex-shrink-0"
-            title="Notion에서 보기"
-          >
-            <Image
-              src="/icons/notion-logo.svg"
-              alt="Notion"
-              width={20}
-              height={20}
-              className="opacity-60 hover:opacity-100 transition-opacity"
-            />
-          </a>
+        {/* Menu Button */}
+        {!isEditing && (
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 text-slate-500 hover:text-slate-900 rounded-full transition-colors flex-shrink-0"
+              aria-label="메뉴"
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="12" cy="19" r="2" />
+              </svg>
+            </button>
+
+            {/* Dropdown Menu */}
+            {showMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 py-1 min-w-[140px] z-50">
+                {isOwner && (
+                  <button
+                    onClick={startEditing}
+                    className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    제목 수정
+                  </button>
+                )}
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  링크 복사
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </header>
 
       {/* Main Content */}
       <main className="app-main bg-slate-50">
         <div className="px-mobile py-4 space-y-4">
+
+          {/* Notion / Google Docs Buttons - Owner Only */}
+          {isOwner && (recording.notion_page_url || recording.google_doc_url) && (
+            <div className="flex items-center gap-3">
+              {recording.notion_page_url && (
+                <a
+                  href={recording.notion_page_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center w-10 h-10 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
+                  title="Notion에서 보기"
+                >
+                  <Image
+                    src="/logos/notion.png"
+                    alt="Notion"
+                    width={24}
+                    height={24}
+                    className="object-contain"
+                  />
+                </a>
+              )}
+              {recording.google_doc_url && (
+                <a
+                  href={recording.google_doc_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center w-10 h-10 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
+                  title="Google Docs에서 보기"
+                >
+                  <Image
+                    src="/logos/google docs.png"
+                    alt="Google Docs"
+                    width={24}
+                    height={24}
+                    className="object-contain"
+                  />
+                </a>
+              )}
+            </div>
+          )}
 
           {/* Info Card */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -204,8 +295,8 @@ export function RecordingDetailClient({ recording, saveAudioEnabled }: Recording
             </div>
           </div>
 
-          {/* Audio Player */}
-          {recording.status === "completed" && (
+          {/* Audio Player - Owner Only */}
+          {isOwner && recording.status === "completed" && (
             <AudioPlayer
               recordingId={recording.id}
               saveAudioEnabled={saveAudioEnabled}

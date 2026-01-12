@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { RecordingDetailClient } from "@/components/recordings/recording-detail-client";
 
 interface PageProps {
@@ -10,34 +10,41 @@ export default async function RecordingDetailPage({ params }: PageProps) {
   const { id } = await params;
   const supabase = await createClient();
 
+  // Check if user is logged in
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect("/");
-  }
-
-  // Fetch the recording on the server
+  // Fetch the recording without user_id filter for public access
   const { data: recording, error } = await supabase
     .from("recordings")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single();
-
-  // Fetch user settings
-  const { data: userSettings } = await supabase
-    .from("users")
-    .select("save_audio_enabled")
-    .eq("id", user.id)
-    .single();
-
-  const saveAudioEnabled = userSettings?.save_audio_enabled ?? false;
 
   if (error || !recording) {
     notFound();
   }
 
-  return <RecordingDetailClient recording={recording} saveAudioEnabled={saveAudioEnabled} />;
+  // Check if current user is the owner
+  const isOwner = user?.id === recording.user_id;
+
+  // Fetch user settings only if owner
+  let saveAudioEnabled = false;
+  if (isOwner && user) {
+    const { data: userSettings } = await supabase
+      .from("users")
+      .select("save_audio_enabled")
+      .eq("id", user.id)
+      .single();
+    saveAudioEnabled = userSettings?.save_audio_enabled ?? false;
+  }
+
+  return (
+    <RecordingDetailClient
+      recording={recording}
+      saveAudioEnabled={saveAudioEnabled}
+      isOwner={isOwner}
+    />
+  );
 }
