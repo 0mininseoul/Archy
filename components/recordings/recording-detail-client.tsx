@@ -259,7 +259,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                     height={20}
                     className="object-contain"
                   />
-                  <span className="text-sm font-medium text-slate-700">에서 보기</span>
+                  <span className="text-sm font-medium text-slate-700">노션에서 보기</span>
                 </a>
               )}
               {recording.google_doc_url && (
@@ -276,7 +276,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                     height={20}
                     className="object-contain"
                   />
-                  <span className="text-sm font-medium text-slate-700">에서 보기</span>
+                  <span className="text-sm font-medium text-slate-700">구글 독스에서 보기</span>
                 </a>
               )}
             </div>
