@@ -250,16 +250,16 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                   href={recording.notion_page_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center w-10 h-10 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
-                  title="Notion에서 보기"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
                 >
                   <Image
                     src="/logos/notion.png"
                     alt="Notion"
-                    width={24}
-                    height={24}
+                    width={20}
+                    height={20}
                     className="object-contain"
                   />
+                  <span className="text-sm font-medium text-slate-700">에서 보기</span>
                 </a>
               )}
               {recording.google_doc_url && (
@@ -267,16 +267,16 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                   href={recording.google_doc_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center w-10 h-10 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
-                  title="Google Docs에서 보기"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
                 >
                   <Image
-                    src="/logos/google docs.png"
+                    src="/logos/google-docs.png"
                     alt="Google Docs"
-                    width={24}
-                    height={24}
+                    width={20}
+                    height={20}
                     className="object-contain"
                   />
+                  <span className="text-sm font-medium text-slate-700">에서 보기</span>
                 </a>
               )}
             </div>
@@ -395,7 +395,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
             </div>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 }
