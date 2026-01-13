@@ -13,6 +13,7 @@ import {
   LanguageSection,
 } from "./sections";
 import { useUserStore } from "@/lib/stores/user-store";
+import { createClient } from "@/lib/supabase/client";
 
 // =============================================================================
 // Types
@@ -146,14 +147,16 @@ export function SettingsClient() {
 
   const handleSignOut = useCallback(async () => {
     try {
-      await fetch("/api/auth/signout", { method: "POST" });
+      const supabase = createClient();
+      await supabase.auth.signOut();
       // Clear all stores on logout
       useUserStore.getState().invalidate();
-      router.push("/");
+      // Force navigation to landing page
+      window.location.href = "/";
     } catch (error) {
       console.error("Failed to sign out:", error);
     }
-  }, [router]);
+  }, []);
 
   const toggleSection = useCallback((section: string) => {
     setOpenSection((prev) => (prev === section ? null : section));

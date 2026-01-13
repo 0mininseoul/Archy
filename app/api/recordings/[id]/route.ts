@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/recordings/[id] - Get recording details
+// GET /api/recordings/[id] - Get recording details (supports shared access)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -14,15 +14,11 @@ export async function GET(
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    // Fetch recording without user_id filter for public/shared access
     const { data: recording, error } = await supabase
       .from("recordings")
       .select("*")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single();
 
     if (error || !recording) {
@@ -32,7 +28,25 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ recording });
+    // Check if current user is the owner
+    const isOwner = user?.id === recording.user_id;
+
+    // Fetch user settings only if owner
+    let saveAudioEnabled = false;
+    if (isOwner && user) {
+      const { data: userSettings } = await supabase
+        .from("users")
+        .select("save_audio_enabled")
+        .eq("id", user.id)
+        .single();
+      saveAudioEnabled = userSettings?.save_audio_enabled ?? false;
+    }
+
+    return NextResponse.json({
+      recording,
+      isOwner,
+      saveAudioEnabled,
+    });
   } catch (error) {
     console.error("API error:", error);
     return NextResponse.json(

@@ -49,6 +49,15 @@ function getFormatEmoji(format: string): string {
   }
 }
 
+function formatRecordingDate(dateString: string): string {
+  const date = new Date(dateString);
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${month}/${day} ${hours}:${minutes}`;
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -264,6 +273,8 @@ export function RecordingCard({
               </span>
               <span>·</span>
               <span>{formatDurationMinutes(recording.duration_seconds)}</span>
+              <span>·</span>
+              <span>{formatRecordingDate(recording.created_at)}</span>
             </div>
 
             {/* Processing Status Info */}

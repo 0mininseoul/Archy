@@ -1,24 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useI18n } from "@/lib/i18n";
-import { RecordingCard, FilterChips, EmptyState } from "./sections";
+import { useEffect, useCallback, useRef } from "react";
+import { RecordingCard, EmptyState } from "./sections";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
 import { useUserStore } from "@/lib/stores/user-store";
-
-// =============================================================================
-// Types
-// =============================================================================
-
-type FilterValue = "all" | "processing" | "completed" | "failed";
 
 // =============================================================================
 // Component
 // =============================================================================
 
 export function HistoryClient() {
-  const { t } = useI18n();
-  const [filter, setFilter] = useState<FilterValue>("all");
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Use cached data from stores
@@ -116,42 +107,22 @@ export function HistoryClient() {
     [updateRecording]
   );
 
-  const filteredRecordings = recordings.filter((recording) => {
-    if (filter === "all") return true;
-    return recording.status === filter;
-  });
-
   // Show loading state only on initial load
   if (!isLoaded && isLoading) {
     return (
-      <>
-        {/* Filter Chips Skeleton */}
-        <div className="px-4 py-3 border-b border-slate-100">
-          <div className="flex gap-2">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-[44px] w-16 bg-slate-100 rounded-full animate-pulse"
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Recordings List Skeleton */}
-        <div className="px-4 py-4 space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="card p-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 animate-pulse" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-5 w-3/4 bg-slate-100 rounded animate-pulse" />
-                  <div className="h-4 w-1/2 bg-slate-100 rounded animate-pulse" />
-                </div>
+      <div className="px-4 py-4 space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="card p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="flex-1 space-y-2">
+                <div className="h-5 w-3/4 bg-slate-100 rounded animate-pulse" />
+                <div className="h-4 w-1/2 bg-slate-100 rounded animate-pulse" />
               </div>
             </div>
-          ))}
-        </div>
-      </>
+          </div>
+        ))}
+      </div>
     );
   }
 
@@ -159,29 +130,23 @@ export function HistoryClient() {
   const slackConnected = connectionStatus?.slackConnected ?? false;
 
   return (
-    <>
-      {/* Filter Chips */}
-      <FilterChips value={filter} onChange={setFilter} />
-
-      {/* Recordings List */}
-      <div className="px-4 py-4">
-        {filteredRecordings.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="space-y-3">
-            {filteredRecordings.map((recording) => (
-              <RecordingCard
-                key={recording.id}
-                recording={recording}
-                pushEnabled={pushEnabled}
-                slackConnected={slackConnected}
-                onHide={handleHideRecording}
-                onPin={handlePinRecording}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </>
+    <div className="px-4 py-4">
+      {recordings.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="space-y-3">
+          {recordings.map((recording) => (
+            <RecordingCard
+              key={recording.id}
+              recording={recording}
+              pushEnabled={pushEnabled}
+              slackConnected={slackConnected}
+              onHide={handleHideRecording}
+              onPin={handlePinRecording}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import Image from "next/image";
 
 interface NotionDatabase {
   id: string;
@@ -246,8 +247,8 @@ export function IntegrationsSection({
         {/* Notion */}
         <div className="p-3 border border-slate-200 rounded-xl">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-              📔
+            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
+              <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.notion.title}</h3>
@@ -397,8 +398,8 @@ export function IntegrationsSection({
         {/* Google Docs */}
         <div className="p-3 border border-slate-200 rounded-xl">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-              📄
+            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
+              <Image src="/logos/google-docs.png" alt="Google Docs" width={28} height={28} />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.google.title}</h3>
@@ -495,8 +496,8 @@ export function IntegrationsSection({
         {/* Slack */}
         <div className="p-3 border border-slate-200 rounded-xl">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-xl">
-              💬
+            <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
+              <Image src="/logos/slack.png" alt="Slack" width={28} height={28} />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.slack.title}</h3>
