@@ -8,7 +8,6 @@ import { getFileExtension } from "@/hooks/useAudioRecorder";
 import { BottomTab } from "@/components/navigation/bottom-tab";
 import { useI18n } from "@/lib/i18n";
 import { DashboardPWAInstallModal } from "@/components/pwa/dashboard-install-modal";
-import { SplashScreen } from "@/components/splash-screen";
 
 // =============================================================================
 // Types
@@ -113,9 +112,6 @@ export function DashboardClient({ initialConnectionStatus }: DashboardClientProp
 
   return (
     <div className="app-container">
-      {/* Splash Screen - shows only on first visit per session */}
-      <SplashScreen />
-
       {/* Header */}
       <header className="app-header">
         <div className="flex items-center gap-2">
