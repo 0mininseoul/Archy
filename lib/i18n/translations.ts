@@ -392,7 +392,7 @@ export const translations = {
       iosChrome: {
         step1: "화면 상단 우측의 공유 버튼을 탭하세요",
         step2: "'홈 화면에 추가'를 선택하세요",
-        tip: "Tip: Safari에서 열면 더 쉽게 추가할 수 있어요!",
+
       },
       desktopMessage: "모바일에서 더 편리하게 사용할 수 있어요!",
       browserNotSupported: "이 브라우저에서는 홈 화면 추가 기능을 사용할 수 없습니다.",
@@ -809,7 +809,7 @@ export const translations = {
       iosChrome: {
         step1: "Tap the share button at the top right",
         step2: "Select 'Add to Home Screen'",
-        tip: "Tip: Open in Safari for easier installation!",
+
       },
       desktopMessage: "Use on mobile for a better experience!",
       browserNotSupported: "Add to home screen is not supported in this browser.",

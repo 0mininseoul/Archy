@@ -180,11 +180,7 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
                 {t.pwaModal.iosChrome.step2}
               </p>
             </div>
-            <div className="p-2 bg-blue-50 border border-blue-100 rounded-lg">
-              <p className="text-xs text-blue-700">
-                {t.pwaModal.iosChrome.tip}
-              </p>
-            </div>
+
           </div>
         )}
 

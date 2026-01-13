@@ -1,15 +1,9 @@
-import Image from "next/image";
-
 export default function Loading() {
     return (
-        <div className="fixed inset-0 z-50 h-[100dvh] w-full bg-[#0f172a] animate-fade-in">
-            <Image
-                src="/splash-screen.png"
-                alt="Archy Splash Screen"
-                fill
-                className="object-cover"
-                priority
-            />
+        <div className="app-container">
+            <div className="flex items-center justify-center h-full w-full">
+                <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
+            </div>
         </div>
     );
 }

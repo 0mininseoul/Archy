@@ -300,11 +300,7 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
               </div>
             </div>
 
-            <div className="p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
-              <p className="text-xs text-blue-700">
-                <strong>Tip:</strong> Safari에서 열면 더 쉽게 추가할 수 있습니다!
-              </p>
-            </div>
+
           </div>
         </div>
 
