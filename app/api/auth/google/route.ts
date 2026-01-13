@@ -21,7 +21,6 @@ export async function GET(request: NextRequest) {
   // Google OAuth URL 생성
   const scopes = [
     "https://www.googleapis.com/auth/drive.file", // 앱이 생성한 파일만 접근
-    "https://www.googleapis.com/auth/documents", // Google Docs 접근
   ];
 
   const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
