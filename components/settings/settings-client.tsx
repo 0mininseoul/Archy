@@ -32,16 +32,11 @@ interface CustomFormat {
   created_at: string;
 }
 
-interface SettingsClientProps {
-  email: string;
-  customFormats: CustomFormat[];
-}
-
 // =============================================================================
 // Component
 // =============================================================================
 
-export function SettingsClient({ email, customFormats }: SettingsClientProps) {
+export function SettingsClient() {
   const router = useRouter();
   const { t } = useI18n();
 
@@ -50,6 +45,9 @@ export function SettingsClient({ email, customFormats }: SettingsClientProps) {
 
   // Push notification support check
   const [pushSupported, setPushSupported] = useState(false);
+
+  // Custom formats (fetched client-side)
+  const [customFormats, setCustomFormats] = useState<CustomFormat[]>([]);
 
   // Use cached data from store
   const {
@@ -73,11 +71,25 @@ export function SettingsClient({ email, customFormats }: SettingsClientProps) {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [audioStorageEnabled, setAudioStorageEnabled] = useState(false);
 
-  // Fetch user data on mount if not already loaded
+  // Fetch user data and custom formats on mount
   useEffect(() => {
     if (!userLoaded) {
       fetchUserData();
     }
+
+    // Fetch custom formats
+    const fetchFormats = async () => {
+      try {
+        const response = await fetch("/api/formats");
+        if (response.ok) {
+          const data = await response.json();
+          setCustomFormats(data.data || data.formats || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch formats:", error);
+      }
+    };
+    fetchFormats();
   }, [userLoaded, fetchUserData]);
 
   // Sync store data to local state
@@ -159,7 +171,10 @@ export function SettingsClient({ email, customFormats }: SettingsClientProps) {
     invalidateUser();
   }, [invalidateUser]);
 
-  // Show loading skeleton on initial load
+  // Get email from settings
+  const email = settings?.email || "";
+
+  // Show loading skeleton only on initial load when no cached data exists
   if (!userLoaded && !connectionStatus) {
     return (
       <div className="space-y-4">

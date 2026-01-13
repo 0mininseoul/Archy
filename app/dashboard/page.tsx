@@ -1,18 +1,9 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+"use client";
+
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/");
-  }
-
-  // Pass minimal data - the client will fetch and cache user data
+export default function DashboardPage() {
+  // Authentication is handled by middleware
+  // No server-side auth check needed
   return <DashboardClient />;
 }

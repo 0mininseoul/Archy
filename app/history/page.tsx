@@ -1,20 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+"use client";
+
 import { BottomTab } from "@/components/navigation/bottom-tab";
 import { HistoryClient } from "@/components/history/history-client";
 
-export default async function HistoryPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/");
-  }
-
-  // Pass minimal data - the client will fetch and cache recordings
+export default function HistoryPage() {
+  // Authentication is handled by middleware
+  // No server-side auth check needed
   return (
     <div className="app-container">
       {/* Header */}
