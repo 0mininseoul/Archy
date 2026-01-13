@@ -399,6 +399,17 @@ export const translations = {
       later: "나중에",
     },
 
+    // In-App Browser Modal
+    inAppBrowser: {
+      title: "외부 브라우저에서 열어주세요",
+      description: "원활한 서비스 이용을 위해\nSafari에서 열어주세요.",
+      step1: "우측 하단의",
+      shareIcon: "공유 아이콘",
+      step2: "을 탭하세요",
+      step3: "'Safari로 열기'를 선택하세요",
+      confirm: "확인",
+    },
+
     // Errors
     errors: {
       uploadFailed: "녹음 업로드에 실패했습니다. 다시 시도해주세요.",
@@ -803,6 +814,17 @@ export const translations = {
       desktopMessage: "Use on mobile for a better experience!",
       browserNotSupported: "Add to home screen is not supported in this browser.",
       later: "Later",
+    },
+
+    // In-App Browser Modal
+    inAppBrowser: {
+      title: "Open in External Browser",
+      description: "For the best experience,\nplease open in Safari.",
+      step1: "Tap the",
+      shareIcon: "share icon",
+      step2: "at the bottom right",
+      step3: "Select 'Open in Safari'",
+      confirm: "OK",
     },
 
     // Errors
