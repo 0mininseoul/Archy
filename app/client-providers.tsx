@@ -14,11 +14,19 @@ const RegisterServiceWorkerComponent = dynamic(
     { ssr: false }
 );
 
+// Dynamic import for PWA installation tracking
+const PWAInstaller = dynamic(
+    () => import("@/components/pwa/pwa-installer").then((mod) => ({ default: mod.PWAInstaller })),
+    { ssr: false }
+);
+
 export function ClientProviders() {
     return (
         <>
             <RegisterServiceWorkerComponent />
             <AmplitudeAnalytics />
+            <PWAInstaller />
         </>
     );
 }
+
