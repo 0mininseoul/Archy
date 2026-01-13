@@ -13,18 +13,6 @@ export default async function DashboardPage() {
     redirect("/");
   }
 
-  // Fetch connection status on the server
-  const { data: userData } = await supabase
-    .from("users")
-    .select("notion_access_token, slack_access_token, google_access_token")
-    .eq("id", user.id)
-    .single();
-
-  const initialConnectionStatus = {
-    notionConnected: !!userData?.notion_access_token,
-    slackConnected: !!userData?.slack_access_token,
-    googleConnected: !!userData?.google_access_token,
-  };
-
-  return <DashboardClient initialConnectionStatus={initialConnectionStatus} />;
+  // Pass minimal data - the client will fetch and cache user data
+  return <DashboardClient />;
 }

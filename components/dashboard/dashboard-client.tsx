@@ -8,34 +8,34 @@ import { getFileExtension } from "@/hooks/useAudioRecorder";
 import { BottomTab } from "@/components/navigation/bottom-tab";
 import { useI18n } from "@/lib/i18n";
 import { DashboardPWAInstallModal } from "@/components/pwa/dashboard-install-modal";
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface DashboardClientProps {
-  initialConnectionStatus: {
-    notionConnected: boolean;
-    slackConnected: boolean;
-    googleConnected: boolean;
-  };
-}
+import { useUserStore } from "@/lib/stores/user-store";
+import { useRecordingsStore } from "@/lib/stores/recordings-store";
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export function DashboardClient({ initialConnectionStatus }: DashboardClientProps) {
+export function DashboardClient() {
   const router = useRouter();
   const { t } = useI18n();
   const [isUploading, setIsUploading] = useState(false);
-  const [notionConnected, setNotionConnected] = useState(initialConnectionStatus.notionConnected);
-  const [slackConnected, setSlackConnected] = useState(initialConnectionStatus.slackConnected);
-  const [googleConnected, setGoogleConnected] = useState(initialConnectionStatus.googleConnected);
   const [showPWAModal, setShowPWAModal] = useState(false);
 
+  // Use cached data from store
+  const { connectionStatus, fetchUserData, isLoaded: userLoaded } = useUserStore();
+  const { invalidate: invalidateRecordings } = useRecordingsStore();
+
+  // Fetch user data on mount if not already loaded
+  useEffect(() => {
+    if (!userLoaded) {
+      fetchUserData();
+    }
+  }, [userLoaded, fetchUserData]);
+
   // Show settings tooltip when integrations not configured
-  const showSettingsTooltip = (!notionConnected && !googleConnected) || !slackConnected;
+  const showSettingsTooltip = connectionStatus
+    ? (!connectionStatus.notionConnected && !connectionStatus.googleConnected) || !connectionStatus.slackConnected
+    : false;
 
   useEffect(() => {
     // PWA install modal check
@@ -100,6 +100,9 @@ export function DashboardClient({ initialConnectionStatus }: DashboardClientProp
           throw new Error(errorData.error || "Upload failed");
         }
 
+        // Invalidate recordings cache so history page fetches fresh data
+        invalidateRecordings();
+
         router.push("/history");
       } catch (error) {
         console.error("Error uploading recording:", error);
@@ -107,7 +110,7 @@ export function DashboardClient({ initialConnectionStatus }: DashboardClientProp
         setIsUploading(false);
       }
     },
-    [router, t]
+    [router, t, invalidateRecordings]
   );
 
   return (

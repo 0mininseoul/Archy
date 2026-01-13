@@ -14,21 +14,7 @@ export default async function HistoryPage() {
     redirect("/");
   }
 
-  // Fetch recordings on the server
-  const { data: recordings } = await supabase
-    .from("recordings")
-    .select("*")
-    .eq("user_id", user.id)
-    .neq("is_hidden", true)
-    .order("created_at", { ascending: false });
-
-  // Fetch user settings for dynamic messages
-  const { data: profile } = await supabase
-    .from("users")
-    .select("push_enabled, slack_access_token")
-    .eq("id", user.id)
-    .single();
-
+  // Pass minimal data - the client will fetch and cache recordings
   return (
     <div className="app-container">
       {/* Header */}
@@ -38,11 +24,7 @@ export default async function HistoryPage() {
 
       {/* Main Content */}
       <main className="app-main">
-        <HistoryClient
-          initialRecordings={recordings || []}
-          pushEnabled={profile?.push_enabled ?? false}
-          slackConnected={!!profile?.slack_access_token}
-        />
+        <HistoryClient />
       </main>
 
       {/* Bottom Tab Navigation */}

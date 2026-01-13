@@ -14,38 +14,13 @@ export default async function SettingsPage() {
     redirect("/");
   }
 
-  // Fetch all data on the server in parallel
-  const [{ data: userData }, { data: formatsData }] = await Promise.all([
-    supabase
-      .from("users")
-      .select("monthly_minutes_used, notion_access_token, notion_database_id, notion_save_target_type, notion_save_target_title, slack_access_token, google_access_token, google_folder_id, google_folder_name, push_enabled, bonus_minutes, save_audio_enabled")
-      .eq("id", user.id)
-      .single(),
-    supabase
-      .from("custom_formats")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-  ]);
-
-  const initialData = {
-    email: user.email || "",
-    usage: {
-      used: userData?.monthly_minutes_used || 0,
-      limit: 350 + (userData?.bonus_minutes || 0),
-    },
-    notionConnected: !!userData?.notion_access_token,
-    slackConnected: !!userData?.slack_access_token,
-    googleConnected: !!userData?.google_access_token,
-    notionDatabaseId: userData?.notion_database_id || null,
-    notionSaveTargetType: userData?.notion_save_target_type || null,
-    notionSaveTargetTitle: userData?.notion_save_target_title || null,
-    googleFolderId: userData?.google_folder_id || null,
-    googleFolderName: userData?.google_folder_name || null,
-    customFormats: formatsData || [],
-    pushEnabled: userData?.push_enabled || false,
-    audioStorageEnabled: userData?.save_audio_enabled || false,
-  };
+  // Pass minimal data - the client will fetch and cache user data
+  // Custom formats still need to be fetched separately
+  const { data: formatsData } = await supabase
+    .from("custom_formats")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
 
   return (
     <div className="app-container">
@@ -56,7 +31,10 @@ export default async function SettingsPage() {
 
       {/* Main Content */}
       <main className="app-main px-4 py-4">
-        <SettingsClient initialData={initialData} />
+        <SettingsClient
+          email={user.email || ""}
+          customFormats={formatsData || []}
+        />
       </main>
 
       {/* Bottom Tab Navigation */}

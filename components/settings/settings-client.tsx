@@ -12,6 +12,7 @@ import {
   DataManagementSection,
   LanguageSection,
 } from "./sections";
+import { useUserStore } from "@/lib/stores/user-store";
 
 // =============================================================================
 // Types
@@ -31,31 +32,16 @@ interface CustomFormat {
   created_at: string;
 }
 
-interface InitialData {
-  email: string;
-  usage: { used: number; limit: number };
-  notionConnected: boolean;
-  slackConnected: boolean;
-  googleConnected: boolean;
-  notionDatabaseId: string | null;
-  notionSaveTargetType: "database" | "page" | null;
-  notionSaveTargetTitle: string | null;
-  googleFolderId: string | null;
-  googleFolderName: string | null;
-  customFormats: CustomFormat[];
-  pushEnabled: boolean;
-  audioStorageEnabled: boolean;
-}
-
 interface SettingsClientProps {
-  initialData: InitialData;
+  email: string;
+  customFormats: CustomFormat[];
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export function SettingsClient({ initialData }: SettingsClientProps) {
+export function SettingsClient({ email, customFormats }: SettingsClientProps) {
   const router = useRouter();
   const { t } = useI18n();
 
@@ -65,24 +51,64 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
   // Push notification support check
   const [pushSupported, setPushSupported] = useState(false);
 
-  // State for values that can change after OAuth callbacks
-  const [notionConnected, setNotionConnected] = useState(initialData.notionConnected);
-  const [googleConnected, setGoogleConnected] = useState(initialData.googleConnected);
-  const [usage, setUsage] = useState(initialData.usage);
-  const [saveTarget, setSaveTarget] = useState<NotionSaveTarget | null>(() => {
-    if (initialData.notionDatabaseId && initialData.notionSaveTargetType && initialData.notionSaveTargetTitle) {
-      return {
-        type: initialData.notionSaveTargetType,
-        id: initialData.notionDatabaseId,
-        title: initialData.notionSaveTargetTitle,
-      };
+  // Use cached data from store
+  const {
+    connectionStatus,
+    settings,
+    fetchUserData,
+    isLoaded: userLoaded,
+    invalidate: invalidateUser,
+  } = useUserStore();
+
+  // Local state for values that can change after OAuth callbacks
+  const [notionConnected, setNotionConnected] = useState(false);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [usage, setUsage] = useState({ used: 0, limit: 350 });
+  const [saveTarget, setSaveTarget] = useState<NotionSaveTarget | null>(null);
+  const [googleFolder, setGoogleFolder] = useState<{ id: string | null; name: string | null }>({
+    id: null,
+    name: null,
+  });
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [audioStorageEnabled, setAudioStorageEnabled] = useState(false);
+
+  // Fetch user data on mount if not already loaded
+  useEffect(() => {
+    if (!userLoaded) {
+      fetchUserData();
     }
-    return null;
-  });
-  const [googleFolder, setGoogleFolder] = useState({
-    id: initialData.googleFolderId,
-    name: initialData.googleFolderName,
-  });
+  }, [userLoaded, fetchUserData]);
+
+  // Sync store data to local state
+  useEffect(() => {
+    if (connectionStatus) {
+      setNotionConnected(connectionStatus.notionConnected);
+      setGoogleConnected(connectionStatus.googleConnected);
+      setSlackConnected(connectionStatus.slackConnected);
+    }
+    if (settings) {
+      setUsage({
+        used: settings.monthlyMinutesUsed,
+        limit: 350 + settings.bonusMinutes,
+      });
+      setPushEnabled(settings.pushEnabled);
+      setAudioStorageEnabled(settings.saveAudioEnabled);
+
+      if (settings.notionDatabaseId && settings.notionSaveTargetType && settings.notionSaveTargetTitle) {
+        setSaveTarget({
+          type: settings.notionSaveTargetType,
+          id: settings.notionDatabaseId,
+          title: settings.notionSaveTargetTitle,
+        });
+      }
+
+      setGoogleFolder({
+        id: settings.googleFolderId,
+        name: settings.googleFolderName,
+      });
+    }
+  }, [connectionStatus, settings]);
 
   // Handle OAuth callback URL params
   useEffect(() => {
@@ -93,9 +119,10 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     if (isNotionJustConnected || isGoogleJustConnected) {
       window.history.replaceState({}, "", "/settings");
 
-      // Wait for DB save then refresh data
-      setTimeout(async () => {
-        await refreshData();
+      // Invalidate cache and refresh data
+      invalidateUser();
+      setTimeout(() => {
+        fetchUserData();
       }, 800);
     }
 
@@ -103,45 +130,13 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     if ("serviceWorker" in navigator && "PushManager" in window) {
       setPushSupported(true);
     }
-  }, []);
-
-  const refreshData = useCallback(async () => {
-    try {
-      const [usageResponse, userResponse] = await Promise.all([
-        fetch("/api/user/usage"),
-        fetch("/api/user/profile"),
-      ]);
-
-      const usageData = await usageResponse.json();
-      const userData = await userResponse.json();
-
-      setUsage({
-        used: usageData.used || 0,
-        limit: usageData.limit || 350,
-      });
-      setNotionConnected(!!userData.notion_access_token);
-      setGoogleConnected(!!userData.google_access_token);
-
-      if (userData.notion_database_id && userData.notion_save_target_type) {
-        setSaveTarget({
-          type: userData.notion_save_target_type,
-          id: userData.notion_database_id,
-          title: userData.notion_save_target_title || "",
-        });
-      }
-
-      setGoogleFolder({
-        id: userData.google_folder_id || null,
-        name: userData.google_folder_name || null,
-      });
-    } catch (error) {
-      console.error("Failed to refresh data:", error);
-    }
-  }, []);
+  }, [invalidateUser, fetchUserData]);
 
   const handleSignOut = useCallback(async () => {
     try {
       await fetch("/api/auth/signout", { method: "POST" });
+      // Clear all stores on logout
+      useUserStore.getState().invalidate();
       router.push("/");
     } catch (error) {
       console.error("Failed to sign out:", error);
@@ -155,22 +150,48 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
   const handleNotionDisconnect = useCallback(() => {
     setNotionConnected(false);
     setSaveTarget(null);
-  }, []);
+    invalidateUser();
+  }, [invalidateUser]);
 
   const handleGoogleDisconnect = useCallback(() => {
     setGoogleConnected(false);
     setGoogleFolder({ id: null, name: null });
-  }, []);
+    invalidateUser();
+  }, [invalidateUser]);
+
+  // Show loading skeleton on initial load
+  if (!userLoaded && !connectionStatus) {
+    return (
+      <div className="space-y-4">
+        {/* Account Section Skeleton */}
+        <div className="card p-4">
+          <div className="space-y-3">
+            <div className="h-5 w-32 bg-slate-100 rounded animate-pulse" />
+            <div className="h-4 w-48 bg-slate-100 rounded animate-pulse" />
+            <div className="h-2 w-full bg-slate-100 rounded animate-pulse" />
+          </div>
+        </div>
+        {/* Integrations Skeleton */}
+        <div className="card p-4">
+          <div className="space-y-3">
+            <div className="h-5 w-24 bg-slate-100 rounded animate-pulse" />
+            <div className="h-10 w-full bg-slate-100 rounded animate-pulse" />
+            <div className="h-10 w-full bg-slate-100 rounded animate-pulse" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       {/* 1. Account Info */}
-      <AccountSection email={initialData.email} usage={usage} />
+      <AccountSection email={email} usage={usage} />
 
       {/* 2. Integrations */}
       <IntegrationsSection
         notionConnected={notionConnected}
-        slackConnected={initialData.slackConnected}
+        slackConnected={slackConnected}
         googleConnected={googleConnected}
         initialSaveTarget={saveTarget}
         initialGoogleFolder={googleFolder}
@@ -179,7 +200,7 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       />
 
       {/* 3. Custom Formats */}
-      <CustomFormatsSection initialFormats={initialData.customFormats} />
+      <CustomFormatsSection initialFormats={customFormats} />
 
       {/* 4. Invite Friends */}
       <InviteFriends />
@@ -187,7 +208,7 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       {/* 5. Push Notifications (Accordion) */}
       {pushSupported && (
         <PushNotificationSection
-          initialEnabled={initialData.pushEnabled}
+          initialEnabled={pushEnabled}
           isOpen={openSection === "push"}
           onToggle={() => toggleSection("push")}
         />
@@ -197,7 +218,7 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
       <DataManagementSection
         isOpen={openSection === "data"}
         onToggle={() => toggleSection("data")}
-        initialAudioStorageEnabled={initialData.audioStorageEnabled}
+        initialAudioStorageEnabled={audioStorageEnabled}
       />
 
       {/* 7. Language (Accordion) */}

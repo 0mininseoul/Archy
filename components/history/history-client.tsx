@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Recording } from "@/types";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { RecordingCard, FilterChips, EmptyState } from "./sections";
+import { useRecordingsStore } from "@/lib/stores/recordings-store";
+import { useUserStore } from "@/lib/stores/user-store";
 
 // =============================================================================
 // Types
@@ -11,114 +12,151 @@ import { RecordingCard, FilterChips, EmptyState } from "./sections";
 
 type FilterValue = "all" | "processing" | "completed" | "failed";
 
-interface HistoryClientProps {
-  initialRecordings: Recording[];
-  pushEnabled: boolean;
-  slackConnected: boolean;
-}
-
 // =============================================================================
 // Component
 // =============================================================================
 
-export function HistoryClient({ initialRecordings, pushEnabled, slackConnected }: HistoryClientProps) {
+export function HistoryClient() {
   const { t } = useI18n();
-  const [recordings, setRecordings] = useState<Recording[]>(initialRecordings);
   const [filter, setFilter] = useState<FilterValue>("all");
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Polling for processing recordings & Refresh on mount
+  // Use cached data from stores
+  const {
+    recordings,
+    isLoaded,
+    isLoading,
+    fetchRecordings,
+    updateRecording,
+    removeRecording,
+  } = useRecordingsStore();
+
+  const { connectionStatus, settings, fetchUserData, isLoaded: userLoaded } = useUserStore();
+
+  // Fetch data on mount if not already loaded
   useEffect(() => {
-    const fetchRecordings = async () => {
-      try {
-        const response = await fetch("/api/recordings");
-        const data = await response.json();
-        setRecordings(data.data?.recordings || data.recordings || []);
-      } catch (error) {
-        console.error("Failed to fetch recordings:", error);
+    if (!isLoaded) {
+      fetchRecordings();
+    }
+    if (!userLoaded) {
+      fetchUserData();
+    }
+  }, [isLoaded, fetchRecordings, userLoaded, fetchUserData]);
+
+  // Polling for processing recordings
+  useEffect(() => {
+    const hasProcessing = recordings.some((r) => r.status === "processing");
+
+    if (hasProcessing) {
+      // Start polling
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          const response = await fetch("/api/recordings");
+          const data = await response.json();
+          const freshRecordings = data.data?.recordings || data.recordings || [];
+          useRecordingsStore.getState().setRecordings(freshRecordings);
+        } catch (error) {
+          console.error("Failed to poll recordings:", error);
+        }
+      }, 3000);
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
+  }, [recordings]);
 
-    // Always fetch once on mount to ensure fresh data
-    fetchRecordings();
-
-    // Check if we need to poll
-    const hasProcessing = recordings.some((r) => r.status === "processing");
-    if (!hasProcessing) return;
-
-    const interval = setInterval(fetchRecordings, 3000);
-
-    return () => clearInterval(interval);
-  }, []); // Remove dependency on recordings to avoid infinite loops, rely on internal state check or re-render if needed. 
-  // actually, to support polling when status changes, we should maybe keep it simple.
-  // The user wants fresh data when coming back. simple fetch on mount does that.
-
-  // Revised approach: 
-  // 1. Fetch immediately on mount.
-  // 2. Set interval if processing items exist in the *fetched* data (need to be careful about state updates).
-  // Let's stick to the existing pattern but add an immediate fetch.
-
-
-  const handleHideRecording = useCallback(async (id: string) => {
-    try {
-      const response = await fetch(`/api/recordings/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_hidden: true }),
-      });
-
-      if (response.ok) {
-        setRecordings((prev) => prev.filter((r) => r.id !== id));
-      } else {
-        throw new Error("Hide failed");
-      }
-    } catch (error) {
-      console.error("Failed to hide recording:", error);
-      alert("녹음을 숨기는데 실패했습니다.");
-    }
-  }, []);
-
-  const handlePinRecording = useCallback(async (id: string, isPinned: boolean) => {
-    // Optimistic update
-    setRecordings((prev) => {
-      const updated = prev.map((r) => (r.id === id ? { ...r, is_pinned: isPinned } : r));
-      return updated.sort((a, b) => {
-        if (a.is_pinned === b.is_pinned) {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        }
-        return a.is_pinned ? -1 : 1;
-      });
-    });
-
-    try {
-      const response = await fetch(`/api/recordings/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_pinned: isPinned }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Pin failed");
-      }
-    } catch (error) {
-      console.error("Failed to pin recording:", error);
-      alert("고정 설정을 변경하는데 실패했습니다.");
-      // Revert optimism
-      setRecordings((prev) => {
-        const updated = prev.map((r) => (r.id === id ? { ...r, is_pinned: !isPinned } : r));
-        return updated.sort((a, b) => {
-          if (a.is_pinned === b.is_pinned) {
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-          }
-          return a.is_pinned ? -1 : 1;
+  const handleHideRecording = useCallback(
+    async (id: string) => {
+      try {
+        const response = await fetch(`/api/recordings/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_hidden: true }),
         });
-      });
-    }
-  }, []);
+
+        if (response.ok) {
+          removeRecording(id);
+        } else {
+          throw new Error("Hide failed");
+        }
+      } catch (error) {
+        console.error("Failed to hide recording:", error);
+        alert("녹음을 숨기는데 실패했습니다.");
+      }
+    },
+    [removeRecording]
+  );
+
+  const handlePinRecording = useCallback(
+    async (id: string, isPinned: boolean) => {
+      // Optimistic update
+      updateRecording(id, { is_pinned: isPinned });
+
+      try {
+        const response = await fetch(`/api/recordings/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_pinned: isPinned }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Pin failed");
+        }
+      } catch (error) {
+        console.error("Failed to pin recording:", error);
+        alert("고정 설정을 변경하는데 실패했습니다.");
+        // Revert optimistic update
+        updateRecording(id, { is_pinned: !isPinned });
+      }
+    },
+    [updateRecording]
+  );
 
   const filteredRecordings = recordings.filter((recording) => {
     if (filter === "all") return true;
     return recording.status === filter;
   });
+
+  // Show loading state only on initial load
+  if (!isLoaded && isLoading) {
+    return (
+      <>
+        {/* Filter Chips Skeleton */}
+        <div className="px-4 py-3 border-b border-slate-100">
+          <div className="flex gap-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-[44px] w-16 bg-slate-100 rounded-full animate-pulse"
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Recordings List Skeleton */}
+        <div className="px-4 py-4 space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="card p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 animate-pulse" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-5 w-3/4 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-4 w-1/2 bg-slate-100 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  const pushEnabled = settings?.pushEnabled ?? false;
+  const slackConnected = connectionStatus?.slackConnected ?? false;
 
   return (
     <>
