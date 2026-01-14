@@ -246,7 +246,7 @@ export function IntegrationsSection({
       <div className="space-y-3">
         {/* Notion */}
         <div className="p-3 border border-slate-200 rounded-xl">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
               <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
             </div>
@@ -260,18 +260,25 @@ export function IntegrationsSection({
                   : t.settings.integrations.notion.notConnected}
               </p>
             </div>
-            {notionConnected && (
+            {notionConnected ? (
               <button
                 onClick={handleDisconnectNotion}
-                className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
+                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
               >
                 해지
+              </button>
+            ) : (
+              <button
+                onClick={() => handleConnect("notion")}
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+              >
+                연결
               </button>
             )}
           </div>
 
-          {notionConnected ? (
-            <div className="relative">
+          {notionConnected && (
+            <div className="mt-3 relative">
               <button
                 onClick={openSaveTargetDropdown}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-left text-sm font-medium text-slate-700 flex items-center justify-between min-h-[44px]"
@@ -385,19 +392,12 @@ export function IntegrationsSection({
                 </div>
               )}
             </div>
-          ) : (
-            <button
-              onClick={() => handleConnect("notion")}
-              className="w-full px-4 py-2.5 bg-slate-900 text-white rounded-lg font-bold text-sm min-h-[44px]"
-            >
-              {t.settings.integrations.notion.connect}
-            </button>
           )}
         </div>
 
         {/* Google Docs */}
         <div className="p-3 border border-slate-200 rounded-xl">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
               <Image src="/logos/google-docs.png" alt="Google Docs" width={28} height={28} />
             </div>
@@ -411,18 +411,26 @@ export function IntegrationsSection({
                   : t.settings.integrations.google.notConnected}
               </p>
             </div>
-            {googleConnected && (
+            {googleConnected ? (
               <button
                 onClick={handleDisconnectGoogle}
-                className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 min-h-[36px]"
+                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
               >
                 {t.settings.integrations.google.disconnect}
               </button>
+            ) : (
+              <button
+                onClick={() => handleConnect("google")}
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+              >
+                {t.settings.integrations.google.connect}
+              </button>
             )}
+
           </div>
 
-          {googleConnected ? (
-            <div className="relative">
+          {googleConnected && (
+            <div className="mt-3 relative">
               <button
                 onClick={() => {
                   setShowGoogleFolderDropdown(true);
@@ -483,13 +491,6 @@ export function IntegrationsSection({
                 </div>
               )}
             </div>
-          ) : (
-            <button
-              onClick={() => handleConnect("google")}
-              className="w-full px-4 py-2.5 bg-slate-900 text-white rounded-lg font-bold text-sm min-h-[44px]"
-            >
-              {t.settings.integrations.google.connect}
-            </button>
           )}
         </div>
 
@@ -503,12 +504,22 @@ export function IntegrationsSection({
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.slack.title}</h3>
               <p className="text-xs text-slate-500">{t.settings.integrations.slack.description}</p>
             </div>
-            <button
-              onClick={() => handleConnect("slack")}
-              className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[44px]"
-            >
-              {slackConnected ? t.settings.integrations.slack.reconnect : "연결"}
-            </button>
+            {slackConnected ? (
+              <button
+                onClick={() => handleConnect("slack")}
+                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
+              >
+                {t.settings.integrations.slack.reconnect}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleConnect("slack")}
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+              >
+                연결
+              </button>
+            )}
+
           </div>
         </div>
       </div>

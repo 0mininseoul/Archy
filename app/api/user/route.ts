@@ -26,6 +26,8 @@ export const GET = withAuth(async ({ user, supabase }) => {
 
     return successResponse({
         email: user.email,
+        name: user.user_metadata?.name || user.user_metadata?.full_name || null,
+        avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
         notion_access_token: userData?.notion_access_token || null,
         notion_database_id: userData?.notion_database_id || null,
         notion_save_target_type: userData?.notion_save_target_type || null,

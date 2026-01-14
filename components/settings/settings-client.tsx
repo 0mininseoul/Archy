@@ -204,7 +204,12 @@ export function SettingsClient() {
   return (
     <div className="space-y-4">
       {/* 1. Account Info */}
-      <AccountSection email={email} usage={usage} />
+      <AccountSection
+        email={email}
+        name={settings?.name}
+        avatarUrl={settings?.avatar_url}
+        usage={usage}
+      />
 
       {/* 2. Integrations */}
       <IntegrationsSection

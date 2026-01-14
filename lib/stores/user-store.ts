@@ -13,6 +13,8 @@ interface ConnectionStatus {
 }
 
 interface UserSettings {
+    name: string | null;
+    avatar_url: string | null;
     email: string;
     pushEnabled: boolean;
     saveAudioEnabled: boolean;
@@ -79,6 +81,8 @@ export const useUserStore = create<UserStore>((set, get) => ({
                     googleConnected: !!userData.google_access_token,
                 },
                 settings: {
+                    name: userData.name || null,
+                    avatar_url: userData.avatar_url || null,
                     email: userData.email || "",
                     pushEnabled: userData.push_enabled || false,
                     saveAudioEnabled: userData.save_audio_enabled || false,
