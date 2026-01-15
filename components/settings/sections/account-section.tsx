@@ -12,7 +12,7 @@ interface AccountSectionProps {
   usage: { used: number; limit: number };
 }
 
-export function AccountSection({ email, name, avatarUrl }: AccountSectionProps) {
+export function AccountSection({ email, name, avatarUrl, usage }: AccountSectionProps) {
   const { t } = useI18n();
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
 
@@ -74,11 +74,14 @@ export function AccountSection({ email, name, avatarUrl }: AccountSectionProps) 
             */}
         <div className="mt-6">
           <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-2">
-            <div className="h-full bg-slate-200" style={{ width: '0%' }} /> {/* Mocked at 0 for now or use prop */}
+            <div
+              className="h-full bg-slate-900 transition-all duration-500"
+              style={{ width: `${Math.min((usage.used / usage.limit) * 100, 100)}%` }}
+            />
           </div>
           <div className="flex justify-between text-sm text-slate-900">
-            <span>0분 사용</span>
-            <span className="text-slate-500">300분 사용가능</span>
+            <span>{usage.used}분 사용</span>
+            <span className="text-slate-500">{usage.limit}분 사용가능</span>
           </div>
         </div>
       </div>

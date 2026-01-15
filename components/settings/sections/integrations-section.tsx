@@ -227,6 +227,28 @@ export function IntegrationsSection({
     }
   };
 
+  // Slack handlers
+  const handleDisconnectSlack = async () => {
+    if (!confirm("Slack 연결을 해제하시겠습니까?")) return;
+
+    try {
+      const response = await fetch("/api/user/slack", { method: "DELETE" });
+      if (response.ok) {
+        // We might need a callback to update parent state, but assuming implicit reload or store update needs checking.
+        // The original code used window.location for connect.
+        // Here we just reload or expect store to update? 
+        // The prop 'slackConnected' comes from parent. Parent 'SettingsClient' gets it from store.
+        // Store FetchUserData should be called or page reload.
+        // For now, let's force a reload or assume parent updates if we had a callback passed.
+        // Actually, the original code for Notion/Google had 'onNotionDisconnect' callbacks.
+        // Slack prop didn't have one. We should probably accept one or just reload.
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error("Failed to disconnect Slack:", error);
+    }
+  };
+
   const filteredDatabases = databases.filter((db) =>
     db.title.toLowerCase().includes(saveTargetSearch.toLowerCase())
   );
@@ -263,14 +285,14 @@ export function IntegrationsSection({
             {notionConnected ? (
               <button
                 onClick={handleDisconnectNotion}
-                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
+                className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-50 transition-colors"
               >
                 해지
               </button>
             ) : (
               <button
                 onClick={() => handleConnect("notion")}
-                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-800 transition-colors"
               >
                 연결
               </button>
@@ -414,16 +436,16 @@ export function IntegrationsSection({
             {googleConnected ? (
               <button
                 onClick={handleDisconnectGoogle}
-                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
+                className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-50 transition-colors"
               >
-                {t.settings.integrations.google.disconnect}
+                해지
               </button>
             ) : (
               <button
                 onClick={() => handleConnect("google")}
-                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-800 transition-colors"
               >
-                {t.settings.integrations.google.connect}
+                연결
               </button>
             )}
 
@@ -506,15 +528,15 @@ export function IntegrationsSection({
             </div>
             {slackConnected ? (
               <button
-                onClick={() => handleConnect("slack")}
-                className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium min-h-[36px]"
+                onClick={handleDisconnectSlack}
+                className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-50 transition-colors"
               >
-                {t.settings.integrations.slack.reconnect}
+                해지
               </button>
             ) : (
               <button
                 onClick={() => handleConnect("slack")}
-                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px]"
+                className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-medium min-h-[36px] hover:bg-slate-800 transition-colors"
               >
                 연결
               </button>

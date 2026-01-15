@@ -139,36 +139,61 @@ export default function PrivacyPolicyPage() {
             </div>
           </section>
 
-          {/* 5. Entrustment (Third Party) */}
+          {/* 5. Entrustment (Third Party) / Sub-processors */}
           <section>
             <h2 className="text-2xl font-semibold text-gray-900 mb-6 flex justify-between items-center">
-              <span>5. 개인정보 처리의 위탁</span>
-              <span className="text-lg font-normal text-gray-400">Entrustment of Data Processing</span>
+              <span>5. 개인정보 처리의 위탁 (Sub-processors)</span>
+              <span className="text-lg font-normal text-gray-400">Sub-processors</span>
             </h2>
+            <p className="text-gray-600 mb-4">
+              Archy는 서비스 제공을 위해 아래의 제3자 서비스 제공업체(Sub-processors)를 이용합니다.
+              <br />
+              <span className="text-gray-500">Archy uses the following third-party sub-processors to provide our services:</span>
+            </p>
             <div className="bg-gray-50 p-6 rounded-lg overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200">
-                    <th className="py-2 text-left">수탁 업체 (Processor)</th>
-                    <th className="py-2 text-left">업무 내용 (Service)</th>
+                    <th className="py-2 text-left">수탁 업체 (Sub-processor)</th>
+                    <th className="py-2 text-left">업무 내용 (Purpose)</th>
+                    <th className="py-2 text-left">데이터 위치 (Location)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   <tr>
                     <td className="py-3 font-medium">Supabase</td>
-                    <td className="py-3 text-gray-600">데이터베이스 호스팅 및 인증 (Hosting & Auth)</td>
+                    <td className="py-3 text-gray-600">데이터베이스 호스팅 및 인증 (Database Hosting & Authentication)</td>
+                    <td className="py-3 text-gray-500">United States</td>
                   </tr>
                   <tr>
-                    <td className="py-3 font-medium">OpenAI / Groq</td>
-                    <td className="py-3 text-gray-600">음성-텍스트 변환 및 AI 요약 (STT & AI Summarization)</td>
+                    <td className="py-3 font-medium">Groq</td>
+                    <td className="py-3 text-gray-600">음성-텍스트 변환 (Speech-to-Text Transcription)</td>
+                    <td className="py-3 text-gray-500">United States</td>
                   </tr>
                   <tr>
-                    <td className="py-3 font-medium">Google / Notion / Slack</td>
-                    <td className="py-3 text-gray-600">사용자 요청에 따른 문서 연동 및 알림 (Integration & Notifications)</td>
+                    <td className="py-3 font-medium">OpenAI</td>
+                    <td className="py-3 text-gray-600">AI 문서 포맷팅 (AI Document Formatting)</td>
+                    <td className="py-3 text-gray-500">United States</td>
                   </tr>
                   <tr>
                     <td className="py-3 font-medium">Vercel</td>
-                    <td className="py-3 text-gray-600">애플리케이션 호스팅 (Platform Hosting)</td>
+                    <td className="py-3 text-gray-600">애플리케이션 호스팅 (Application Hosting)</td>
+                    <td className="py-3 text-gray-500">United States</td>
+                  </tr>
+                  <tr>
+                    <td className="py-3 font-medium">Notion</td>
+                    <td className="py-3 text-gray-600">문서 내보내기 - 선택적 (Document Export - Optional)</td>
+                    <td className="py-3 text-gray-500">United States</td>
+                  </tr>
+                  <tr>
+                    <td className="py-3 font-medium">Google</td>
+                    <td className="py-3 text-gray-600">문서 내보내기 - 선택적 (Document Export - Optional)</td>
+                    <td className="py-3 text-gray-500">United States</td>
+                  </tr>
+                  <tr>
+                    <td className="py-3 font-medium">Slack</td>
+                    <td className="py-3 text-gray-600">알림 전송 - 선택적 (Notifications - Optional)</td>
+                    <td className="py-3 text-gray-500">United States</td>
                   </tr>
                 </tbody>
               </table>
