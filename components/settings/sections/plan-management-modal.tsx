@@ -63,16 +63,17 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         dragConstraints={{ top: 0, bottom: 0 }}
                         dragElastic={{ top: 0, bottom: 0.2 }}
                         onDragEnd={onDragEnd}
-                        className="fixed bottom-0 left-0 right-0 mx-auto md:max-w-[430px] bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[85vh] shadow-2xl"
+                        className="fixed bottom-0 left-0 right-0 mx-auto md:max-w-[430px] bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[80dvh] shadow-2xl"
+                        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
                     >
                         {/* Header / Drag Handle Area */}
                         <div
-                            className="pt-4 pb-2 px-6 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none select-none"
+                            className="pt-5 pb-2 px-6 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none select-none"
                             onPointerDown={(e) => dragControls.start(e)}
                         >
                             {/* Drag Indicator */}
                             <div className="flex justify-center mb-6">
-                                <div className="w-10 h-1 bg-slate-200 rounded-full" />
+                                <div className="w-12 h-1.5 bg-slate-200 rounded-full opacity-50" />
                             </div>
 
                             {/* Close Button (Absolute positioned to top-right of modal) */}
@@ -86,12 +87,12 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                             {/* Title Section */}
                             <div className="text-center mb-4">
                                 <div className="flex justify-center mb-4">
-                                    <div className="relative w-12 h-12">
+                                    <div className="relative w-12 h-12 shadow-sm rounded-xl overflow-hidden">
                                         <Image
                                             src="/icons/archy logo.png"
                                             fill
                                             alt="Archy Logo"
-                                            className="object-contain"
+                                            className="object-cover"
                                         />
                                     </div>
                                 </div>
@@ -164,11 +165,11 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         </div>
 
                         {/* Footer Button Area */}
-                        <div className="px-6 pt-4 pb-[env(safe-area-inset-bottom,20px)] bg-white border-t border-slate-50 mt-auto rounded-b-[2rem] safe-area-pb">
+                        <div className="px-6 pt-2 pb-8 bg-white border-t border-slate-50 mt-auto rounded-b-[2rem]">
                             <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98]">
                                 $3.99에 업그레이드
                             </button>
-                            <p className="text-center text-[11px] text-slate-400 mt-3 pb-4 leading-tight">
+                            <p className="text-center text-[10px] text-slate-400 mt-2.5 leading-tight">
                                 매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
                             </p>
                         </div>
