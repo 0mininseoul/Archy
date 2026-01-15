@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
+import { X, Check, Minus, Sparkles } from "lucide-react";
 
 interface PlanManagementModalProps {
     isOpen: boolean;
@@ -9,7 +10,7 @@ interface PlanManagementModalProps {
 }
 
 export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProps) {
-    const [selectedPlan, setSelectedPlan] = useState<"free" | "pro">("pro");
+    const dragControls = useDragControls();
 
     // Prevent background scrolling when modal is open
     useEffect(() => {
@@ -22,6 +23,12 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
             document.body.style.overflow = "unset";
         };
     }, [isOpen]);
+
+    const onDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+        if (info.offset.y > 100) {
+            onClose();
+        }
+    };
 
     return (
         <AnimatePresence>
@@ -42,108 +49,114 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         animate={{ y: 0 }}
                         exit={{ y: "100%" }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 p-6 max-h-[85vh] overflow-y-auto pb-10"
+                        drag="y"
+                        dragControls={dragControls}
+                        dragListener={false}
+                        dragConstraints={{ top: 0, bottom: 0 }}
+                        dragElastic={{ top: 0, bottom: 0.2 }}
+                        onDragEnd={onDragEnd}
+                        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[92vh]"
                     >
-                        {/* Handle Bar */}
-                        <div className="flex justify-center mb-6">
-                            <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
-                        </div>
+                        {/* Header / Drag Handle Area */}
+                        <div
+                            className="pt-4 pb-2 px-6 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+                            onPointerDown={(e) => dragControls.start(e)}
+                        >
+                            {/* Drag Indicator */}
+                            <div className="flex justify-center mb-4">
+                                <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+                            </div>
 
-                        {/* Header with Close Button */}
-                        <div className="flex justify-between items-start mb-6">
-                            <div className="pr-8">
-                                <h2 className="text-xl font-bold text-slate-900 leading-snug">
+                            {/* Close Button (Absolute positioned to top-right of modal) */}
+                            <button
+                                onClick={onClose}
+                                className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+
+                            {/* Title Section */}
+                            <div className="text-center mb-2">
+                                <div className="flex justify-center mb-4">
+                                    <Sparkles className="w-12 h-12 text-indigo-500 fill-indigo-100" />
+                                </div>
+                                <h2 className="text-2xl font-bold text-slate-900 leading-snug mb-2">
                                     아키를 무제한으로 사용하세요
                                 </h2>
-                                <p className="text-sm text-slate-500 mt-1">
+                                <p className="text-sm text-slate-500 whitespace-pre-wrap">
                                     지금 업그레이드하고 모든 기능을 마음껏 이용해보세요.
                                 </p>
                             </div>
-                            <button onClick={onClose} className="p-2 -mr-2 text-slate-400 hover:text-slate-600">
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
                         </div>
 
-                        {/* Feature List (Vertical) */}
-                        <div className="space-y-4 mb-8">
-                            <div className="flex items-center gap-3">
-                                <svg className="w-5 h-5 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span className="text-sm text-slate-700">노트당 60분 제한 해제</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <svg className="w-5 h-5 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span className="text-sm text-slate-700">고품질 한페이지 문서</span>
-                                <div className="ml-auto">
-                                    <span className="text-2xl text-slate-400">∞</span>
+                        {/* Content Scroll Area */}
+                        <div className="flex-1 overflow-y-auto px-6 pb-6">
+                            {/* Feature Comparison Table */}
+                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-1 mb-6">
+                                {/* Header Row */}
+                                <div className="grid grid-cols-[1.5fr_1fr_1fr] py-3 border-b border-slate-100">
+                                    <div className="pl-4 text-xs font-medium text-slate-400">기능</div>
+                                    <div className="text-center text-xs font-bold text-slate-500">Free</div>
+                                    <div className="text-center text-xs font-bold text-indigo-600">Pro</div>
                                 </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <svg className="w-5 h-5 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span className="text-sm text-slate-700">노트 기반 무제한 AI 채팅</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <svg className="w-5 h-5 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span className="text-sm text-slate-700">원하는 양식으로, 나만의 템플릿</span>
-                            </div>
-                        </div>
 
-                        {/* Plan Selection Cards */}
-                        <div className="space-y-3 mb-8">
-                            {/* Free Plan */}
-                            <div
-                                className={`border border-slate-200 rounded-xl p-4 flex items-center justify-between opacity-50`}
-                                onClick={() => setSelectedPlan('free')}
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 rounded-full border border-slate-300" />
-                                    <span className="font-bold text-slate-900 text-sm">Free</span>
-                                </div>
-                                <span className="text-sm text-slate-500">$0 / 월</span>
-                            </div>
-
-                            {/* Pro Plan (Selected) */}
-                            <div
-                                className={`border-2 rounded-xl p-4 flex items-center justify-between transition-colors cursor-pointer ${selectedPlan === 'pro' ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
-                                onClick={() => setSelectedPlan('pro')}
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="relative flex items-center justify-center">
-                                        {selectedPlan === 'pro' ? (
-                                            <div className="w-5 h-5 rounded-full bg-slate-900 flex items-center justify-center">
-                                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                                </svg>
-                                            </div>
-                                        ) : (
-                                            <div className="w-5 h-5 rounded-full border border-slate-300" />
-                                        )}
+                                {/* Rows */}
+                                <div className="divide-y divide-slate-50">
+                                    {/* Monthly Usage */}
+                                    <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
+                                        <div className="pl-4 text-sm font-medium text-slate-700">월간 사용량</div>
+                                        <div className="text-center text-sm text-slate-500">350분</div>
+                                        <div className="text-center text-sm font-bold text-indigo-600">무제한</div>
                                     </div>
-                                    <span className="font-bold text-slate-900 text-sm">Pro</span>
+
+                                    {/* Recording Time Limit */}
+                                    <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
+                                        <div className="pl-4 text-sm font-medium text-slate-700">1회 녹음 시간</div>
+                                        <div className="text-center text-sm text-slate-500">120분</div>
+                                        <div className="text-center text-sm font-bold text-indigo-600">무제한</div>
+                                    </div>
+
+                                    {/* AI Chat */}
+                                    <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
+                                        <div className="pl-4 text-sm font-medium text-slate-700">AI 채팅</div>
+                                        <div className="flex justify-center text-slate-300">
+                                            <Minus className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex justify-center text-indigo-600">
+                                            <Check className="w-5 h-5 bg-indigo-100 rounded-full p-0.5" />
+                                        </div>
+                                    </div>
+
+                                    {/* Templates */}
+                                    <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
+                                        <div className="pl-4 text-sm font-medium text-slate-700">커스텀 템플릿</div>
+                                        <div className="text-center text-sm text-slate-500">3개</div>
+                                        <div className="text-center text-sm font-bold text-indigo-600">무제한</div>
+                                    </div>
+
+                                    {/* High Quality Features */}
+                                    <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
+                                        <div className="pl-4 text-sm font-medium text-slate-700">고품질 문서</div>
+                                        <div className="flex justify-center text-slate-400">
+                                            <Check className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex justify-center text-indigo-600">
+                                            <Check className="w-5 h-5 bg-indigo-100 rounded-full p-0.5" />
+                                        </div>
+                                    </div>
                                 </div>
-                                <span className="text-sm font-bold text-slate-900">$3.99 / 월</span>
                             </div>
                         </div>
 
-                        {/* Purchase Layout */}
-                        <div className="mt-auto">
-                            <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all">
+                        {/* Footer Button Area */}
+                        <div className="px-6 pb-safe pt-2 bg-gradient-to-t from-white via-white to-transparent mt-auto pb-12">
+                            <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98]">
                                 $3.99에 업그레이드
                             </button>
-                            <p className="text-center text-xs text-slate-400 mt-3">
+                            <p className="text-center text-[11px] text-slate-400 mt-3 leading-tight">
                                 매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
                             </p>
                         </div>
-
                     </motion.div>
                 </>
             )}
