@@ -176,5 +176,5 @@ export interface GoogleFolder {
 // -----------------------------------------------------------------------------
 
 export const MONTHLY_MINUTES_LIMIT = 350;
-export const MAX_CUSTOM_FORMATS = 3;
 export const REFERRAL_BONUS_MINUTES = 30;
+export const MAX_CUSTOM_FORMATS = 1;

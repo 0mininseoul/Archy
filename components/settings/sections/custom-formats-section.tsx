@@ -105,7 +105,7 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-bold text-slate-900">{t.settings.formats.title}</h2>
-        {customFormats.length < 3 && !showFormatForm && (
+        {customFormats.length < 1 && !showFormatForm && (
           <button
             onClick={() => setShowFormatForm(true)}
             className="px-3 py-1.5 bg-slate-900 text-white rounded-lg font-bold text-xs min-h-[36px]"
@@ -138,11 +138,10 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
         {customFormats.map((format) => (
           <div
             key={format.id}
-            className={`p-3 border rounded-xl ${
-              format.is_default
-                ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
-                : "border-slate-200"
-            }`}
+            className={`p-3 border rounded-xl ${format.is_default
+              ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
+              : "border-slate-200"
+              }`}
           >
             <div className="flex items-start gap-2">
               <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-lg">
@@ -235,7 +234,7 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
           </div>
         )}
 
-        {customFormats.length >= 3 && (
+        {customFormats.length >= 1 && (
           <p className="text-xs text-slate-500 text-center py-1">{t.settings.formats.maxFormats}</p>
         )}
       </div>

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
-import { X, Check, Minus, Sparkles } from "lucide-react";
+import { X, Check, Minus } from "lucide-react";
+import Image from "next/image";
 
 interface PlanManagementModalProps {
     isOpen: boolean;
@@ -16,11 +17,18 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
     useEffect(() => {
         if (isOpen) {
             document.body.style.overflow = "hidden";
+            // Check if on iOS to handle safaris bottom bar
+            const viewport = window.visualViewport;
+            if (viewport) {
+                document.body.style.height = `${viewport.height}px`;
+            }
         } else {
             document.body.style.overflow = "unset";
+            document.body.style.height = 'auto';
         }
         return () => {
             document.body.style.overflow = "unset";
+            document.body.style.height = 'auto';
         };
     }, [isOpen]);
 
@@ -55,16 +63,16 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         dragConstraints={{ top: 0, bottom: 0 }}
                         dragElastic={{ top: 0, bottom: 0.2 }}
                         onDragEnd={onDragEnd}
-                        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[92vh]"
+                        className="fixed bottom-0 left-0 right-0 mx-auto md:max-w-[430px] bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[85vh] shadow-2xl"
                     >
                         {/* Header / Drag Handle Area */}
                         <div
-                            className="pt-4 pb-2 px-6 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+                            className="pt-4 pb-2 px-6 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none select-none"
                             onPointerDown={(e) => dragControls.start(e)}
                         >
                             {/* Drag Indicator */}
-                            <div className="flex justify-center mb-4">
-                                <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+                            <div className="flex justify-center mb-6">
+                                <div className="w-10 h-1 bg-slate-200 rounded-full" />
                             </div>
 
                             {/* Close Button (Absolute positioned to top-right of modal) */}
@@ -76,9 +84,16 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                             </button>
 
                             {/* Title Section */}
-                            <div className="text-center mb-2">
+                            <div className="text-center mb-4">
                                 <div className="flex justify-center mb-4">
-                                    <Sparkles className="w-12 h-12 text-indigo-500 fill-indigo-100" />
+                                    <div className="relative w-12 h-12">
+                                        <Image
+                                            src="/icons/archy logo.png"
+                                            fill
+                                            alt="Archy Logo"
+                                            className="object-contain"
+                                        />
+                                    </div>
                                 </div>
                                 <h2 className="text-2xl font-bold text-slate-900 leading-snug mb-2">
                                     아키를 무제한으로 사용하세요
@@ -90,9 +105,9 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         </div>
 
                         {/* Content Scroll Area */}
-                        <div className="flex-1 overflow-y-auto px-6 pb-6">
+                        <div className="flex-1 overflow-y-auto px-6 pb-4">
                             {/* Feature Comparison Table */}
-                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-1 mb-6">
+                            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-1 mb-2">
                                 {/* Header Row */}
                                 <div className="grid grid-cols-[1.5fr_1fr_1fr] py-3 border-b border-slate-100">
                                     <div className="pl-4 text-xs font-medium text-slate-400">기능</div>
@@ -130,7 +145,7 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                                     {/* Templates */}
                                     <div className="grid grid-cols-[1.5fr_1fr_1fr] py-4 items-center">
                                         <div className="pl-4 text-sm font-medium text-slate-700">커스텀 템플릿</div>
-                                        <div className="text-center text-sm text-slate-500">3개</div>
+                                        <div className="text-center text-sm text-slate-500">1개</div>
                                         <div className="text-center text-sm font-bold text-indigo-600">무제한</div>
                                     </div>
 
@@ -149,11 +164,11 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         </div>
 
                         {/* Footer Button Area */}
-                        <div className="px-6 pb-safe pt-2 bg-gradient-to-t from-white via-white to-transparent mt-auto pb-12">
+                        <div className="px-6 pt-4 pb-[env(safe-area-inset-bottom,20px)] bg-white border-t border-slate-50 mt-auto rounded-b-[2rem] safe-area-pb">
                             <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98]">
                                 $3.99에 업그레이드
                             </button>
-                            <p className="text-center text-[11px] text-slate-400 mt-3 leading-tight">
+                            <p className="text-center text-[11px] text-slate-400 mt-3 pb-4 leading-tight">
                                 매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
                             </p>
                         </div>
