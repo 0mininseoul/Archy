@@ -113,14 +113,14 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
 
                             {/* Pro Plan (Selected) */}
                             <div
-                                className={`border-2 rounded-xl p-4 flex items-center justify-between transition-colors cursor-pointer ${selectedPlan === 'pro' ? 'border-[#CCF913] bg-[#FAFAE5]' : 'border-slate-200'}`}
+                                className={`border-2 rounded-xl p-4 flex items-center justify-between transition-colors cursor-pointer ${selectedPlan === 'pro' ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
                                 onClick={() => setSelectedPlan('pro')}
                             >
                                 <div className="flex items-center gap-3">
                                     <div className="relative flex items-center justify-center">
                                         {selectedPlan === 'pro' ? (
-                                            <div className="w-5 h-5 rounded-full bg-[#CCF913] flex items-center justify-center">
-                                                <svg className="w-3 h-3 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <div className="w-5 h-5 rounded-full bg-slate-900 flex items-center justify-center">
+                                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                                                 </svg>
                                             </div>
@@ -136,7 +136,7 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
 
                         {/* Purchase Layout */}
                         <div className="mt-auto">
-                            <button className="w-full bg-gradient-to-r from-[#AEDD44] to-[#44BBEE] text-white font-bold py-4 rounded-xl text-md shadow-sm hover:shadow-md transition-shadow">
+                            <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all">
                                 $3.99에 업그레이드
                             </button>
                             <p className="text-center text-xs text-slate-400 mt-3">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 import Image from "next/image";
 
@@ -61,6 +61,23 @@ export function IntegrationsSection({
   const [googleFolder, setGoogleFolder] = useState(initialGoogleFolder);
   const [showGoogleFolderDropdown, setShowGoogleFolderDropdown] = useState(false);
   const [googleFolderLoading, setGoogleFolderLoading] = useState(false);
+
+  // Sync state with props when they change
+  useEffect(() => {
+    setNotionConnected(initialNotionConnected);
+  }, [initialNotionConnected]);
+
+  useEffect(() => {
+    setSaveTarget(initialSaveTarget);
+  }, [initialSaveTarget]);
+
+  useEffect(() => {
+    setGoogleConnected(initialGoogleConnected);
+  }, [initialGoogleConnected]);
+
+  useEffect(() => {
+    setGoogleFolder(initialGoogleFolder);
+  }, [initialGoogleFolder]);
 
   const handleConnect = (service: "notion" | "slack" | "google") => {
     window.location.href = `/api/auth/${service}?returnTo=/settings`;
