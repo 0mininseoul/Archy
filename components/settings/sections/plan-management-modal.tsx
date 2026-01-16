@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
 import { X, Check, Minus } from "lucide-react";
 import Image from "next/image";
@@ -11,7 +12,12 @@ interface PlanManagementModalProps {
 }
 
 export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProps) {
+    const [mounted, setMounted] = useState(false);
     const dragControls = useDragControls();
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // Prevent background scrolling when modal is open
     useEffect(() => {
@@ -38,7 +44,9 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
         }
     };
 
-    return (
+    if (!mounted) return null;
+
+    return createPortal(
         <AnimatePresence>
             {isOpen && (
                 <>
@@ -176,6 +184,7 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                     </motion.div>
                 </>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
     );
 }
