@@ -94,6 +94,7 @@ export async function sendSlackNotification(
 
   await client.chat.postMessage({
     channel: channelId,
+    text: `✅ 녹음 처리 완료! - ${title}`,
     blocks,
   });
 }

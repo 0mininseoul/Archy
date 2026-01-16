@@ -38,36 +38,45 @@ function getStatusIcon(status: string): string {
 
 
 
-function formatRecordingDate(dateString: string): string {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: false, // 24-hour format creates cleaner short dates like "1/15 18:05", or enable for "오후 6:05" but user screenshot showed "오후" in title but "1/15 9:18" in small text. Wait, user said "녹음 카드 제목은 한국 시간 기준... 작은 글씨의 녹음일시는 한국 시간이 아닌 것 같아". 
-    // Screenshot shows small text "1/15 9:18". If it was 6pm, it should be 18:xx or 오후.
-    // I will use 24h format or standard ko-KR short format.
-    // "1/15 18:18" is standard short.
-  }).format(date).replace(/\. /g, "/").replace(".", "");  // Simple ko-KR produces "2024. 1. 15. 18:00".
-  // Let's stick to the user's seeming preference "1/15 9:18" style but correct time.
-  // Actually, let's just use the `Intl` directly to get "1/15 18:30" style.
-}
-
-// Better yet, let's redefine it to be explicitly KST "M/D HH:mm" or similar.
+// Format date to KST with "M.DD 요일 AM/PM HH:MM" format (e.g., "1.16 Fri PM 10:34")
 function formatRecordingDateKST(dateString: string): string {
   const date = new Date(dateString);
-  return new Intl.DateTimeFormat("en-US", { // Using en-US pattern for "M/D" but KST time
+
+  // Get month and day in KST
+  const month = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Seoul",
     month: "numeric",
-    day: "numeric",
+  }).format(date);
+
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    day: "2-digit",
+  }).format(date);
+
+  // Get weekday abbreviation in KST
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    weekday: "short",
+  }).format(date);
+
+  // Get hour in KST to determine AM/PM
+  const hour24 = parseInt(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
     hour: "numeric",
-    minute: "2-digit",
     hour12: false,
-  }).format(date); // en-US produces "1/15, 18:18" roughly.
+  }).format(date));
+
+  const ampm = hour24 < 12 ? "AM" : "PM";
+  const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+
+  // Get minute in KST
+  const minute = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    minute: "2-digit",
+  }).format(date);
+
+  return `${month}.${day} ${weekday} ${ampm} ${hour12}:${minute}`;
 }
-// Actually, let's correct the implementations below in one go.
 
 // =============================================================================
 // Component
@@ -222,14 +231,7 @@ export function RecordingCard({
   );
 
   // Format date to KST
-  const formattedDate = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(recording.created_at));
+  const formattedDate = formatRecordingDateKST(recording.created_at);
 
   return (
     <div className="relative overflow-hidden rounded-xl bg-slate-100">
