@@ -36,18 +36,7 @@ function getStatusIcon(status: string): string {
   }
 }
 
-function getFormatEmoji(format: string): string {
-  switch (format) {
-    case "meeting":
-      return "🎙️";
-    case "interview":
-      return "📝";
-    case "lecture":
-      return "📚";
-    default:
-      return "📄";
-  }
-}
+
 
 function formatRecordingDate(dateString: string): string {
   const date = new Date(dateString);
@@ -290,8 +279,14 @@ export function RecordingCard({
 
         <div className="flex items-start gap-3">
           {/* Icon */}
-          <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-xl flex-shrink-0">
-            {getFormatEmoji(recording.format)}
+          <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0">
+            <Image
+              src="/icons/archy logo.png"
+              alt="Archy"
+              width={40}
+              height={40}
+              className="object-cover"
+            />
           </div>
 
           {/* Content */}
@@ -359,10 +354,15 @@ export function RecordingCard({
             {recording.status === "completed" && (
               <div className="flex items-center gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                 {recording.notion_page_url && (
-                  <a
-                    href={recording.notion_page_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={() => {
+                      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                      if (isMobile) {
+                        window.location.href = recording.notion_page_url!;
+                      } else {
+                        window.open(recording.notion_page_url!, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 min-h-[36px]"
                   >
                     <Image src="/logos/notion.png" alt="Notion" width={14} height={14} />
@@ -374,7 +374,7 @@ export function RecordingCard({
                         d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
                       />
                     </svg>
-                  </a>
+                  </button>
                 )}
                 {recording.google_doc_url && (
                   <a

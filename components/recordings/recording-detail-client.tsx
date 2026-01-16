@@ -246,10 +246,15 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
           {isOwner && (recording.notion_page_url || recording.google_doc_url) && (
             <div className="flex items-center gap-3">
               {recording.notion_page_url && (
-                <a
-                  href={recording.notion_page_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => {
+                    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                    if (isMobile) {
+                      window.location.href = recording.notion_page_url!;
+                    } else {
+                      window.open(recording.notion_page_url!, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
                 >
                   <Image
@@ -260,7 +265,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                     className="object-contain"
                   />
                   <span className="text-sm font-medium text-slate-700">노션에서 보기</span>
-                </a>
+                </button>
               )}
               {recording.google_doc_url && (
                 <a

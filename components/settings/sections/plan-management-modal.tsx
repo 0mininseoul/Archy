@@ -175,7 +175,8 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         {/* Footer Button Area */}
                         <div className="px-6 pt-2 pb-8 bg-white border-t border-slate-50 mt-auto rounded-b-[2rem]">
                             <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98]">
-                                $3.99에 업그레이드
+                                <span className="text-slate-400 line-through mr-1.5">$9.99</span>
+                                <span>$3.99에 업그레이드</span>
                             </button>
                             <p className="text-center text-[10px] text-slate-400 mt-2.5 leading-tight">
                                 매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
