@@ -63,12 +63,55 @@ export async function formatDocument(
     const fullResponse = response.choices[0].message.content || "";
     console.log("[Formatting] OpenAI formatting succeeded");
 
-    // Parse title and content from response
-    const titleMatch = fullResponse.match(/\[TITLE\]\s*([\s\S]*?)\s*\[\/TITLE\]/);
-    const contentMatch = fullResponse.match(/\[CONTENT\]\s*([\s\S]*?)\s*\[\/CONTENT\]/);
+    // Parse title and content from response with robust regex
+    // Handle various formats: [TITLE], [TITLE], with/without newlines
+    let title = "";
+    let content = fullResponse;
 
-    const title = titleMatch ? titleMatch[1].trim() : "";
-    const content = contentMatch ? contentMatch[1].trim() : fullResponse;
+    // Try multiple patterns for title extraction
+    const titlePatterns = [
+      /\[TITLE\]\s*([\s\S]*?)\s*\[\/TITLE\]/i,
+      /\[TITLE\]([\s\S]*?)\[\/TITLE\]/i,
+    ];
+
+    for (const pattern of titlePatterns) {
+      const match = fullResponse.match(pattern);
+      if (match) {
+        title = match[1].trim();
+        break;
+      }
+    }
+
+    // Try multiple patterns for content extraction
+    const contentPatterns = [
+      /\[CONTENT\]\s*([\s\S]*?)\s*\[\/CONTENT\]/i,
+      /\[CONTENT\]([\s\S]*?)\[\/CONTENT\]/i,
+      /\[CONTENT\]\s*([\s\S]*)$/i, // Handle missing [/CONTENT] tag
+    ];
+
+    for (const pattern of contentPatterns) {
+      const match = fullResponse.match(pattern);
+      if (match) {
+        content = match[1].trim();
+        break;
+      }
+    }
+
+    // Post-processing: Remove any remaining tags that might have leaked
+    content = content
+      .replace(/^\[TITLE\][\s\S]*?\[\/TITLE\]\s*/i, "") // Remove title block at start
+      .replace(/\[TITLE\][\s\S]*?\[\/TITLE\]\s*/gi, "") // Remove any title blocks
+      .replace(/^\[CONTENT\]\s*/i, "") // Remove [CONTENT] tag at start
+      .replace(/\s*\[\/CONTENT\]$/i, "") // Remove [/CONTENT] tag at end
+      .trim();
+
+    // If content still starts with tags after cleanup, extract just the content part
+    if (content.startsWith("[")) {
+      const contentStart = content.indexOf("### ");
+      if (contentStart !== -1) {
+        content = content.substring(contentStart);
+      }
+    }
 
     console.log("[Formatting] Parsed title:", title);
 

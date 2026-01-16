@@ -9,7 +9,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { transcribeAudio } from "@/lib/services/whisper";
 import { formatDocument } from "@/lib/services/openai";
-import { createNotionPage } from "@/lib/services/notion";
+import { createNotionPage, getNotionDatabases, getNotionPages } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
@@ -255,8 +255,9 @@ async function stepNotionSave(
   format: RecordingFormat,
   duration: number
 ): Promise<StepResult<string>> {
-  if (!userData.notion_access_token || !userData.notion_database_id) {
-    log(recordingId, "Notion not configured, skipping...");
+  // Notion 연결되지 않은 경우 스킵
+  if (!userData.notion_access_token) {
+    log(recordingId, "Notion not connected, skipping...");
     return { success: true, data: "" };
   }
 
@@ -264,14 +265,54 @@ async function stepNotionSave(
   await updateProcessingStep(supabase, recordingId, "notion");
 
   try {
+    let targetId = userData.notion_database_id;
+    let targetType = userData.notion_save_target_type || "database";
+
+    // 저장 위치가 설정되지 않은 경우 자동 선택
+    if (!targetId) {
+      log(recordingId, "Notion save location not set, auto-selecting...");
+
+      // 1. 데이터베이스 우선 검색
+      const databases = await getNotionDatabases(userData.notion_access_token);
+      if (databases.length > 0) {
+        targetId = databases[0].id;
+        targetType = "database";
+        log(recordingId, `Auto-selected database: ${databases[0].title}`);
+      } else {
+        // 2. 데이터베이스 없으면 페이지 검색
+        const pages = await getNotionPages(userData.notion_access_token);
+        if (pages.length > 0) {
+          targetId = pages[0].id;
+          targetType = "page";
+          log(recordingId, `Auto-selected page: ${pages[0].title}`);
+        }
+      }
+
+      // 여전히 없으면 스킵
+      if (!targetId) {
+        log(recordingId, "No accessible Notion pages or databases found, skipping...");
+        return { success: true, data: "" };
+      }
+
+      // 자동 선택된 위치를 사용자 설정에 저장 (다음 녹음부터 재사용)
+      await supabase
+        .from("users")
+        .update({
+          notion_database_id: targetId,
+          notion_save_target_type: targetType,
+        })
+        .eq("id", userData.id);
+      log(recordingId, "Auto-selected location saved to user settings");
+    }
+
     const notionUrl = await createNotionPage(
       userData.notion_access_token,
-      userData.notion_database_id,
+      targetId,
       title,
       content,
       format,
       duration,
-      userData.notion_save_target_type || "database"
+      targetType as "database" | "page"
     );
 
     await supabase
