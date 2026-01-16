@@ -151,11 +151,10 @@ export function AudioRecorder({ onRecordingComplete, format }: AudioRecorderProp
 
       {/* Wake Lock Status Badge - smaller size */}
       {isRecording && (
-        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs ${
-          isWakeLockActive
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs ${isWakeLockActive
             ? "bg-green-50 text-green-600 border border-green-200"
             : "bg-amber-50 text-amber-600 border border-amber-200"
-        }`}>
+          }`}>
           {isWakeLockActive ? (
             <>
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -175,7 +174,7 @@ export function AudioRecorder({ onRecordingComplete, format }: AudioRecorderProp
       )}
 
       {/* Timer - smaller size */}
-      <div className={`text-4xl font-bold tracking-tight font-mono ${isRecording ? 'text-red-500' : 'text-slate-800'}`}>
+      <div className={`text-4xl font-bold tracking-tight ${isRecording ? 'text-red-500' : 'text-slate-800'}`}>
         {formatDuration(duration)}
       </div>
 

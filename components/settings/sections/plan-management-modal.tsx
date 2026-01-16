@@ -48,7 +48,7 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         animate={{ opacity: 0.5 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-black z-40"
+                        className="fixed inset-0 bg-black z-[60]"
                     />
 
                     {/* Modal Bottom Sheet */}
@@ -63,7 +63,7 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
                         dragConstraints={{ top: 0, bottom: 0 }}
                         dragElastic={{ top: 0, bottom: 0.2 }}
                         onDragEnd={onDragEnd}
-                        className="fixed bottom-0 left-0 right-0 mx-auto md:max-w-[430px] bg-white rounded-t-[2rem] z-50 flex flex-col max-h-[80dvh] shadow-2xl"
+                        className="fixed bottom-0 left-0 right-0 mx-auto md:max-w-[430px] bg-white rounded-t-[2rem] z-[60] flex flex-col max-h-[80dvh] shadow-2xl"
                         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
                     >
                         {/* Header / Drag Handle Area */}

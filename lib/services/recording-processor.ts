@@ -150,32 +150,70 @@ async function stepFormat(
   await updateProcessingStep(supabase, recordingId, "formatting");
 
   try {
-    // Check for custom format
-    const { data: defaultFormat } = await supabase
-      .from("custom_formats")
-      .select("prompt")
-      .eq("user_id", userId)
-      .eq("is_default", true)
-      .single();
-
+    // Retry logic for formatting (max 2 attempts)
     let formatResult;
-    if (defaultFormat?.prompt) {
-      log(recordingId, "Using custom format");
-      formatResult = await formatDocument(
-        transcript,
-        format, // format ignored internally but passed for compatibility
-        defaultFormat.prompt
-      );
-    } else {
-      log(recordingId, "Using universal format");
-      formatResult = await formatDocument(transcript);
+    const MAX_RETRIES = 2;
+    const TIMEOUT_MS = 90000; // 90 seconds
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        log(recordingId, `Step 2: Formatting document (Attempt ${attempt}/${MAX_RETRIES})...`);
+
+        // Create a timeout promise
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Formatting timed out after 90 seconds")), TIMEOUT_MS);
+        });
+
+        // Check for custom format
+        const { data: defaultFormat } = await supabase
+          .from("custom_formats")
+          .select("prompt")
+          .eq("user_id", userId)
+          .eq("is_default", true)
+          .single();
+
+        let formatPromise;
+        if (defaultFormat?.prompt) {
+          log(recordingId, "Using custom format");
+          formatPromise = formatDocument(
+            transcript,
+            format, // format ignored internally but passed for compatibility
+            defaultFormat.prompt
+          );
+        } else {
+          log(recordingId, "Using universal format");
+          formatPromise = formatDocument(transcript);
+        }
+
+        // Race between formatting and timeout
+        formatResult = await Promise.race([formatPromise, timeoutPromise]);
+
+        // If successful, break the loop
+        break;
+
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logError(recordingId, `Formatting attempt ${attempt} failed:`, errorMessage);
+
+        if (attempt === MAX_RETRIES) {
+          throw new Error(`All formatting attempts failed: ${errorMessage}`);
+        }
+
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    if (!formatResult) {
+      throw new Error("Formatting failed (no result)");
     }
 
     let formattedContent: string;
     let aiGeneratedTitle = defaultTitle;
 
     if (!formatResult.content || formatResult.content.trim().length === 0) {
-      log(recordingId, "Formatting returned empty, using raw transcript");
+      // This case might be rare if we throw on error, but if OpenAI returns empty content successfully:
+      log(recordingId, "Formatting returned empty content");
       formattedContent = transcript;
     } else {
       formattedContent = formatResult.content;
@@ -198,19 +236,10 @@ async function stepFormat(
     return { success: true, data: { content: formattedContent, title: aiGeneratedTitle } };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown formatting error";
-    logError(recordingId, "Formatting failed:", errorMessage);
+    logError(recordingId, "Formatting failed after retries:", errorMessage);
 
-    // Formatting failure is not critical - use raw transcript
-    await supabase
-      .from("recordings")
-      .update({
-        formatted_content: transcript,
-        error_step: "formatting",
-        error_message: `Formatting failed (using raw transcript): ${errorMessage}`,
-      })
-      .eq("id", recordingId);
-
-    return { success: true, data: { content: transcript, title: defaultTitle } };
+    // Propagate error to mark as failed
+    return { success: false, error: errorMessage };
   }
 }
 

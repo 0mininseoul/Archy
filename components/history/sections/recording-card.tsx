@@ -51,12 +51,34 @@ function getFormatEmoji(format: string): string {
 
 function formatRecordingDate(dateString: string): string {
   const date = new Date(dateString);
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  return `${month}/${day} ${hours}:${minutes}`;
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false, // 24-hour format creates cleaner short dates like "1/15 18:05", or enable for "오후 6:05" but user screenshot showed "오후" in title but "1/15 9:18" in small text. Wait, user said "녹음 카드 제목은 한국 시간 기준... 작은 글씨의 녹음일시는 한국 시간이 아닌 것 같아". 
+    // Screenshot shows small text "1/15 9:18". If it was 6pm, it should be 18:xx or 오후.
+    // I will use 24h format or standard ko-KR short format.
+    // "1/15 18:18" is standard short.
+  }).format(date).replace(/\. /g, "/").replace(".", "");  // Simple ko-KR produces "2024. 1. 15. 18:00".
+  // Let's stick to the user's seeming preference "1/15 9:18" style but correct time.
+  // Actually, let's just use the `Intl` directly to get "1/15 18:30" style.
 }
+
+// Better yet, let's redefine it to be explicitly KST "M/D HH:mm" or similar.
+function formatRecordingDateKST(dateString: string): string {
+  const date = new Date(dateString);
+  return new Intl.DateTimeFormat("en-US", { // Using en-US pattern for "M/D" but KST time
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date); // en-US produces "1/15, 18:18" roughly.
+}
+// Actually, let's correct the implementations below in one go.
 
 // =============================================================================
 // Component
@@ -210,6 +232,16 @@ export function RecordingCard({
     [recording.id, onHide]
   );
 
+  // Format date to KST
+  const formattedDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(recording.created_at));
+
   return (
     <div className="relative overflow-hidden rounded-xl bg-slate-100">
       {/* Background Actions */}
@@ -274,7 +306,7 @@ export function RecordingCard({
               <span>·</span>
               <span>{formatDurationMinutes(recording.duration_seconds)}</span>
               <span>·</span>
-              <span>{formatRecordingDate(recording.created_at)}</span>
+              <span>{formattedDate}</span>
             </div>
 
             {/* Processing Status Info */}
@@ -333,8 +365,8 @@ export function RecordingCard({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 min-h-[36px]"
                   >
-                    <span>Notion</span>
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <Image src="/logos/notion.png" alt="Notion" width={14} height={14} />
+                    <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -351,8 +383,8 @@ export function RecordingCard({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 rounded-lg text-xs font-medium text-blue-700 min-h-[36px]"
                   >
-                    <span>Google Docs</span>
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <Image src="/logos/google-docs.png" alt="Google Docs" width={14} height={14} />
+                    <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
