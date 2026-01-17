@@ -40,7 +40,13 @@ function getStatusIcon(status: string): string {
 
 // Format date to KST with "M.DD 요일 AM/PM HH:MM" format (e.g., "1.16 Fri PM 10:34")
 function formatRecordingDateKST(dateString: string): string {
-  const date = new Date(dateString);
+  // Supabase timestamptz는 UTC로 저장되지만, ISO 문자열에 'Z'나 오프셋이 없을 수 있음
+  // UTC로 명시적으로 파싱하기 위해 'Z' suffix가 없으면 추가
+  let normalizedDateString = dateString;
+  if (!dateString.endsWith('Z') && !dateString.includes('+') && !dateString.includes('-', 10)) {
+    normalizedDateString = dateString + 'Z';
+  }
+  const date = new Date(normalizedDateString);
 
   // Get month and day in KST
   const month = new Intl.DateTimeFormat("en-US", {

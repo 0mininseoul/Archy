@@ -1,8 +1,8 @@
 // Service Worker for Archy PWA
-// v5: Added push notification support
+// v6: Fixed JS bundle caching issue for iOS PWA
 
-const CACHE_NAME = 'archy-v1';
-// Only cache static assets, not routes that require auth
+const CACHE_NAME = 'archy-v2';
+// Only cache static assets, not routes that require auth or dynamic content
 const urlsToCache = [
   '/manifest.json'
 ];
@@ -31,8 +31,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip service worker for API routes and auth callbacks
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
+  // Skip service worker for API routes, auth callbacks, and JS/CSS bundles
+  // This ensures fresh JavaScript is always loaded to prevent stale script issues
+  if (url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/auth/') ||
+    url.pathname.startsWith('/_next/')) {
     return;
   }
 
