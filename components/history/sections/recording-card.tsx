@@ -75,11 +75,12 @@ function formatRecordingDateKST(dateString: string): string {
   const ampm = hour24 < 12 ? "AM" : "PM";
   const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
 
-  // Get minute in KST
-  const minute = new Intl.DateTimeFormat("en-US", {
+  // Get minute in KST - padStart로 2자리 보장
+  const minuteRaw = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Seoul",
-    minute: "2-digit",
+    minute: "numeric",
   }).format(date);
+  const minute = minuteRaw.padStart(2, '0');
 
   return `${month}.${day} ${weekday} ${ampm} ${hour12}:${minute}`;
 }
@@ -309,7 +310,7 @@ export function RecordingCard({
               <span>·</span>
               <span>{formatDurationMinutes(recording.duration_seconds)}</span>
               <span>·</span>
-              <span>{formattedDate}</span>
+              <span className="tracking-wide">{formattedDate}</span>
             </div>
 
             {/* Processing Status Info */}
