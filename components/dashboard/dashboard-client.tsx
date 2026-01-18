@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { AudioRecorder } from "@/components/recorder/audio-recorder";
-import { getFileExtension } from "@/hooks/useAudioRecorder";
+import { ChunkedAudioRecorder } from "@/components/recorder/chunked-audio-recorder";
+import { ChunkedRecordingResult } from "@/hooks/useChunkedRecorder";
 import { BottomTab } from "@/components/navigation/bottom-tab";
 import { useI18n } from "@/lib/i18n";
 import { DashboardPWAInstallModal } from "@/components/pwa/dashboard-install-modal";
@@ -18,7 +18,8 @@ import { useRecordingsStore } from "@/lib/stores/recordings-store";
 export function DashboardClient() {
   const router = useRouter();
   const { t } = useI18n();
-  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState("");
   const [showPWAModal, setShowPWAModal] = useState(false);
 
   // Use cached data from store
@@ -66,48 +67,55 @@ export function DashboardClient() {
   }, []);
 
   const handleRecordingComplete = useCallback(
-    async (blob: Blob, duration: number) => {
-      if (!blob || blob.size === 0) {
-        alert("녹음 데이터가 없습니다. 다시 녹음해주세요.");
+    async (result: ChunkedRecordingResult) => {
+      const { transcripts, totalDuration, totalChunks } = result;
+
+      // 전사된 청크가 없으면 에러
+      if (transcripts.length === 0) {
+        alert("전사된 내용이 없습니다. 다시 녹음해주세요.");
         return;
       }
 
-      if (duration < 1) {
+      // 녹음 시간이 너무 짧으면 에러
+      if (totalDuration < 1) {
         alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
         return;
       }
 
-      setIsUploading(true);
+      setIsProcessing(true);
+      setProcessingStatus(t.dashboard.finalizingRecording);
 
       try {
-        const extension = getFileExtension(blob.type);
-        const file = new File([blob], `recording-${Date.now()}.${extension}`, {
-          type: blob.type,
-        });
+        console.log(
+          `[Dashboard] Finalizing recording: ${transcripts.length}/${totalChunks} chunks, ${totalDuration}s`
+        );
 
-        const formData = new FormData();
-        formData.append("audio", file);
-        formData.append("duration", duration.toString());
-        formData.append("format", "meeting");
-
-        const response = await fetch("/api/recordings", {
+        // finalize API 호출
+        const response = await fetch("/api/recordings/finalize", {
           method: "POST",
-          body: formData,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            transcripts,
+            totalDurationSeconds: totalDuration,
+            format: "meeting",
+          }),
         });
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.error || "Upload failed");
+          throw new Error(errorData.error || "Finalize failed");
         }
 
-        // Invalidate recordings cache so history page fetches fresh data
+        // 성공
         invalidateRecordings();
-
         router.push("/history");
       } catch (error) {
-        console.error("Error uploading recording:", error);
+        console.error("Error finalizing recording:", error);
         alert(t.errors.uploadFailed);
-        setIsUploading(false);
+        setIsProcessing(false);
+        setProcessingStatus("");
       }
     },
     [router, t, invalidateRecordings]
@@ -131,14 +139,16 @@ export function DashboardClient() {
 
       {/* Main Content */}
       <main className="app-main flex flex-col items-center justify-center min-h-[calc(100vh-56px-64px)] px-4">
-        {isUploading ? (
+        {isProcessing ? (
           <div className="w-full max-w-sm mx-auto">
             <div className="card p-8 text-center space-y-6 animate-fade-in">
               <div className="flex justify-center">
                 <div className="w-14 h-14 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-xl font-bold text-slate-900">{t.dashboard.processing}</h2>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {processingStatus || t.dashboard.processing}
+                </h2>
                 <p className="text-sm text-slate-500">{t.dashboard.processingDescription}</p>
               </div>
             </div>
@@ -146,7 +156,10 @@ export function DashboardClient() {
         ) : (
           <div className="w-full max-w-sm mx-auto animate-slide-up">
             <div className="card p-6 shadow-lg">
-              <AudioRecorder onRecordingComplete={handleRecordingComplete} format="meeting" />
+              <ChunkedAudioRecorder
+                onRecordingComplete={handleRecordingComplete}
+                format="meeting"
+              />
             </div>
           </div>
         )}

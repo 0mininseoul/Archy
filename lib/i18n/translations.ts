@@ -112,6 +112,16 @@ export const translations = {
       notionNotConnected: "Notion이 연결되지 않았습니다. 녹음 내용이 Notion에 저장되지 않습니다.",
       slackNotConnected: "Slack이 연결되지 않았습니다. 완료 알림이 발송되지 않습니다.",
       notionAndGoogleNotConnected: "Notion과 Google이 모두 연결되지 않았습니다. 녹음 내용이 저장되지 않습니다.",
+      // Chunking
+      chunkProgress: "청크 {current}/{total} 처리 중...",
+      pendingChunks: "{count}개 청크 대기 중",
+      finalizingRecording: "녹음 완료 중...",
+      networkOffline: "네트워크 연결 끊김",
+      networkReconnected: "네트워크 재연결됨",
+      chunkUploadFailed: "청크 업로드 실패. 재시도 중...",
+      // iOS Background Warning
+      iosBackgroundWarning: "iOS에서 다른 앱으로 이동하거나 화면을 잠금하면 녹음이 중단될 수 있습니다.",
+      iosBackgroundWarningDismiss: "알겠습니다",
     },
 
     // History
@@ -529,6 +539,16 @@ export const translations = {
       wakeLockInactive: "Screen wake lock unavailable",
       notionNotConnected: "Notion is not connected. Your recording will not be saved to Notion.",
       slackNotConnected: "Slack is not connected. You will not receive completion notifications.",
+      // Chunking
+      chunkProgress: "Processing chunk {current}/{total}...",
+      pendingChunks: "{count} chunks pending",
+      finalizingRecording: "Finalizing recording...",
+      networkOffline: "Network disconnected",
+      networkReconnected: "Network reconnected",
+      chunkUploadFailed: "Chunk upload failed. Retrying...",
+      // iOS Background Warning
+      iosBackgroundWarning: "On iOS, switching to another app or locking the screen may stop the recording.",
+      iosBackgroundWarningDismiss: "Got it",
     },
 
     // History

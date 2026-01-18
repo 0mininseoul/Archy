@@ -36,6 +36,15 @@ export interface ProcessingContext {
   title: string;
 }
 
+export interface TranscriptProcessingContext {
+  recordingId: string;
+  transcript: string;
+  format: RecordingFormat;
+  duration: number;
+  userData: User;
+  title: string;
+}
+
 export interface ProcessingResult {
   success: boolean;
   transcript?: string;
@@ -547,6 +556,106 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
     userData.id,
     title
   );
+  const formattedContent = formatResult.data!.content;
+  const finalTitle = formatResult.data!.title;
+
+  // Step 3: Notion (optional)
+  const notionResult = await stepNotionSave(
+    supabase,
+    recordingId,
+    userData,
+    finalTitle,
+    formattedContent,
+    format,
+    duration
+  );
+  const notionUrl = notionResult.data || "";
+
+  // Step 4: Google Docs (optional)
+  const googleResult = await stepGoogleDocSave(
+    supabase,
+    recordingId,
+    userData,
+    finalTitle,
+    formattedContent
+  );
+  const googleDocUrl = googleResult.data || "";
+
+  // Step 5: Slack (optional)
+  await stepSlackNotify(
+    supabase,
+    recordingId,
+    userData,
+    finalTitle,
+    duration,
+    notionUrl,
+    googleDocUrl
+  );
+
+  // Mark as completed
+  log(recordingId, "Processing completed successfully");
+  await supabase
+    .from("recordings")
+    .update({
+      status: "completed",
+      processing_step: null,
+      error_step: null,
+      error_message: null,
+    })
+    .eq("id", recordingId);
+
+  // Step 6: Push notification (after marking complete)
+  await stepPushNotify(recordingId, userData, finalTitle, notionUrl, googleDocUrl);
+
+  return {
+    success: true,
+    transcript,
+    formattedContent,
+    title: finalTitle,
+    notionUrl: notionUrl || undefined,
+    googleDocUrl: googleDocUrl || undefined,
+  };
+}
+
+/**
+ * Process a recording from pre-transcribed chunks (skip transcription step)
+ * Used when audio was chunked and transcribed during recording
+ */
+export async function processFromTranscripts(
+  ctx: TranscriptProcessingContext
+): Promise<ProcessingResult> {
+  const { recordingId, transcript, format, duration, userData, title } = ctx;
+  const supabase = await createClient();
+
+  log(recordingId, "Starting processing from pre-transcribed chunks...");
+
+  // Skip Step 1 (transcription already done)
+  // Step 2: Format
+  const formatResult = await stepFormat(
+    supabase,
+    recordingId,
+    transcript,
+    format,
+    userData.id,
+    title
+  );
+
+  if (!formatResult.success) {
+    await supabase
+      .from("recordings")
+      .update({
+        status: "failed",
+        error_step: "formatting",
+        error_message: formatResult.error,
+      })
+      .eq("id", recordingId);
+
+    return {
+      success: false,
+      error: { step: "formatting", message: formatResult.error! },
+    };
+  }
+
   const formattedContent = formatResult.data!.content;
   const finalTitle = formatResult.data!.title;
 
