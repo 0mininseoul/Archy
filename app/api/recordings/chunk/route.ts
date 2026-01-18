@@ -3,13 +3,8 @@ import { transcribeAudio } from "@/lib/services/whisper";
 
 // Vercel Free tier: 4.5MB limit
 // 5분 청크 (64kbps): ~2.4MB
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "4mb",
-    },
-  },
-};
+// Route segment config for body size limit
+export const maxDuration = 60; // 60 seconds timeout
 
 interface ChunkTranscriptResponse {
   transcript: string;
