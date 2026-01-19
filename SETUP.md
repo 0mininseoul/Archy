@@ -42,8 +42,8 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 # OpenAI
 OPENAI_API_KEY=sk-...
 
-# WhisperAPI
-WHISPER_API_KEY=your_whisper_key
+# Groq API (STT - Whisper Large V3)
+GROQ_API_KEY=your_groq_key
 
 # Notion (온보딩 후 필요)
 NOTION_CLIENT_ID=your_notion_client_id
@@ -54,6 +54,19 @@ NOTION_REDIRECT_URI=http://localhost:3000/api/auth/notion/callback
 SLACK_CLIENT_ID=your_slack_client_id
 SLACK_CLIENT_SECRET=your_slack_secret
 SLACK_REDIRECT_URI=http://localhost:3000/api/auth/slack/callback
+
+# Google (Docs/Drive 연동)
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
+
+# Push 알림 (VAPID)
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=your_vapid_public_key
+VAPID_PRIVATE_KEY=your_vapid_private_key
+VAPID_SUBJECT=mailto:your-email@example.com
+
+# Analytics (Amplitude)
+NEXT_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
 
 # App URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -94,6 +107,10 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 9. `database/migrations/add_google_integration.sql` - Google Docs 연동
 10. `database/migrations/add_user_name.sql` - 사용자 이름
 11. `database/migrations/add_withdrawn_users_table.sql` - 탈퇴 사용자 테이블
+12. `database/migrations/update_withdrawn_users_add_name.sql` - 탈퇴 사용자 이름 추가
+13. `database/migrations/update_withdrawn_users_add_data.sql` - 탈퇴 사용자 데이터 추가
+14. `database/migrations/add_recording_session.sql` - 녹음 세션 관리
+15. `database/migrations/add_audio_storage_setting.sql` - 오디오 저장 설정
 
 각 파일의 내용을 SQL Editor에서 실행합니다.
 
@@ -163,7 +180,7 @@ npm run dev
 
 ### 7.3 히스토리
 
-1. 히스토리 페이지로 이동합니다.
+1. 히스토리 페이지(`/dashboard/history`)로 이동합니다.
 2. 녹음 목록을 확인합니다.
 3. 처리 상태를 확인합니다 (처리중/완료/실패).
 

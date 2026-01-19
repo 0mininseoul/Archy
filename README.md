@@ -67,9 +67,16 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 OPENAI_API_KEY=your_openai_api_key
 ```
 
-**WhisperAPI** (https://whisperapi.com)
+**Groq** (https://console.groq.com) - STT
 ```env
-WHISPER_API_KEY=your_whisper_api_key
+GROQ_API_KEY=your_groq_api_key
+```
+
+**Google** (https://console.cloud.google.com) - Docs 연동
+```env
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
 ```
 
 **Notion** (https://developers.notion.com)
@@ -91,6 +98,18 @@ SLACK_REDIRECT_URI=http://localhost:3000/api/auth/slack/callback
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
+**Push 알림** (VAPID 키 생성 필요)
+```env
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=your_vapid_public_key
+VAPID_PRIVATE_KEY=your_vapid_private_key
+VAPID_SUBJECT=mailto:your-email@example.com
+```
+
+**Analytics** (https://amplitude.com)
+```env
+NEXT_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
+```
+
 ### 2. 데이터베이스 설정
 
 Supabase 대시보드에서 SQL 에디터를 열고 다음 파일들을 순서대로 실행하세요:
@@ -106,7 +125,11 @@ Supabase 대시보드에서 SQL 에디터를 열고 다음 파일들을 순서�
 9. `database/migrations/add_referral_system.sql` - 리퍼럴 시스템
 10. `database/migrations/add_google_integration.sql` - Google Docs 연동
 11. `database/migrations/add_user_name.sql` - 사용자 이름
-12. `database/migrations/add_withdrawn_users_table.sql` - 탈퇴 사용자 테이블
+11. `database/migrations/add_withdrawn_users_table.sql` - 탈퇴 사용자 테이블
+12. `database/migrations/update_withdrawn_users_add_name.sql` - 탈퇴 사용자 이름 추가
+13. `database/migrations/update_withdrawn_users_add_data.sql` - 탈퇴 사용자 데이터 추가
+14. `database/migrations/add_recording_session.sql` - 녹음 세션 관리
+15. `database/migrations/add_audio_storage_setting.sql` - 오디오 저장 설정
 
 기본 스키마는 다음을 생성합니다:
 - `users` 테이블
@@ -141,10 +164,8 @@ npm run dev
 .
 ├── app/                    # Next.js App Router
 │   ├── api/               # API Routes
-│   ├── dashboard/         # 대시보드
+│   ├── dashboard/         # 대시보드 (메인, 히스토리, 설정, 녹음)
 │   ├── onboarding/        # 온보딩
-│   ├── history/           # 녹음 히스토리
-│   ├── settings/          # 설정
 │   └── page.tsx           # 랜딩 페이지
 ├── components/            # React 컴포넌트
 │   └── recorder/          # 녹음 관련 컴포넌트
@@ -177,12 +198,12 @@ npm run dev
 - 포맷 선택
 - 사용량 표시
 
-### 히스토리 (`/history`)
+### 히스토리 (`/dashboard/history`)
 - 최근 녹음 목록
 - 처리 상태 (처리중/완료/실패)
 - Notion 링크 바로가기
 
-### 설정 (`/settings`)
+### 설정 (`/dashboard/settings`)
 - 계정 정보
 - 연결된 통합 관리
 - 데이터 삭제
@@ -194,12 +215,18 @@ npm run dev
 - `POST /api/auth/signout` - 로그아웃
 
 ### 녹음
-- `POST /api/recordings` - 녹음 생성 및 업로드
+- `POST /api/recordings/start` - 녹음 세션 시작
+- `POST /api/recordings/chunk` - 실시간 청크 업로드 및 전사
+- `POST /api/recordings/finalize` - 녹음 종료 및 AI 처리
+- `POST /api/recordings/pause-notify` - 백그라운드 전환 시 푸시 알림
+- `POST /api/recordings` - 녹음 생성 및 업로드 (레거시)
 - `GET /api/recordings` - 녹음 목록 조회
 - `GET /api/recordings/[id]` - 녹음 상세 조회
+- `GET /api/recordings/[id]/audio` - 오디오 파일 조회
 - `DELETE /api/recordings/[id]` - 녹음 삭제
 
 ### 사용자
+- `GET /api/user` - 사용자 정보 조회
 - `GET /api/user/usage` - 사용량 조회
 - `POST /api/user/language` - 언어 설정 업데이트
 - `POST /api/user/onboarding` - 온보딩 완료 표시
@@ -212,9 +239,14 @@ npm run dev
 - `DELETE /api/user/push-subscription` - 푸시 구독 해제
 - `GET /api/user/push-enabled` - 푸시 알림 상태 조회
 - `POST /api/user/push-enabled` - 푸시 알림 상태 변경
+- `POST /api/user/pwa-install` - PWA 설치 추적
+- `POST /api/user/audio-storage` - 오디오 저장 설정
 - `POST /api/user/withdraw` - 사용자 탈퇴
 - `GET /api/user/google` - Google 연동 상태 조회
 - `POST /api/user/google` - Google Docs 연동
+- `GET /api/user/slack` - Slack 연동 상태 조회
+- `GET /api/user/notion-database` - Notion 데이터베이스 설정 조회
+- `POST /api/user/notion-database` - Notion 데이터베이스 설정 변경
 
 ### 포맷
 - `GET /api/formats` - 커스텀 포맷 목록
