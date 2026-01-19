@@ -26,18 +26,7 @@
     }
   }
 
-  /* iOS PWA standalone mode specific fix */
-  @media (display-mode: standalone) {
 
-    html,
-    body {
-      height: 100%;
-      min-height: 100%;
-      min-height: -webkit-fill-available;
-      /* Ensure background extends to safe area */
-      background-color: white;
-    }
-  }
 }
 
 @layer components {
