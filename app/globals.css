@@ -4,9 +4,18 @@
 
 @layer base {
 
+  /* iOS PWA safe-area fix: prevent white bar at bottom */
+  html {
+    height: 100%;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
+  }
+
   html:has(.app-container),
   body:has(.app-container) {
     height: 100%;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
     overflow: hidden;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
@@ -15,11 +24,24 @@
   body {
     @apply bg-white text-slate-900 antialiased;
     font-family: var(--font-pretendard), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
   }
 
   @media (min-width: 480px) {
     body {
       @apply bg-gray-900;
+    }
+  }
+
+  /* iOS PWA standalone mode specific fix */
+  @media (display-mode: standalone) {
+    html, body {
+      height: 100%;
+      min-height: 100%;
+      min-height: -webkit-fill-available;
+      /* Ensure background extends to safe area */
+      background-color: white;
     }
   }
 }
@@ -33,8 +55,33 @@
     flex-direction: column;
     height: 100vh;
     height: 100dvh;
+    height: -webkit-fill-available;
     position: relative;
     overflow: hidden;
+  }
+
+  /* iOS PWA standalone mode: use fixed positioning to fill entire screen */
+  @media (display-mode: standalone) {
+    .app-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 100%;
+      max-width: 100%;
+      /* Safe area padding for notch and home indicator */
+      padding-top: env(safe-area-inset-top);
+    }
+  }
+
+  /* Desktop: centered layout with max-width */
+  @media (min-width: 480px) {
+    .app-container {
+      position: relative;
+      max-width: 430px;
+      height: 100dvh;
+    }
   }
 
   /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
@@ -57,6 +104,14 @@
     flex-shrink: 0;
   }
 
+  /* iOS PWA standalone mode: safe-area already applied to container */
+  @media (display-mode: standalone) {
+    .app-header {
+      height: 3.5rem;
+      padding-top: 0;
+    }
+  }
+
   .app-header-title {
     @apply text-lg font-bold text-slate-900;
   }
@@ -65,6 +120,16 @@
   .bottom-tab {
     @apply fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-slate-100 z-50;
     padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* iOS PWA standalone mode: full width bottom tab */
+  @media (display-mode: standalone) {
+    .bottom-tab {
+      left: 0;
+      right: 0;
+      transform: none;
+      max-width: 100%;
+    }
   }
 
   .bottom-tab-inner {
