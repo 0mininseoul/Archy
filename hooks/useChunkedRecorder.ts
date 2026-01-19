@@ -147,14 +147,14 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       const ctx = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
       keepAliveContextRef.current = ctx;
 
-      // Create oscillator with very low frequency (less noticeable)
+      // Create oscillator with low audible frequency (iOS may require audible audio)
       const oscillator = ctx.createOscillator();
       oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(1, ctx.currentTime); // 1Hz - inaudible frequency
+      oscillator.frequency.setValueAtTime(200, ctx.currentTime); // 200Hz - low audible tone
 
-      // Create gain node with very low volume
+      // Create gain node with low volume (still audible but quiet)
       const gainNode = ctx.createGain();
-      gainNode.gain.setValueAtTime(0.01, ctx.currentTime); // Very quiet
+      gainNode.gain.setValueAtTime(0.02, ctx.currentTime); // Slightly louder for iOS detection
 
       oscillator.connect(gainNode);
       gainNode.connect(ctx.destination);
