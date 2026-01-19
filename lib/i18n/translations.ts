@@ -124,6 +124,32 @@ export const translations = {
       iosBackgroundWarningDismiss: "알겠습니다",
     },
 
+    // Recording Guide Modal
+    recordingGuide: {
+      title: "녹음을 시작합니다",
+      keepScreen: "녹음 중에는 화면을 유지해 주세요.",
+      keepScreenDesc: "홈 화면이나 다른 앱으로 이동하면 녹음이 일시정지됩니다.",
+      stealthMode: "화면이 자동으로 어두워집니다.",
+      stealthModeDesc: '화면을 "두 번" 탭하면 다시 밝아집니다.',
+      pushDenied: "알림이 꺼져 있어 녹음 중단 시 알려드릴 수 없습니다.",
+      enablePush: "알림 켜기",
+      confirm: "확인하고 녹음 시작",
+    },
+
+    // Resume Modal
+    resumeModal: {
+      title: "녹음이 일시정지되었습니다",
+      recordedSoFar: "현재까지 녹음",
+      resume: "이어서 녹음",
+      saveHere: "여기까지만 저장",
+      discard: "녹음 취소",
+    },
+
+    // Stealth Mode
+    stealthMode: {
+      hint: "두 번 탭하면 화면이 밝아집니다",
+    },
+
     // History
     history: {
       title: "녹음 기록",
@@ -549,6 +575,32 @@ export const translations = {
       // iOS Background Warning
       iosBackgroundWarning: "On iOS, switching to another app or locking the screen may stop the recording.",
       iosBackgroundWarningDismiss: "Got it",
+    },
+
+    // Recording Guide Modal
+    recordingGuide: {
+      title: "Starting Recording",
+      keepScreen: "Please keep the screen on while recording.",
+      keepScreenDesc: "Recording will pause if you switch to home screen or another app.",
+      stealthMode: "The screen will automatically dim.",
+      stealthModeDesc: "Double tap to brighten it again.",
+      pushDenied: "Notifications are off, so we can't alert you if recording stops.",
+      enablePush: "Enable notifications",
+      confirm: "Got it, start recording",
+    },
+
+    // Resume Modal
+    resumeModal: {
+      title: "Recording paused",
+      recordedSoFar: "Recorded so far",
+      resume: "Continue recording",
+      saveHere: "Save up to here",
+      discard: "Cancel recording",
+    },
+
+    // Stealth Mode
+    stealthMode: {
+      hint: "Double tap to brighten the screen",
     },
 
     // History

@@ -30,6 +30,11 @@ export interface ChunkUploadCallbacks {
   onNetworkStatusChange?: (isOnline: boolean) => void;
 }
 
+export interface ChunkUploadOptions {
+  sessionId?: string;
+  callbacks?: ChunkUploadCallbacks;
+}
+
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 1000; // 1초
 const MAX_RETRY_DELAY = 30000; // 30초
@@ -40,10 +45,21 @@ export class ChunkUploadManager {
   private callbacks: ChunkUploadCallbacks = {};
   private isOnline: boolean = true;
   private retryTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private sessionId: string | null = null;
+  private totalDuration: number = 0;
 
-  constructor(callbacks?: ChunkUploadCallbacks) {
-    if (callbacks) {
-      this.callbacks = callbacks;
+  constructor(options?: ChunkUploadOptions | ChunkUploadCallbacks) {
+    // 레거시 지원: callbacks만 전달된 경우
+    if (options) {
+      if ('onChunkUploaded' in options || 'onChunkFailed' in options) {
+        this.callbacks = options as ChunkUploadCallbacks;
+      } else {
+        const opts = options as ChunkUploadOptions;
+        this.sessionId = opts.sessionId || null;
+        if (opts.callbacks) {
+          this.callbacks = opts.callbacks;
+        }
+      }
     }
 
     // 네트워크 상태 감지
@@ -53,6 +69,18 @@ export class ChunkUploadManager {
       window.addEventListener("online", this.handleOnline);
       window.addEventListener("offline", this.handleOffline);
     }
+  }
+
+  setSessionId(sessionId: string): void {
+    this.sessionId = sessionId;
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId;
+  }
+
+  setTotalDuration(duration: number): void {
+    this.totalDuration = duration;
   }
 
   private handleOnline = () => {
@@ -106,6 +134,12 @@ export class ChunkUploadManager {
       formData.append("audio", chunk.blob, `chunk-${chunk.chunkIndex}.webm`);
       formData.append("chunkIndex", chunk.chunkIndex.toString());
       formData.append("durationSeconds", chunk.durationSeconds.toString());
+
+      // 세션 기반 실시간 병합을 위한 추가 필드
+      if (this.sessionId) {
+        formData.append("sessionId", this.sessionId);
+      }
+      formData.append("totalDuration", this.totalDuration.toString());
 
       const response = await fetch("/api/recordings/chunk", {
         method: "POST",

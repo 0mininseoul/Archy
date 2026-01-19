@@ -68,8 +68,55 @@ export function DashboardClient() {
 
   const handleRecordingComplete = useCallback(
     async (result: ChunkedRecordingResult) => {
-      const { transcripts, totalDuration, totalChunks } = result;
+      const { transcripts, totalDuration, totalChunks, sessionId } = result;
 
+      // 세션 기반인 경우 sessionId로 finalize
+      if (sessionId) {
+        // 녹음 시간이 너무 짧으면 에러
+        if (totalDuration < 1) {
+          alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
+          return;
+        }
+
+        setIsProcessing(true);
+        setProcessingStatus(t.dashboard.finalizingRecording);
+
+        try {
+          console.log(
+            `[Dashboard] Finalizing session: ${sessionId}, ${totalDuration}s`
+          );
+
+          // finalize API 호출 (세션 기반)
+          const response = await fetch("/api/recordings/finalize", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sessionId,
+              totalDurationSeconds: totalDuration,
+              format: "meeting",
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Finalize failed");
+          }
+
+          // 성공
+          invalidateRecordings();
+          router.push("/history");
+        } catch (error) {
+          console.error("Error finalizing recording:", error);
+          alert(t.errors.uploadFailed);
+          setIsProcessing(false);
+          setProcessingStatus("");
+        }
+        return;
+      }
+
+      // 레거시: transcripts 배열 기반
       // 전사된 청크가 없으면 에러
       if (transcripts.length === 0) {
         alert("전사된 내용이 없습니다. 다시 녹음해주세요.");

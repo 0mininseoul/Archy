@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useChunkedRecorder,
   ChunkedRecordingResult,
+  RecordingSession,
 } from "@/hooks/useChunkedRecorder";
 import { formatDuration } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { StealthMode } from "./stealth-mode";
+import { RecordingGuideModal } from "./recording-guide-modal";
+import { ResumeModal } from "./resume-modal";
 
 interface ChunkedAudioRecorderProps {
   onRecordingComplete: (result: ChunkedRecordingResult) => void;
@@ -124,7 +128,12 @@ export function ChunkedAudioRecorder({
   onRecordingComplete,
 }: ChunkedAudioRecorderProps) {
   const { t } = useI18n();
-  const [showIosWarning, setShowIosWarning] = useState(false);
+
+  // UI 상태
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [stealthModeActive, setStealthModeActive] = useState(false);
+  const [pushPermissionDenied, setPushPermissionDenied] = useState(false);
 
   const {
     isRecording,
@@ -137,44 +146,125 @@ export function ChunkedAudioRecorder({
     chunksTotal,
     pendingChunks,
     isOnline,
+    sessionId,
+    pausedSession,
+    isBackgroundPaused,
     startRecording,
     pauseRecording,
     resumeRecording,
     stopRecording,
+    resumeSession,
+    discardSession,
+    finalizeCurrentSession,
   } = useChunkedRecorder();
 
-  // Check if iOS device
-  const isIOS = typeof navigator !== 'undefined' && (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-
-  const handleStartRecording = async () => {
-    // Show iOS warning on first recording
-    if (isIOS && typeof window !== 'undefined') {
-      const hasSeenWarning = localStorage.getItem('archy_ios_background_warning_seen');
-      if (!hasSeenWarning) {
-        setShowIosWarning(true);
-        return;
-      }
+  // 푸시 권한 상태 확인
+  const checkPushPermission = useCallback(async (): Promise<"granted" | "denied" | "default"> => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return "denied";
     }
-    await startRecording();
-  };
+    return Notification.permission;
+  }, []);
 
-  const handleDismissIosWarning = async () => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('archy_ios_background_warning_seen', 'true');
+  // 푸시 권한 요청
+  const requestPushPermission = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return;
     }
-    setShowIosWarning(false);
-    await startRecording();
-  };
+    try {
+      const permission = await Notification.requestPermission();
+      setPushPermissionDenied(permission === "denied");
+    } catch (e) {
+      console.warn("[ChunkedAudioRecorder] Failed to request push permission:", e);
+    }
+  }, []);
 
-  const handleStopRecording = async () => {
+  // 녹음 버튼 클릭 핸들러
+  const handleRecordButtonClick = useCallback(async () => {
+    // 푸시 권한 확인
+    const permission = await checkPushPermission();
+
+    if (permission === "default") {
+      // 권한 요청
+      await requestPushPermission();
+    }
+
+    const finalPermission = await checkPushPermission();
+    setPushPermissionDenied(finalPermission === "denied");
+
+    // 안내 모달 표시
+    setShowGuideModal(true);
+  }, [checkPushPermission, requestPushPermission]);
+
+  // 안내 모달에서 확인 클릭
+  const handleGuideConfirm = useCallback(async () => {
+    setShowGuideModal(false);
+    await startRecording();
+    setStealthModeActive(true);
+  }, [startRecording]);
+
+  // 스텔스 모드 종료
+  const handleStealthModeExit = useCallback(() => {
+    setStealthModeActive(false);
+  }, []);
+
+  // 녹음 중지 핸들러
+  const handleStopRecording = useCallback(async () => {
+    setStealthModeActive(false);
     const result = await stopRecording();
     if (result) {
       onRecordingComplete(result);
     }
-  };
+  }, [stopRecording, onRecordingComplete]);
+
+  // 일시정지 핸들러
+  const handlePauseRecording = useCallback(() => {
+    pauseRecording();
+    setStealthModeActive(false);
+  }, [pauseRecording]);
+
+  // 재개 핸들러
+  const handleResumeRecording = useCallback(async () => {
+    await resumeRecording();
+    setStealthModeActive(true);
+  }, [resumeRecording]);
+
+  // 재개 모달에서 이어서 녹음
+  const handleResumeFromModal = useCallback(async () => {
+    if (!pausedSession) return;
+    setShowResumeModal(false);
+    await resumeSession(pausedSession);
+    setStealthModeActive(true);
+  }, [pausedSession, resumeSession]);
+
+  // 재개 모달에서 여기까지만 저장
+  const handleSaveHere = useCallback(async () => {
+    setShowResumeModal(false);
+    const result = await finalizeCurrentSession();
+    if (result) {
+      onRecordingComplete(result);
+    }
+  }, [finalizeCurrentSession, onRecordingComplete]);
+
+  // 재개 모달에서 취소
+  const handleDiscard = useCallback(async () => {
+    setShowResumeModal(false);
+    await discardSession();
+  }, [discardSession]);
+
+  // 일시정지된 세션이 있으면 모달 표시
+  useEffect(() => {
+    if (pausedSession && !isRecording) {
+      setShowResumeModal(true);
+    }
+  }, [pausedSession, isRecording]);
+
+  // 백그라운드에서 복귀 시 스텔스 모드 해제
+  useEffect(() => {
+    if (isBackgroundPaused) {
+      setStealthModeActive(false);
+    }
+  }, [isBackgroundPaused]);
 
   return (
     <div className="w-full flex flex-col items-center justify-center space-y-4">
@@ -256,36 +346,11 @@ export function ChunkedAudioRecorder({
         </div>
       )}
 
-      {/* iOS Background Warning Modal */}
-      {showIosWarning && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
-                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900">iOS 녹음 안내</h3>
-            </div>
-            <p className="text-slate-600 text-sm mb-6">
-              {t.dashboard.iosBackgroundWarning}
-            </p>
-            <button
-              onClick={handleDismissIosWarning}
-              className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors"
-            >
-              {t.dashboard.iosBackgroundWarningDismiss}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Controls */}
       <div className="flex items-center gap-4 pt-2">
         {!isRecording ? (
           <button
-            onClick={handleStartRecording}
+            onClick={handleRecordButtonClick}
             className="group relative flex items-center justify-center w-20 h-20 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-xl shadow-red-500/30 transition-all hover:scale-105 active:scale-95"
             aria-label="Start Recording"
           >
@@ -296,7 +361,7 @@ export function ChunkedAudioRecorder({
           <>
             {/* Pause/Resume Button */}
             <button
-              onClick={isPaused ? resumeRecording : pauseRecording}
+              onClick={isPaused ? handleResumeRecording : handlePauseRecording}
               className="flex items-center justify-center w-14 h-14 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all hover:scale-105 active:scale-95"
               aria-label={isPaused ? "Resume" : "Pause"}
             >
@@ -331,6 +396,31 @@ export function ChunkedAudioRecorder({
           <span className="text-xs opacity-75">{t.dashboard.maxDuration}</span>
         </p>
       )}
+
+      {/* Stealth Mode */}
+      <StealthMode
+        isActive={stealthModeActive && isRecording && !isPaused}
+        duration={duration}
+        onExit={handleStealthModeExit}
+      />
+
+      {/* Recording Guide Modal */}
+      <RecordingGuideModal
+        isOpen={showGuideModal}
+        pushPermissionDenied={pushPermissionDenied}
+        onConfirm={handleGuideConfirm}
+        onRequestPushPermission={requestPushPermission}
+        onClose={() => setShowGuideModal(false)}
+      />
+
+      {/* Resume Modal */}
+      <ResumeModal
+        isOpen={showResumeModal}
+        session={pausedSession}
+        onResume={handleResumeFromModal}
+        onSaveHere={handleSaveHere}
+        onDiscard={handleDiscard}
+      />
     </div>
   );
 }
