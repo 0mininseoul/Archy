@@ -62,7 +62,7 @@ export default function ContactPage() {
           {/* Withdraw Button */}
           <div className="text-center">
             <button
-              onClick={() => router.push("/settings/contact/withdraw")}
+              onClick={() => router.push("/dashboard/settings/contact/withdraw")}
               className="text-xs text-slate-400 hover:text-red-500 transition-colors"
             >
               {t.settings.contactPage.withdraw}

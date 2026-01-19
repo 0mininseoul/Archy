@@ -443,7 +443,7 @@ async function stepSlackNotify(
       appUrl = process.env.NEXT_PUBLIC_APP_URL;
     }
 
-    const archyUrl = `${appUrl}/recordings/${recordingId}`;
+    const archyUrl = `${appUrl}/dashboard/recordings/${recordingId}`;
 
     await sendSlackNotification(
       userData.slack_access_token,
@@ -513,7 +513,7 @@ async function stepPushNotify(
     await sendPushNotification(userData.push_subscription as PushSubscription, {
       title,
       body,
-      url: "/history",
+      url: "/dashboard/history",
       recordingId,
     });
 

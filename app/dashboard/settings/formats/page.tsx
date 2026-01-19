@@ -80,7 +80,7 @@ export default function FormatsPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/settings")}
+              onClick={() => router.push("/dashboard/settings")}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg

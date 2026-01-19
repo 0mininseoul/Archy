@@ -26,7 +26,7 @@ export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
     },
     {
       id: "history",
-      path: "/history",
+      path: "/dashboard/history",
       label: t.nav.history,
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -36,7 +36,7 @@ export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
     },
     {
       id: "settings",
-      path: "/settings",
+      path: "/dashboard/settings",
       label: t.nav.settings,
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

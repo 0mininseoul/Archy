@@ -80,7 +80,7 @@ export function IntegrationsSection({
   }, [initialGoogleFolder]);
 
   const handleConnect = (service: "notion" | "slack" | "google") => {
-    window.location.href = `/api/auth/${service}?returnTo=/settings`;
+    window.location.href = `/api/auth/${service}?returnTo=/dashboard/settings`;
   };
 
   // Notion handlers

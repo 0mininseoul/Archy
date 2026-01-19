@@ -102,7 +102,7 @@ export function RecordingCard({
   // Prefetch for performance
   useEffect(() => {
     if (recording.transcript) {
-      router.prefetch(`/recordings/${recording.id}`);
+      router.prefetch(`/dashboard/recordings/${recording.id}`);
     }
   }, [recording.id, recording.transcript, router]);
 
@@ -219,7 +219,7 @@ export function RecordingCard({
     }
 
     if (recording.transcript) {
-      router.push(`/recordings/${recording.id}`);
+      router.push(`/dashboard/recordings/${recording.id}`);
     }
   }, [recording.transcript, recording.id, router, swipeOffset]);
 
@@ -410,7 +410,7 @@ export function RecordingCard({
             {recording.status === "failed" && recording.transcript && (
               <div className="flex items-center gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => router.push(`/recordings/${recording.id}`)}
+                  onClick={() => router.push(`/dashboard/recordings/${recording.id}`)}
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 min-h-[36px]"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

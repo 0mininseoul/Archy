@@ -25,7 +25,7 @@ export default function WithdrawPage() {
       });
 
       if (response.ok) {
-        router.push("/settings/contact/withdraw/complete");
+        router.push("/dashboard/settings/contact/withdraw/complete");
       } else {
         throw new Error("Failed to withdraw");
       }

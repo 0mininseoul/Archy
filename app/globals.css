@@ -4,18 +4,9 @@
 
 @layer base {
 
-  /* iOS PWA safe-area fix: prevent white bar at bottom */
-  html {
-    height: 100%;
-    min-height: 100%;
-    min-height: -webkit-fill-available;
-  }
-
   html:has(.app-container),
   body:has(.app-container) {
     height: 100%;
-    min-height: 100%;
-    min-height: -webkit-fill-available;
     overflow: hidden;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
@@ -24,8 +15,6 @@
   body {
     @apply bg-white text-slate-900 antialiased;
     font-family: var(--font-pretendard), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
-    min-height: 100%;
-    min-height: -webkit-fill-available;
   }
 
   @media (min-width: 480px) {
@@ -36,7 +25,9 @@
 
   /* iOS PWA standalone mode specific fix */
   @media (display-mode: standalone) {
-    html, body {
+
+    html,
+    body {
       height: 100%;
       min-height: 100%;
       min-height: -webkit-fill-available;
@@ -60,18 +51,19 @@
     overflow: hidden;
   }
 
-  /* iOS PWA standalone mode: use fixed positioning to fill entire screen */
+  /* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
   @media (display-mode: standalone) {
-    .app-container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 100%;
-      max-width: 100%;
-      /* Safe area padding for notch and home indicator */
+    body {
       padding-top: env(safe-area-inset-top);
+      background-color: white;
+      /* Or your header bg color */
+    }
+
+    .app-header {
+      padding-top: 0;
+      /* Body padding handles it */
+      height: 3.5rem;
+      /* Fixed height without safe-area calculation */
     }
   }
 
@@ -90,8 +82,8 @@
     flex: 1 1 0;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    /* Bottom Tab 높이(64px) + safe area + 추가 여백 */
-    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    /* Bottom Tab 높이(64px) + 여유분 */
+    padding-bottom: 64px;
     /* iOS 스크롤 */
     -webkit-overflow-scrolling: touch;
   }

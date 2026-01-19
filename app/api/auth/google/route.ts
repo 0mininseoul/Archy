@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 // GET /api/auth/google - Redirect to Google OAuth
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const returnTo = searchParams.get("returnTo") || "/settings";
+  const returnTo = searchParams.get("returnTo") || "/dashboard/settings";
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI;

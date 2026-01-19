@@ -97,13 +97,13 @@ export async function updateSession(request: NextRequest) {
   console.log("[Middleware] Cookies:", request.cookies.getAll().map(c => c.name).filter(n => n.includes('supabase')));
 
   // Protected routes
-  const protectedRoutes = ["/dashboard", "/history", "/settings", "/onboarding"];
+  const protectedRoutes = ["/dashboard", "/onboarding"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route)
   );
 
   // Exception: Withdrawal complete page should be accessible without auth
-  const isWithdrawComplete = request.nextUrl.pathname === "/settings/contact/withdraw/complete";
+  const isWithdrawComplete = request.nextUrl.pathname === "/dashboard/settings/contact/withdraw/complete";
 
   if (isProtectedRoute && !isWithdrawComplete && !user) {
     console.log("[Middleware] Redirecting to home - no user on protected route");

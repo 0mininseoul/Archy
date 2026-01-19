@@ -107,7 +107,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
   }, [recording.id, editingTitle]);
 
   const handleCopyLink = useCallback(() => {
-    const shareUrl = `${PRODUCTION_DOMAIN}/recordings/${recording.id}`;
+    const shareUrl = `${PRODUCTION_DOMAIN}/dashboard/recordings/${recording.id}`;
     navigator.clipboard.writeText(shareUrl);
     alert("링크가 복사되었습니다!");
     setShowMenu(false);

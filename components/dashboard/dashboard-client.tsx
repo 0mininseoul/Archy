@@ -106,7 +106,7 @@ export function DashboardClient() {
 
           // 성공
           invalidateRecordings();
-          router.push("/history");
+          router.push("/dashboard/history");
         } catch (error) {
           console.error("Error finalizing recording:", error);
           alert(t.errors.uploadFailed);
@@ -157,7 +157,7 @@ export function DashboardClient() {
 
         // 성공
         invalidateRecordings();
-        router.push("/history");
+        router.push("/dashboard/history");
       } catch (error) {
         console.error("Error finalizing recording:", error);
         alert(t.errors.uploadFailed);

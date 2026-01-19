@@ -130,7 +130,7 @@ export function SettingsClient() {
     const isGoogleJustConnected = params.get("google") === "connected";
 
     if (isNotionJustConnected || isGoogleJustConnected) {
-      window.history.replaceState({}, "", "/settings");
+      window.history.replaceState({}, "", "/dashboard/settings");
 
       // Invalidate cache and refresh data
       invalidateUser();
@@ -261,7 +261,7 @@ export function SettingsClient() {
       {/* 9. Contact */}
       <div className="text-center pt-4">
         <button
-          onClick={() => router.push("/settings/contact")}
+          onClick={() => router.push("/dashboard/settings/contact")}
           className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
         >
           {t.settings.contact}
