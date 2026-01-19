@@ -54,16 +54,7 @@
   /* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
   @media (display-mode: standalone) {
     body {
-      padding-top: env(safe-area-inset-top);
       background-color: white;
-      /* Or your header bg color */
-    }
-
-    .app-header {
-      padding-top: 0;
-      /* Body padding handles it */
-      height: 3.5rem;
-      /* Fixed height without safe-area calculation */
     }
   }
 
@@ -96,13 +87,7 @@
     flex-shrink: 0;
   }
 
-  /* iOS PWA standalone mode: safe-area already applied to container */
-  @media (display-mode: standalone) {
-    .app-header {
-      height: 3.5rem;
-      padding-top: 0;
-    }
-  }
+
 
   .app-header-title {
     @apply text-lg font-bold text-slate-900;
