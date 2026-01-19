@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 
 interface BottomTabProps {
@@ -67,13 +68,13 @@ export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
                 </div>
               </div>
             )}
-            <button
-              onClick={() => router.push(tab.path)}
+            <Link
+              href={tab.path}
               className={`bottom-tab-item ${isActive(tab.path) ? "active" : ""}`}
             >
               {tab.icon}
               <span className="bottom-tab-label">{tab.label}</span>
-            </button>
+            </Link>
           </div>
         ))}
       </div>

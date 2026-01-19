@@ -8,7 +8,7 @@ export function LandingClient() {
     const { t } = useI18n();
 
     return (
-        <main className="min-h-screen bg-white flex flex-col">
+        <main className="min-h-screen bg-white flex flex-col h-[100dvh] overflow-y-auto overflow-x-hidden">
             {/* Navbar - 모바일 최적화 */}
             <nav className="border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">

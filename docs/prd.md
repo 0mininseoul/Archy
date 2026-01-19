@@ -69,18 +69,19 @@ Deployment:
 ```
 
 ### **3.2 데이터 플로우**
+### 3.2 데이터 플로우
 ```mermaid
-웹 녹음 → Supabase Storage (원본 오디오)
+웹 녹음 (20초 청크) → /api/recordings/chunk (실시간 업로드)
     ↓
-WhisperAPI.com (STT 변환)
+Groq Whisper V3 (실시간 전사)
     ↓
-Supabase DB (트랜스크립트 저장)
+Supabase DB (전사본 실시간 병합)
     ↓
-OpenAI GPT-4 (포맷별 정리)
+녹음 종료 → /api/recordings/finalize
     ↓
-Notion API (페이지 생성 + 오디오 첨부)
+OpenAI GPT-4o-mini (문서 정리)
     ↓
-Slack API (완료 알림 + Notion 링크)
+Notion/Google Docs/Slack (외부 연동)
 ```
 
 ---
@@ -734,8 +735,8 @@ FormData: audioFile
 
 ### **필수 기능 (Must Have)**
 - [x] Google 로그인
-- [x] 웹 녹음 (최대 120분)
-- [x] STT 변환 (WhisperAPI.com)
+- [x] 웹 녹음 (최대 120분, 청크 분할 전송)
+- [x] STT 변환 (Groq Whisper V3)
 - [x] AI 문서 정리 (GPT-4o-mini, 3가지 기본 포맷)
 - [x] Notion 페이지 생성 (원본 오디오 첨부 포함)
 - [x] Slack 알림
@@ -747,11 +748,12 @@ FormData: audioFile
 - [x] PWA 지원
 - [x] 리퀴드 글래스 디자인
 - [x] 모바일 반응형
+- [x] Google Docs 연동
 
 ### **연기 가능 (Nice to Have)**
 - [ ] 튜토리얼 이미지 3장
-- [ ] 다국어 지원
-- [ ] 실시간 진행 상황 표시
+- [x] 다국어 지원 (한국어/영어)
+- [x] 실시간 진행 상황 표시 (전사 중 표시)
 - [ ] 녹음 편집 기능
 - [ ] 팀 공유 기능
 
