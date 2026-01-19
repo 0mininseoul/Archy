@@ -3,17 +3,29 @@
 @tailwind utilities;
 
 @layer base {
-  html, body {
-    @apply overflow-x-hidden;
+
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   body {
-    @apply bg-gray-900 text-slate-900 antialiased;
+    @apply bg-white text-slate-900 antialiased;
     font-family: var(--font-pretendard), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  }
+
+  @media (min-width: 480px) {
+    body {
+      @apply bg-gray-900;
+    }
   }
 }
 
 @layer components {
+
   /* 모바일 앱 컨테이너 - 중앙 정렬된 430px 폰 레이아웃 */
   .app-container {
     @apply max-w-[430px] mx-auto bg-white;
@@ -30,6 +42,7 @@
     @apply overflow-x-hidden;
     flex: 1 1 0;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     /* Bottom Tab 높이(64px) + safe area + 추가 여백 */
     padding-bottom: calc(120px + env(safe-area-inset-bottom));
     /* iOS 스크롤 */
@@ -142,28 +155,61 @@
 
   /* 애니메이션 */
   @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
 
   @keyframes slide-up {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes bounce-arrow {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-8px); }
+
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-8px);
+    }
   }
 
   @keyframes bounce-slow {
-    0%, 100% { transform: translateX(-50%) translateY(0); }
-    50% { transform: translateX(-50%) translateY(-4px); }
+
+    0%,
+    100% {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    50% {
+      transform: translateX(-50%) translateY(-4px);
+    }
   }
 
   @keyframes bounce-vertical {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
+
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-4px);
+    }
   }
 
   .animate-fade-in {
