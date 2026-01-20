@@ -142,21 +142,24 @@ export const POST = withAuth<FinalizeResponse>(
       })
       .eq("id", user.id);
 
-    // Process in background (skip transcription, start from formatting)
-    processFromTranscripts({
+    // Process synchronously (Vercel serverless terminates after response, so we must await)
+    const result = await processFromTranscripts({
       recordingId,
       transcript: mergedTranscript,
       format: format as Recording["format"],
       duration: totalDurationSeconds,
       userData: userData as User,
       title,
-    }).catch((error) => handleProcessingError(recordingId, error));
+    }).catch((error) => {
+      handleProcessingError(recordingId, error);
+      return null;
+    });
 
     return successResponse({
       recording: {
         id: recordingId,
-        title,
-        status: "processing",
+        title: result?.title || title,
+        status: result?.success ? "completed" : "failed",
       },
     });
   }
