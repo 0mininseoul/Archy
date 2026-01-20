@@ -34,93 +34,94 @@
 @layer components {
 
   /* 모바일 앱 컨테이너 - 중앙 정렬된 430px 폰 레이아웃 */
-  @apply max-w-[430px] mx-auto bg-white;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  /* Fallback */
-  height: var(--app-height, 100dvh);
-  position: relative;
-  overflow: hidden;
-}
-
-/* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
-@media (display-mode: standalone) {
-  body {
-    background-color: white;
-  }
-}
-
-/* Desktop: centered layout with max-width */
-@media (min-width: 480px) {
   .app-container {
+    @apply max-w-[430px] mx-auto bg-white;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    /* Fallback */
+    height: var(--app-height, 100dvh);
     position: relative;
-    max-width: 430px;
-    height: 100dvh;
+    overflow: hidden;
   }
-}
 
-/* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
-.app-main {
-  @apply overflow-x-hidden;
-  flex: 1 1 0;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  /* Bottom Tab 높이(64px) + 여유분 */
-  padding-bottom: 64px;
-  /* iOS 스크롤 */
-  -webkit-overflow-scrolling: touch;
-}
+  /* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
+  @media (display-mode: standalone) {
+    body {
+      background-color: white;
+    }
+  }
 
-/* Sticky Top Header */
-.app-header {
-  @apply sticky top-0 z-40 bg-white border-b border-slate-100 px-4 flex items-center justify-between;
-  height: calc(3.5rem + env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
-  flex-shrink: 0;
-}
+  /* Desktop: centered layout with max-width */
+  @media (min-width: 480px) {
+    .app-container {
+      position: relative;
+      max-width: 430px;
+      height: 100dvh;
+    }
+  }
+
+  /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
+  .app-main {
+    @apply overflow-x-hidden;
+    flex: 1 1 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    /* Bottom Tab 높이(64px) + 여유분 */
+    padding-bottom: 64px;
+    /* iOS 스크롤 */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Sticky Top Header */
+  .app-header {
+    @apply sticky top-0 z-40 bg-white border-b border-slate-100 px-4 flex items-center justify-between;
+    height: calc(3.5rem + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    flex-shrink: 0;
+  }
 
 
 
-.app-header-title {
-  @apply text-lg font-bold text-slate-900;
-}
+  .app-header-title {
+    @apply text-lg font-bold text-slate-900;
+  }
 
-/* Bottom Tab Navigation */
-.bottom-tab {
-  @apply fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-slate-100 z-50;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* iOS PWA standalone mode: full width bottom tab */
-@media (display-mode: standalone) {
+  /* Bottom Tab Navigation */
   .bottom-tab {
-    left: 0;
-    right: 0;
-    transform: none;
-    max-width: 100%;
+    @apply fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white border-t border-slate-100 z-50;
+    padding-bottom: env(safe-area-inset-bottom);
   }
-}
 
-.bottom-tab-inner {
-  @apply flex justify-around items-center h-16;
-}
+  /* iOS PWA standalone mode: full width bottom tab */
+  @media (display-mode: standalone) {
+    .bottom-tab {
+      left: 0;
+      right: 0;
+      transform: none;
+      max-width: 100%;
+    }
+  }
 
-.bottom-tab-item {
-  @apply flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[64px] text-slate-400 transition-colors;
-}
+  .bottom-tab-inner {
+    @apply flex justify-around items-center h-16;
+  }
 
-.bottom-tab-item.active {
-  @apply text-slate-900;
-}
+  .bottom-tab-item {
+    @apply flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[64px] text-slate-400 transition-colors;
+  }
 
-.bottom-tab-item:active {
-  @apply text-slate-600 scale-95;
-}
+  .bottom-tab-item.active {
+    @apply text-slate-900;
+  }
 
-.bottom-tab-label {
-  @apply text-xs font-medium;
-}
+  .bottom-tab-item:active {
+    @apply text-slate-600 scale-95;
+  }
+
+  .bottom-tab-label {
+    @apply text-xs font-medium;
+  }
 }
 
 @layer utilities {
