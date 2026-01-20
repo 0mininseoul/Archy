@@ -4,14 +4,9 @@
 
 @layer base {
 
-  html:has(.app-container) {
-    height: -webkit-fill-available;
-    overscroll-behavior-y: none;
-  }
-
+  html:has(.app-container),
   body:has(.app-container) {
     min-height: 100vh;
-    min-height: -webkit-fill-available;
     overscroll-behavior-y: none;
   }
 
@@ -36,11 +31,8 @@
     @apply max-w-[430px] mx-auto bg-white;
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    /* Fallback */
-    height: -webkit-fill-available;
+    min-height: 100vh;
     position: relative;
-    overflow: hidden;
   }
 
   /* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
@@ -62,13 +54,9 @@
   /* 스크롤 가능한 메인 영역 (Bottom Tab 고려) */
   .app-main {
     @apply overflow-x-hidden;
-    flex: 1 1 0;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
+    flex: 1;
     /* Bottom Tab 높이(64px) + 여유분 */
     padding-bottom: 64px;
-    /* iOS 스크롤 */
-    -webkit-overflow-scrolling: touch;
   }
 
   /* Sticky Top Header */
