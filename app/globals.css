@@ -12,6 +12,20 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* iOS PWA specific: Revert to Layout Locking to prevent bottom whitespace */
+  @supports (-webkit-touch-callout: none) {
+    @media (display-mode: standalone) {
+
+      html:has(.app-container),
+      body:has(.app-container) {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        inset: 0;
+      }
+    }
+  }
+
   body {
     @apply bg-white text-slate-900 antialiased;
     font-family: var(--font-pretendard), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
@@ -36,6 +50,21 @@
     height: 100dvh;
     position: relative;
     overflow: hidden;
+  }
+
+  /* iOS PWA specific: Absolute Expansion to force full height */
+  @supports (-webkit-touch-callout: none) {
+    @media (display-mode: standalone) {
+      .app-container {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        height: auto;
+      }
+    }
   }
 
   /* iOS PWA standalone mode: Extend background to safe area but keep layout simple */
