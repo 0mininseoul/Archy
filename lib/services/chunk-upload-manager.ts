@@ -39,6 +39,16 @@ const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 1000; // 1초
 const MAX_RETRY_DELAY = 30000; // 30초
 
+/**
+ * MIME 타입에 맞는 파일 확장자 반환
+ */
+function getExtensionFromMimeType(mimeType: string): string {
+  if (mimeType.includes("mp4")) return "mp4";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm"; // 기본값
+}
+
 export class ChunkUploadManager {
   private pendingChunks: Map<string, PendingChunk> = new Map();
   private transcribedChunks: Map<number, string> = new Map();
@@ -131,7 +141,8 @@ export class ChunkUploadManager {
 
     try {
       const formData = new FormData();
-      formData.append("audio", chunk.blob, `chunk-${chunk.chunkIndex}.webm`);
+      const extension = getExtensionFromMimeType(chunk.blob.type);
+      formData.append("audio", chunk.blob, `chunk-${chunk.chunkIndex}.${extension}`);
       formData.append("chunkIndex", chunk.chunkIndex.toString());
       formData.append("durationSeconds", chunk.durationSeconds.toString());
 
