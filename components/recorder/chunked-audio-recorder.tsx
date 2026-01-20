@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useChunkedRecorder,
   ChunkedRecordingResult,
-  RecordingSession,
 } from "@/hooks/useChunkedRecorder";
 import { formatDuration } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -142,9 +141,7 @@ export function ChunkedAudioRecorder({
     error,
     isWakeLockActive,
     analyserNode,
-    chunksTranscribed,
     chunksTotal,
-    pendingChunks,
     isOnline,
     sessionId,
     pausedSession,
@@ -196,11 +193,15 @@ export function ChunkedAudioRecorder({
     setShowGuideModal(true);
   }, [checkPushPermission, requestPushPermission]);
 
-  // 안내 모달에서 확인 클릭
-  const handleGuideConfirm = useCallback(async () => {
+  // 안내 모달에서 확인 클릭 - 즉시 스텔스 모드 활성화, 녹음은 백그라운드에서 시작
+  const handleGuideConfirm = useCallback(() => {
     setShowGuideModal(false);
-    await startRecording();
     setStealthModeActive(true);
+    // 녹음 시작은 비동기로 진행 (스텔스 모드 즉시 전환으로 체감 지연 감소)
+    startRecording().catch((err) => {
+      console.error("[ChunkedAudioRecorder] Failed to start recording:", err);
+      setStealthModeActive(false);
+    });
   }, [startRecording]);
 
   // 스텔스 모드 종료
@@ -290,53 +291,17 @@ export function ChunkedAudioRecorder({
         isPaused={isPaused}
       />
 
-      {/* Wake Lock Status Badge */}
-      {isRecording && (
-        <div
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs ${isWakeLockActive
-            ? "bg-green-50 text-green-600 border border-green-200"
-            : "bg-amber-50 text-amber-600 border border-amber-200"
-            }`}
-        >
-          {isWakeLockActive ? (
-            <>
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>{t.dashboard.wakeLockActive}</span>
-            </>
-          ) : (
-            <>
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span>{t.dashboard.wakeLockInactive}</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Chunk Progress */}
-      {isRecording && chunksTotal > 0 && (
-        <div className="text-sm text-blue-600 font-medium">
-          {t.dashboard.chunkProgress
-            .replace("{current}", String(chunksTranscribed))
-            .replace("{total}", String(chunksTotal))}
-        </div>
-      )}
-
-      {/* Pending Chunks Warning */}
-      {isRecording && pendingChunks > 0 && (
-        <div className="text-xs text-amber-600">
-          {t.dashboard.pendingChunks.replace("{count}", String(pendingChunks))}
+      {/* Wake Lock Status Badge - only show when active */}
+      {isRecording && isWakeLockActive && (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>{t.dashboard.wakeLockActive}</span>
         </div>
       )}
 
@@ -410,6 +375,28 @@ export function ChunkedAudioRecorder({
           <br />
           <span className="text-xs opacity-75">{t.dashboard.maxDuration}</span>
         </p>
+      )}
+
+      {/* Stealth Mode (Dim Screen) Button - Bottom Right */}
+      {isRecording && !stealthModeActive && !isPaused && (
+        <button
+          onClick={() => setStealthModeActive(true)}
+          className="fixed bottom-24 right-4 flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-full text-sm font-medium shadow-lg hover:bg-slate-800 transition-colors z-50"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 96px)',
+            right: 'calc(env(safe-area-inset-right, 0px) + 16px)',
+          }}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+            />
+          </svg>
+          {t.stealthMode.enterStealth}
+        </button>
       )}
 
       {/* Stealth Mode */}

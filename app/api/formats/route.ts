@@ -66,9 +66,19 @@ export const POST = withAuth<{ format: CustomFormat }>(async ({ user, supabase, 
 });
 
 // PUT /api/formats - Update format or set as default
-export const PUT = withAuth<{ format: CustomFormat }>(async ({ user, supabase, request }) => {
+export const PUT = withAuth<{ format: CustomFormat | null }>(async ({ user, supabase, request }) => {
   const body = await request!.json();
-  const { id, name, prompt, is_default } = body;
+  const { id, name, prompt, is_default, clear_all_default } = body;
+
+  // 스마트 포맷을 기본값으로 설정 (모든 커스텀 포맷의 is_default를 false로)
+  if (clear_all_default) {
+    await supabase
+      .from("custom_formats")
+      .update({ is_default: false })
+      .eq("user_id", user.id);
+
+    return successResponse({ format: null });
+  }
 
   if (!id) {
     return errorResponse("Format ID is required", 400);

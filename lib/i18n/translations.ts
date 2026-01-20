@@ -148,6 +148,7 @@ export const translations = {
     // Stealth Mode
     stealthMode: {
       hint: "두 번 탭하면 화면이 밝아집니다",
+      enterStealth: "화면 끄기",
     },
 
     // History
@@ -267,6 +268,8 @@ export const translations = {
         deleteSuccess: "포맷이 삭제되었습니다.",
         deleteFailed: "포맷 삭제에 실패했습니다.",
         deleteConfirm: "이 포맷을 삭제하시겠습니까?",
+        editSuccess: "포맷이 수정되었습니다.",
+        editFailed: "포맷 수정에 실패했습니다.",
       },
       data: {
         title: "데이터 관리",
@@ -601,6 +604,7 @@ export const translations = {
     // Stealth Mode
     stealthMode: {
       hint: "Double tap to brighten the screen",
+      enterStealth: "Dim screen",
     },
 
     // History
@@ -720,6 +724,8 @@ export const translations = {
         deleteSuccess: "Format deleted successfully.",
         deleteFailed: "Failed to delete format.",
         deleteConfirm: "Delete this format?",
+        editSuccess: "Format updated successfully.",
+        editFailed: "Failed to update format.",
       },
       data: {
         title: "Data Management",
