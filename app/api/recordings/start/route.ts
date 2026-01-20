@@ -13,24 +13,18 @@ export const POST = withAuth<StartSessionResponse>(
     const body = await request!.json();
     const { format = "meeting" } = body;
 
-    // Get user data
-    const { data: userData } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+    // 유저 데이터와 기존 세션을 병렬로 조회 (속도 최적화)
+    const [userResult, sessionResult] = await Promise.all([
+      supabase.from("users").select("monthly_minutes_used, bonus_minutes").eq("id", user.id).single(),
+      supabase.from("recordings").select("id").eq("user_id", user.id).eq("status", "recording").single(),
+    ]);
+
+    const userData = userResult.data;
+    const existingSession = sessionResult.data;
 
     if (!userData) {
       return errorResponse("User not found", 404);
     }
-
-    // Check if user already has an active recording session
-    const { data: existingSession } = await supabase
-      .from("recordings")
-      .select("id, created_at, duration_seconds")
-      .eq("user_id", user.id)
-      .eq("status", "recording")
-      .single();
 
     if (existingSession) {
       // Return existing session instead of creating new one

@@ -525,16 +525,16 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         setError("녹음 중 오류가 발생했습니다.");
       };
 
-      // Wake Lock 요청
-      await requestWakeLock();
-
-      // Start silent audio keep-alive for iOS background
-      startKeepAliveAudio();
-
-      // 녹음 시작 (1초마다 데이터 수집)
+      // 녹음 먼저 시작 (지연 없이 즉시)
       mediaRecorder.start(1000);
       setIsRecording(true);
       setIsPaused(false);
+
+      // Wake Lock과 keep-alive는 백그라운드에서 실행 (non-blocking)
+      requestWakeLock().catch((err) => {
+        console.warn("[ChunkedRecorder] WakeLock request failed:", err);
+      });
+      startKeepAliveAudio();
 
       // 타이머 시작
       startTimeRef.current = Date.now() - pausedTimeRef.current;
