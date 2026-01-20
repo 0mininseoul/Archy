@@ -418,15 +418,30 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       setPausedSession(null);
       clearSessionFromStorage();
 
-      // 서버에 세션 시작 요청
-      console.log("[ChunkedRecorder] Starting session...");
-      const sessionResponse = await fetch("/api/recordings/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format: "meeting" }),
-      });
+      console.log("[ChunkedRecorder] Starting recording...");
+
+      // 마이크 권한 요청과 서버 세션 시작을 병렬로 실행
+      // 마이크 권한 다이얼로그가 즉시 표시되고, 서버 요청도 동시에 진행됨
+      const [stream, sessionResponse] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 44100,
+          },
+        }),
+        fetch("/api/recordings/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format: "meeting" }),
+        }),
+      ]);
+
+      streamRef.current = stream;
 
       if (!sessionResponse.ok) {
+        // 마이크 스트림 정리
+        stream.getTracks().forEach((track) => track.stop());
         const errorData = await sessionResponse.json();
         throw new Error(errorData.error || "Failed to start session");
       }
@@ -475,16 +490,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       setChunksTranscribed(0);
       setChunksTotal(0);
       setPendingChunks(0);
-
-      // 마이크 권한 요청
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 44100,
-        },
-      });
-      streamRef.current = stream;
 
       // AudioContext 및 AnalyserNode 생성
       const audioContext = new AudioContext();

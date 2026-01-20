@@ -208,14 +208,29 @@ export function ChunkedAudioRecorder({
     setStealthModeActive(false);
   }, []);
 
-  // 녹음 중지 핸들러
-  const handleStopRecording = useCallback(async () => {
+  // 녹음 중지 핸들러 - 즉시 history로 이동, 백그라운드에서 처리
+  const handleStopRecording = useCallback(() => {
     setStealthModeActive(false);
-    const result = await stopRecording();
-    if (result) {
-      onRecordingComplete(result);
+
+    // 현재 sessionId와 duration을 즉시 캡처
+    const currentSessionId = sessionId;
+    const currentDuration = duration;
+
+    // 즉시 onRecordingComplete 호출 (history로 이동)
+    if (currentSessionId && currentDuration >= 1) {
+      onRecordingComplete({
+        transcripts: [],
+        totalDuration: currentDuration,
+        totalChunks: chunksTotal,
+        sessionId: currentSessionId,
+      });
     }
-  }, [stopRecording, onRecordingComplete]);
+
+    // 백그라운드에서 stopRecording 실행 (await 하지 않음)
+    stopRecording().catch((err) => {
+      console.error("[ChunkedAudioRecorder] Error in background stopRecording:", err);
+    });
+  }, [sessionId, duration, chunksTotal, stopRecording, onRecordingComplete]);
 
   // 일시정지 핸들러
   const handlePauseRecording = useCallback(() => {
