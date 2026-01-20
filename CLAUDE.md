@@ -305,6 +305,8 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 12. `update_withdrawn_users_add_data.sql` - Store full user snapshot (JSONB)
 13. `update_withdrawn_users_add_name.sql` - Store user name separately
 14. `add_audio_storage_setting.sql` - User audio storage preference (opt-in, default false)
+15. `add_recording_session.sql` - Recording session status and chunk tracking
+16. `add_custom_format_is_default.sql` - Default flag for custom formats
 
 ### Adding Migrations
 - Create new file in `database/migrations/`

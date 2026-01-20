@@ -15,9 +15,24 @@ export function StealthMode({ isActive, duration, onExit }: StealthModeProps) {
   const [showHint, setShowHint] = useState(true);
   const lastTapRef = useRef<number>(0);
   const hintTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tapProcessedRef = useRef<boolean>(false);
 
-  // 더블탭 감지
-  const handleTap = useCallback(() => {
+  // 더블탭 감지 - 터치와 클릭 이벤트 중복 방지
+  const handleTap = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    // 터치 이벤트와 클릭 이벤트 중복 방지
+    if (tapProcessedRef.current) {
+      tapProcessedRef.current = false;
+      return;
+    }
+
+    // 터치 이벤트인 경우 플래그 설정 (300ms 후 리셋)
+    if (e.type === 'touchend') {
+      tapProcessedRef.current = true;
+      setTimeout(() => {
+        tapProcessedRef.current = false;
+      }, 300);
+    }
+
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
 
@@ -25,6 +40,7 @@ export function StealthMode({ isActive, duration, onExit }: StealthModeProps) {
       // 더블탭 감지됨
       console.log("[StealthMode] Double tap detected, exiting...");
       onExit();
+      lastTapRef.current = 0; // 리셋
     } else {
       // 첫 번째 탭 - 힌트 표시
       setShowHint(true);
@@ -34,9 +50,8 @@ export function StealthMode({ isActive, duration, onExit }: StealthModeProps) {
       hintTimeoutRef.current = setTimeout(() => {
         setShowHint(false);
       }, 2000);
+      lastTapRef.current = now;
     }
-
-    lastTapRef.current = now;
   }, [onExit]);
 
   // 마운트 시 힌트 표시 후 숨김
@@ -77,11 +92,26 @@ export function StealthMode({ isActive, duration, onExit }: StealthModeProps) {
   return (
     <div
       className="fixed inset-0 bg-black z-[9999] cursor-pointer select-none"
+      style={{
+        // iOS safe area 완전 커버
+        top: 'calc(-1 * env(safe-area-inset-top, 0px))',
+        left: 'calc(-1 * env(safe-area-inset-left, 0px))',
+        right: 'calc(-1 * env(safe-area-inset-right, 0px))',
+        bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))',
+        width: 'calc(100% + env(safe-area-inset-left, 0px) + env(safe-area-inset-right, 0px))',
+        height: 'calc(100% + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px))',
+      }}
       onClick={handleTap}
       onTouchEnd={handleTap}
     >
-      {/* 녹음 표시 (최소화) */}
-      <div className="absolute top-4 left-4 flex items-center gap-2">
+      {/* 녹음 표시 (최소화) - safe area 안쪽에 배치 */}
+      <div
+        className="absolute flex items-center gap-2"
+        style={{
+          top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+          left: 'calc(env(safe-area-inset-left, 0px) + 16px)',
+        }}
+      >
         <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
         <span className="text-white/30 text-sm font-mono">
           {formatDuration(duration)}

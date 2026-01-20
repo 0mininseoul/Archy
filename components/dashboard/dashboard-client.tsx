@@ -6,7 +6,6 @@ import Image from "next/image";
 import { ChunkedAudioRecorder } from "@/components/recorder/chunked-audio-recorder";
 import { ChunkedRecordingResult } from "@/hooks/useChunkedRecorder";
 import { BottomTab } from "@/components/navigation/bottom-tab";
-import { useI18n } from "@/lib/i18n";
 import { DashboardPWAInstallModal } from "@/components/pwa/dashboard-install-modal";
 import { useUserStore } from "@/lib/stores/user-store";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
@@ -17,9 +16,6 @@ import { useRecordingsStore } from "@/lib/stores/recordings-store";
 
 export function DashboardClient() {
   const router = useRouter();
-  const { t } = useI18n();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState("");
   const [showPWAModal, setShowPWAModal] = useState(false);
 
   // Use cached data from store
@@ -70,30 +66,64 @@ export function DashboardClient() {
     async (result: ChunkedRecordingResult) => {
       const { transcripts, totalDuration, totalChunks, sessionId } = result;
 
-      // 세션 기반인 경우 sessionId로 finalize
-      if (sessionId) {
-        // 녹음 시간이 너무 짧으면 에러
-        if (totalDuration < 1) {
-          alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
-          return;
-        }
+      // 녹음 시간이 너무 짧으면 에러
+      if (totalDuration < 1) {
+        alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
+        return;
+      }
 
-        setIsProcessing(true);
-        setProcessingStatus(t.dashboard.finalizingRecording);
+      // 즉시 history 페이지로 이동
+      invalidateRecordings();
+      router.push("/dashboard/history");
 
+      // 백그라운드에서 finalize 처리 (await 하지 않음)
+      const finalizeInBackground = async () => {
         try {
+          // 세션 기반인 경우
+          if (sessionId) {
+            console.log(
+              `[Dashboard] Finalizing session in background: ${sessionId}, ${totalDuration}s`
+            );
+
+            const response = await fetch("/api/recordings/finalize", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                sessionId,
+                totalDurationSeconds: totalDuration,
+                format: "meeting",
+              }),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              console.error("Error finalizing session:", errorData.error);
+            } else {
+              console.log(`[Dashboard] Session ${sessionId} finalized successfully`);
+              invalidateRecordings();
+            }
+            return;
+          }
+
+          // 레거시: transcripts 배열 기반
+          if (transcripts.length === 0) {
+            console.error("No transcripts to finalize");
+            return;
+          }
+
           console.log(
-            `[Dashboard] Finalizing session: ${sessionId}, ${totalDuration}s`
+            `[Dashboard] Finalizing recording in background: ${transcripts.length}/${totalChunks} chunks, ${totalDuration}s`
           );
 
-          // finalize API 호출 (세션 기반)
           const response = await fetch("/api/recordings/finalize", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              sessionId,
+              transcripts,
               totalDurationSeconds: totalDuration,
               format: "meeting",
             }),
@@ -101,71 +131,20 @@ export function DashboardClient() {
 
           if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.error || "Finalize failed");
+            console.error("Error finalizing recording:", errorData.error);
+          } else {
+            console.log("[Dashboard] Recording finalized successfully");
+            invalidateRecordings();
           }
-
-          // 성공
-          invalidateRecordings();
-          router.push("/dashboard/history");
         } catch (error) {
-          console.error("Error finalizing recording:", error);
-          alert(t.errors.uploadFailed);
-          setIsProcessing(false);
-          setProcessingStatus("");
+          console.error("Error in background finalize:", error);
         }
-        return;
-      }
+      };
 
-      // 레거시: transcripts 배열 기반
-      // 전사된 청크가 없으면 에러
-      if (transcripts.length === 0) {
-        alert("전사된 내용이 없습니다. 다시 녹음해주세요.");
-        return;
-      }
-
-      // 녹음 시간이 너무 짧으면 에러
-      if (totalDuration < 1) {
-        alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
-        return;
-      }
-
-      setIsProcessing(true);
-      setProcessingStatus(t.dashboard.finalizingRecording);
-
-      try {
-        console.log(
-          `[Dashboard] Finalizing recording: ${transcripts.length}/${totalChunks} chunks, ${totalDuration}s`
-        );
-
-        // finalize API 호출
-        const response = await fetch("/api/recordings/finalize", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            transcripts,
-            totalDurationSeconds: totalDuration,
-            format: "meeting",
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Finalize failed");
-        }
-
-        // 성공
-        invalidateRecordings();
-        router.push("/dashboard/history");
-      } catch (error) {
-        console.error("Error finalizing recording:", error);
-        alert(t.errors.uploadFailed);
-        setIsProcessing(false);
-        setProcessingStatus("");
-      }
+      // 백그라운드 처리 시작
+      finalizeInBackground();
     },
-    [router, t, invalidateRecordings]
+    [router, invalidateRecordings]
   );
 
   return (
@@ -186,30 +165,14 @@ export function DashboardClient() {
 
       {/* Main Content */}
       <main className="app-main flex flex-col items-center justify-center min-h-[calc(100vh-56px-64px)] px-4">
-        {isProcessing ? (
-          <div className="w-full max-w-sm mx-auto">
-            <div className="card p-8 text-center space-y-6 animate-fade-in">
-              <div className="flex justify-center">
-                <div className="w-14 h-14 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-bold text-slate-900">
-                  {processingStatus || t.dashboard.processing}
-                </h2>
-                <p className="text-sm text-slate-500">{t.dashboard.processingDescription}</p>
-              </div>
-            </div>
+        <div className="w-full max-w-sm mx-auto animate-slide-up">
+          <div className="card p-6 shadow-lg">
+            <ChunkedAudioRecorder
+              onRecordingComplete={handleRecordingComplete}
+              format="meeting"
+            />
           </div>
-        ) : (
-          <div className="w-full max-w-sm mx-auto animate-slide-up">
-            <div className="card p-6 shadow-lg">
-              <ChunkedAudioRecorder
-                onRecordingComplete={handleRecordingComplete}
-                format="meeting"
-              />
-            </div>
-          </div>
-        )}
+        </div>
       </main>
 
       {/* Bottom Tab Navigation */}
