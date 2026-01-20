@@ -4,17 +4,15 @@
 
 @layer base {
 
-  html:has(.app-container),
+  html:has(.app-container) {
+    height: -webkit-fill-available;
+    overscroll-behavior-y: none;
+  }
+
   body:has(.app-container) {
-    height: 100vh;
-    /* Fallback */
-    height: var(--app-height, 100dvh);
-    overflow: hidden;
-    overscroll-behavior: none;
-    -webkit-overflow-scrolling: touch;
-    width: 100%;
-    position: fixed;
-    /* Safe with JS height */
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    overscroll-behavior-y: none;
   }
 
   body {
@@ -40,7 +38,7 @@
     flex-direction: column;
     height: 100vh;
     /* Fallback */
-    height: var(--app-height, 100dvh);
+    height: -webkit-fill-available;
     position: relative;
     overflow: hidden;
   }
