@@ -127,6 +127,11 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const currentChunkIndexRef = useRef<number>(0);
   const chunkStartTimeRef = useRef<number>(0);
   const lastChunkTimeRef = useRef<number>(0);
+  const isRestartingRef = useRef<boolean>(false); // iOS용 MediaRecorder 재시작 중 플래그
+  const analyserNodeRef = useRef<AnalyserNode | null>(null); // AnalyserNode 참조 유지
+
+  // iOS 감지 (MP4를 사용하는 경우)
+  const isIOSRef = useRef<boolean>(false);
 
   // Wake Lock 관리
   const requestWakeLock = useCallback(async () => {
@@ -267,37 +272,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   }, [releaseWakeLock, stopKeepAliveAudio]);
 
   /**
-   * 현재 청크 추출 및 업로드
+   * 청크 Blob 업로드 (공통 로직)
    */
-  const extractAndUploadChunk = useCallback(async () => {
-    if (currentChunkDataRef.current.length === 0) return;
-
-    const chunkIndex = currentChunkIndexRef.current;
-    const mimeType = mimeTypeRef.current || "audio/webm";
-    const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
-    const chunkDuration = Date.now() - chunkStartTimeRef.current;
-    const durationSeconds = Math.floor(chunkDuration / 1000);
-
-    // 1KB 미만 청크는 무시 (유효한 오디오 데이터가 없을 가능성 높음)
-    if (chunkBlob.size < 1024) {
-      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
-      // 데이터는 초기화하지만 업로드는 하지 않음
-      currentChunkDataRef.current = [];
-      chunkStartTimeRef.current = Date.now();
-      return;
-    }
-
+  const uploadChunkBlob = useCallback(async (chunkBlob: Blob, chunkIndex: number, durationSeconds: number) => {
     // 현재까지 총 녹음 시간 계산
     const currentTotalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
     console.log(
-      `[ChunkedRecorder] Extracting chunk ${chunkIndex}, size: ${chunkBlob.size}, duration: ${durationSeconds}s, totalDuration: ${currentTotalDuration}s`
+      `[ChunkedRecorder] Uploading chunk ${chunkIndex}, size: ${chunkBlob.size}, duration: ${durationSeconds}s, totalDuration: ${currentTotalDuration}s`
     );
-
-    // 현재 청크 데이터 초기화
-    currentChunkDataRef.current = [];
-    currentChunkIndexRef.current++;
-    chunkStartTimeRef.current = Date.now();
 
     // 총 청크 수 업데이트
     setChunksTotal((prev) => Math.max(prev, chunkIndex + 1));
@@ -316,6 +299,112 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     setIsUploadingChunk(false);
     setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
   }, []);
+
+  /**
+   * iOS용: MediaRecorder를 재시작하여 완전한 MP4 청크 생성
+   */
+  const restartMediaRecorderForChunk = useCallback(async () => {
+    if (!mediaRecorderRef.current || !streamRef.current || isRestartingRef.current) return;
+    if (mediaRecorderRef.current.state !== "recording") return;
+
+    isRestartingRef.current = true;
+    const chunkIndex = currentChunkIndexRef.current;
+    const chunkDuration = Date.now() - chunkStartTimeRef.current;
+    const durationSeconds = Math.floor(chunkDuration / 1000);
+    const mimeType = mimeTypeRef.current;
+
+    console.log(`[ChunkedRecorder] iOS: Restarting MediaRecorder for chunk ${chunkIndex}`);
+
+    // 현재 MediaRecorder 정지 → onstop에서 완전한 Blob 획득
+    const currentRecorder = mediaRecorderRef.current;
+
+    const chunkBlobPromise = new Promise<Blob>((resolve) => {
+      const handleStop = () => {
+        const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
+        currentChunkDataRef.current = [];
+        resolve(chunkBlob);
+        currentRecorder.removeEventListener("stop", handleStop);
+      };
+      currentRecorder.addEventListener("stop", handleStop);
+    });
+
+    // 정지
+    currentRecorder.stop();
+
+    // Blob 획득
+    const chunkBlob = await chunkBlobPromise;
+
+    // 청크 인덱스 증가
+    currentChunkIndexRef.current++;
+    chunkStartTimeRef.current = Date.now();
+
+    // 새 MediaRecorder 생성 및 시작
+    const newRecorder = new MediaRecorder(streamRef.current, {
+      mimeType,
+      audioBitsPerSecond: AUDIO_BITRATE,
+    });
+
+    newRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        currentChunkDataRef.current.push(event.data);
+      }
+    };
+
+    newRecorder.onerror = (event) => {
+      console.error("[ChunkedRecorder] MediaRecorder error:", event);
+      setError("녹음 중 오류가 발생했습니다.");
+    };
+
+    mediaRecorderRef.current = newRecorder;
+    newRecorder.start(1000); // 1초마다 데이터 수집
+
+    isRestartingRef.current = false;
+
+    // 1KB 미만 청크는 무시
+    if (chunkBlob.size < 1024) {
+      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
+      return;
+    }
+
+    // 백그라운드에서 업로드
+    uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
+  }, [uploadChunkBlob]);
+
+  /**
+   * WebM용: 현재 청크 추출 및 업로드 (기존 방식)
+   */
+  const extractAndUploadChunk = useCallback(async () => {
+    // iOS는 restartMediaRecorderForChunk 사용
+    if (isIOSRef.current) {
+      await restartMediaRecorderForChunk();
+      return;
+    }
+
+    if (currentChunkDataRef.current.length === 0) return;
+
+    const chunkIndex = currentChunkIndexRef.current;
+    const mimeType = mimeTypeRef.current || "audio/webm";
+    const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
+    const chunkDuration = Date.now() - chunkStartTimeRef.current;
+    const durationSeconds = Math.floor(chunkDuration / 1000);
+
+    // 1KB 미만 청크는 무시 (유효한 오디오 데이터가 없을 가능성 높음)
+    if (chunkBlob.size < 1024) {
+      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
+      // 데이터는 초기화하지만 업로드는 하지 않음
+      currentChunkDataRef.current = [];
+      chunkStartTimeRef.current = Date.now();
+      return;
+    }
+
+    // 현재 청크 데이터 초기화
+    currentChunkDataRef.current = [];
+    currentChunkIndexRef.current++;
+    chunkStartTimeRef.current = Date.now();
+
+    // 업로드
+    await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
+  }, [restartMediaRecorderForChunk, uploadChunkBlob]);
 
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
   const handleBackgroundTransition = useCallback(async () => {
@@ -509,11 +598,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       analyser.smoothingTimeConstant = 0.7;
       source.connect(analyser);
       setAnalyserNode(analyser);
+      analyserNodeRef.current = analyser;
 
       // MediaRecorder 설정
       const mimeType = getSupportedMimeType();
       mimeTypeRef.current = mimeType;
-      console.log("[ChunkedRecorder] Using MIME type:", mimeType);
+
+      // iOS 감지 (MP4 사용 시)
+      isIOSRef.current = mimeType.includes("mp4");
+      console.log("[ChunkedRecorder] Using MIME type:", mimeType, "iOS mode:", isIOSRef.current);
 
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType,
@@ -665,7 +758,18 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         // 마지막 청크 업로드
         if (currentChunkDataRef.current.length > 0) {
           console.log("[ChunkedRecorder] Uploading final chunk...");
-          await extractAndUploadChunk();
+
+          // iOS 모드에서는 직접 Blob 생성 및 업로드 (restartMediaRecorderForChunk 호출 불가)
+          const chunkIndex = currentChunkIndexRef.current;
+          const mimeType = mimeTypeRef.current || "audio/webm";
+          const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
+          const chunkDuration = Date.now() - chunkStartTimeRef.current;
+          const durationSeconds = Math.floor(chunkDuration / 1000);
+
+          if (chunkBlob.size >= 1024) {
+            await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
+          }
+          currentChunkDataRef.current = [];
         }
 
         // 스트림 정리
