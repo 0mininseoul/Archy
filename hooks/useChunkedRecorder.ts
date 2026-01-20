@@ -278,6 +278,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     const chunkDuration = Date.now() - chunkStartTimeRef.current;
     const durationSeconds = Math.floor(chunkDuration / 1000);
 
+    // 1KB 미만 청크는 무시 (유효한 오디오 데이터가 없을 가능성 높음)
+    if (chunkBlob.size < 1024) {
+      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
+      // 데이터는 초기화하지만 업로드는 하지 않음
+      currentChunkDataRef.current = [];
+      chunkStartTimeRef.current = Date.now();
+      return;
+    }
+
     // 현재까지 총 녹음 시간 계산
     const currentTotalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
 

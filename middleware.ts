@@ -13,7 +13,8 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public (public files)
+     * - api/recordings/chunk (heavy upload path, skip middleware to avoid session locking)
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/recordings/chunk|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

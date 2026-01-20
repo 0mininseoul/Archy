@@ -35,6 +35,16 @@ export const POST = withAuth<ChunkTranscriptResponse>(
       return errorResponse("Valid durationSeconds is required", 400);
     }
 
+    // File size check (Minimum 1KB) - 빈 오디오나 무음 파일 방지
+    if (audioChunk.size < 1024) {
+      console.log(`[Chunk] Chunk ${chunkIndex} too small (${audioChunk.size} bytes), skipping transcription`);
+      return successResponse({
+        transcript: "",
+        chunkIndex,
+        totalDuration,
+      });
+    }
+
     // File size check (4MB limit for Vercel)
     const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
     if (audioChunk.size > MAX_CHUNK_SIZE) {
