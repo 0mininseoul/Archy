@@ -154,6 +154,7 @@ export const translations = {
     // History
     history: {
       title: "녹음 기록",
+      open: "열기",
       filters: {
         all: "전체",
         processing: "처리 중",
@@ -611,6 +612,7 @@ export const translations = {
     // History
     history: {
       title: "Recording History",
+      open: "Open",
       filters: {
         all: "All",
         processing: "Processing",

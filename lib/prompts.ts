@@ -1,11 +1,68 @@
 import { formatKSTDate } from "./utils";
 
-// Universal Prompt for flexible summarization
+// =============================================================================
+// Transcript Quality Analysis
+// =============================================================================
+
+export type TranscriptQuality = 'rich' | 'sparse' | 'minimal';
+
+/**
+ * 전사본의 품질을 분석하여 적절한 요약 전략을 결정합니다.
+ * @param transcript 전사본 텍스트
+ * @returns 'rich' | 'sparse' | 'minimal'
+ */
+export function analyzeTranscriptQuality(transcript: string): TranscriptQuality {
+  const trimmed = transcript.trim();
+  if (!trimmed) return 'minimal';
+
+  const words = trimmed.split(/\s+/);
+  const wordCount = words.length;
+
+  // 필러 워드 및 무의미한 표현 패턴
+  const fillerPatterns = [
+    /^[음어그저아으]$/,
+    /^\.{2,}$/,
+    /^[음어그저아으]\.{2,}$/,
+    /^ㅇ+$/,
+    /^ㅎ+$/,
+  ];
+
+  // 의미있는 단어 필터링 (2글자 이상 + 필러가 아닌 것)
+  const meaningfulWords = words.filter(word => {
+    if (word.length < 2) return false;
+    return !fillerPatterns.some(pattern => pattern.test(word));
+  });
+
+  const meaningfulRatio = meaningfulWords.length / wordCount;
+
+  // 품질 기준:
+  // minimal: 15단어 미만 또는 의미있는 단어 비율 30% 미만
+  // sparse: 80단어 미만 또는 의미있는 단어 비율 50% 미만
+  // rich: 그 외
+
+  if (wordCount < 15 || meaningfulRatio < 0.3) return 'minimal';
+  if (wordCount < 80 || meaningfulRatio < 0.5) return 'sparse';
+  return 'rich';
+}
+
+// =============================================================================
+// Prompts
+// =============================================================================
+
+// Universal Prompt - 할루시네이션 방지 제약 추가
 const UNIVERSAL_PROMPT = `당신은 전문 에디터이자 콘텐츠 요약 전문가입니다. 
 주어진 녹취록을 분석하여 핵심 내용을 파악하고, 읽기 쉬운 마크다운 문서로 정리해주세요.
 
 ## 녹취록
 {{transcript}}
+
+## ⚠️ 중요 제약사항 (절대 위반 금지)
+1. **녹취록에 없는 내용은 절대 추가하거나 추측하지 마세요.**
+2. 녹취록이 불완전하거나 내용이 부족한 경우:
+   - 있는 내용만 간결하게 정리하세요
+   - 억지로 내용을 채우거나 만들어내지 마세요
+3. 불명확한 부분은 "[불명확]" 또는 "..." 으로 표시하세요
+4. 녹취록에 언급되지 않은 세부사항을 창작하지 마세요
 
 ## 필수 요구사항
 다음 규칙을 엄격히 준수하세요:
@@ -33,13 +90,90 @@ const UNIVERSAL_PROMPT = `당신은 전문 에디터이자 콘텐츠 요약 전�
 (이후 내용은 자유롭게 마크다운으로 작성... 적절한 이모지 사용 권장)
 [/CONTENT]`;
 
+// Sparse Prompt - 짧은 녹취록용 (80단어 미만)
+const SPARSE_PROMPT = `당신은 전문 에디터입니다.
+주어진 녹취록은 내용이 짧습니다. 있는 내용만 간결하게 정리해주세요.
+
+## 녹취록
+{{transcript}}
+
+## ⚠️ 중요 제약사항 (절대 위반 금지)
+1. **녹취록에 없는 내용은 절대 추가하지 마세요.**
+2. 내용이 부족해도 억지로 채우지 마세요.
+3. 불명확한 부분은 그대로 두거나 "[불명확]"으로 표시하세요.
+
+## 요구사항
+- 짧은 내용이므로 1-2줄 핵심만 정리하세요
+- 내용이 너무 짧으면 "녹음 내용이 짧아 요약이 제한적입니다"라고 명시하세요
+- 본문은 있는 내용만 간결하게 작성하세요
+
+## 출력 형식
+[TITLE]
+(제목)
+[/TITLE]
+[CONTENT]
+### 📌 핵심 내용
+- (있는 내용만 정리)
+
+(간결한 본문)
+[/CONTENT]`;
+
+// Minimal Prompt - 매우 짧은 녹취록용 (15단어 미만)
+const MINIMAL_PROMPT = `당신은 전문 에디터입니다.
+주어진 녹취록은 매우 짧습니다. 있는 내용 그대로만 정리해주세요.
+
+## 녹취록
+{{transcript}}
+
+## ⚠️ 절대 지켜야 할 규칙
+- **절대로 내용을 추가하거나 추측하지 마세요**
+- 녹취록에 있는 것만 그대로 정리하세요
+- 내용이 부족해도 만들어내지 마세요
+
+## 출력 형식
+[TITLE]
+(짧은 제목)
+[/TITLE]
+[CONTENT]
+📝 **녹음 내용이 매우 짧아 요약이 제한적입니다.**
+
+{{transcript}}
+[/CONTENT]`;
+
+// =============================================================================
+// Prompt Builders
+// =============================================================================
+
 export function buildUniversalPrompt(transcript: string): string {
   const date = formatKSTDate();
   return UNIVERSAL_PROMPT
     .replace("{{transcript}}", transcript)
-    .replace("{{date}}", date); // date might not be used in the new prompt but kept for future potential use or if we add it back. Currently the prompt text doesn't have {{date}}, but good to keep the util import.
+    .replace("{{date}}", date);
 }
 
-// Deprecated: Kept types for compatibility if needed elsewhere, or can be removed if fully refactored.
-// For now, removing unused types/exports as per plan.
+export function buildSparsePrompt(transcript: string): string {
+  return SPARSE_PROMPT.replace("{{transcript}}", transcript);
+}
 
+export function buildMinimalPrompt(transcript: string): string {
+  return MINIMAL_PROMPT.replace(/\{\{transcript\}\}/g, transcript);
+}
+
+/**
+ * 전사본 품질에 따라 적절한 프롬프트를 선택합니다.
+ * @param transcript 전사본 텍스트
+ * @returns 선택된 프롬프트와 품질 정보
+ */
+export function buildPromptByQuality(transcript: string): { prompt: string; quality: TranscriptQuality } {
+  const quality = analyzeTranscriptQuality(transcript);
+
+  switch (quality) {
+    case 'minimal':
+      return { prompt: buildMinimalPrompt(transcript), quality };
+    case 'sparse':
+      return { prompt: buildSparsePrompt(transcript), quality };
+    case 'rich':
+    default:
+      return { prompt: buildUniversalPrompt(transcript), quality };
+  }
+}

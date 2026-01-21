@@ -11,24 +11,23 @@ export default function RecordingDetailPage() {
   const params = useParams();
   const id = params.id as string;
 
-  const [recording, setRecording] = useState<Recording | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
-  const [saveAudioEnabled, setSaveAudioEnabled] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-
-  // Try to get recording from cache first
+  // Get cached data immediately on render (before any effects)
   const { getRecordingById, isLoaded: recordingsLoaded } = useRecordingsStore();
   const { settings, isLoaded: userLoaded } = useUserStore();
+  const cachedRecording = recordingsLoaded ? (getRecordingById(id) ?? null) : null;
+
+  // Use cached data as initial state for instant rendering
+  const [recording, setRecording] = useState<Recording | null>(cachedRecording);
+  const [isOwner, setIsOwner] = useState(!!cachedRecording);
+  const [saveAudioEnabled, setSaveAudioEnabled] = useState(settings?.saveAudioEnabled ?? false);
+  const [isLoading, setIsLoading] = useState(!cachedRecording);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    // First, try to get from cache
-    const cachedRecording = getRecordingById(id);
-
+    // If already have cached recording, no need to fetch
     if (cachedRecording) {
-      // Found in cache - use it immediately
       setRecording(cachedRecording);
-      setIsOwner(true); // If it's in our store, we own it
+      setIsOwner(true);
       setSaveAudioEnabled(settings?.saveAudioEnabled ?? false);
       setIsLoading(false);
       return;

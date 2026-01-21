@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { buildUniversalPrompt } from "@/lib/prompts";
+import { buildPromptByQuality, analyzeTranscriptQuality } from "@/lib/prompts";
 
 export interface FormatResult {
   title: string;
@@ -8,11 +8,11 @@ export interface FormatResult {
 
 /**
  * 녹취록을 포맷에 맞춰 요약/정리합니다.
- * (기존의 복잡한 분기 처리를 제거하고 Universal Prompt 사용)
+ * 전사본 품질에 따라 자동으로 적절한 프롬프트를 선택합니다.
  */
 export async function formatDocument(
   transcript: string,
-  // format 인자는 하위 호환성을 위해 남겨두지만 실제로는 무시하거나 로깅용으로만 사용
+  // format 인자는 하위 호환성을 위해 남겨두지만 실제로는 무시
   format?: string,
   customPrompt?: string
 ): Promise<FormatResult> {
@@ -20,19 +20,23 @@ export async function formatDocument(
     throw new Error("OPENAI_API_KEY not configured");
   }
 
-  console.log("[Formatting] Starting OpenAI formatting with Universal Prompt...");
+  // 품질 분석
+  const quality = analyzeTranscriptQuality(transcript);
+  console.log(`[Formatting] Transcript quality: ${quality}, word count: ${transcript.split(/\\s+/).length}`);
 
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
 
-  // 커스텀 프롬프트가 있으면 그것을 우선 사용, 아니면 유니버설 프롬프트 사용
+  // 커스텀 프롬프트가 있으면 그것을 우선 사용, 아니면 품질 기반 프롬프트 사용
   let prompt: string;
   if (customPrompt) {
     prompt = customPrompt.replace("{{transcript}}", transcript);
-    // 날짜 처리가 필요하다면 여기서 추가 replace
+    console.log("[Formatting] Using custom format");
   } else {
-    prompt = buildUniversalPrompt(transcript);
+    const { prompt: qualityPrompt } = buildPromptByQuality(transcript);
+    prompt = qualityPrompt;
+    console.log(`[Formatting] Using ${quality} quality prompt`);
   }
 
   try {
@@ -42,6 +46,9 @@ export async function formatDocument(
         {
           role: "system",
           content: `당신은 전문적인 문서 편집자입니다. 녹취록을 읽기 쉽고 구조화된 형식으로 정리하는 것이 당신의 임무입니다.
+
+⚠️ 중요: 녹취록에 없는 내용을 절대 만들어내지 마세요. 있는 내용만 정확하게 정리하세요.
+
 응답은 반드시 아래 형식을 따라주세요:
 
 [TITLE]
@@ -56,8 +63,8 @@ export async function formatDocument(
           content: prompt,
         },
       ],
-      max_tokens: 4000,
-      temperature: 0.7,
+      max_tokens: quality === 'minimal' ? 500 : quality === 'sparse' ? 2000 : 4000,
+      temperature: 0.5,
     });
 
     const fullResponse = response.choices[0].message.content || "";
