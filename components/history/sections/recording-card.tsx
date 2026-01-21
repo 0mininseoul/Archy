@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+
 import { Recording } from "@/types";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -24,17 +24,20 @@ interface RecordingCardProps {
 // Utility Functions
 // =============================================================================
 
-function getStatusIcon(status: string): string {
-  switch (status) {
-    case "completed":
-      return "🟢";
-    case "processing":
-      return "🟡";
-    case "failed":
-      return "🔴";
-    default:
-      return "⚪";
-  }
+// Status Indicator Component
+function StatusDot({ status }: { status: string }) {
+  const getColor = (s: string) => {
+    switch (s) {
+      case "completed": return "bg-green-500 shadow-green-200";
+      case "processing": return "bg-amber-400 shadow-amber-200 animate-pulse";
+      case "failed": return "bg-red-500 shadow-red-200";
+      default: return "bg-slate-300 shadow-slate-200";
+    }
+  };
+
+  return (
+    <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${getColor(status)}`} />
+  );
 }
 
 
@@ -242,7 +245,7 @@ export function RecordingCard({
   const formattedDate = formatRecordingDateKST(recording.created_at);
 
   return (
-    <div className="relative overflow-hidden rounded-xl bg-slate-100">
+    <div className="relative overflow-hidden rounded-xl bg-slate-100 group">
       {/* Background Actions */}
       <div className="absolute inset-y-0 left-0 w-full flex items-center justify-between px-4">
         {/* Pin Action (Left Side) */}
@@ -272,7 +275,7 @@ export function RecordingCard({
 
       {/* Main Card Content */}
       <div
-        className={`bg-white p-3 relative transition-transform duration-200 ease-out border ${recording.transcript ? "cursor-pointer" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-200"}`}
+        className={`bg-white p-4 relative transition-transform duration-200 ease-out border ${recording.transcript ? "cursor-pointer active:bg-slate-50" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-100 shadow-sm"}`}
         style={{ transform: `translateX(${swipeOffset}px)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -280,7 +283,7 @@ export function RecordingCard({
         onClick={handleCardClick}
       >
         {recording.is_pinned && (
-          <div className="absolute top-2 right-2 text-blue-500">
+          <div className="absolute top-3 right-3 text-blue-500">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M16 5c0 .552-.448 1-1 1h-1v9l2 3v1H8v-1l2-3V6H9c-.552 0-1-.448-1-1s.448-1 1-1h6c.552 0 1 .448 1 1z" />
             </svg>
@@ -301,17 +304,20 @@ export function RecordingCard({
 
           {/* Content */}
           <div className="flex-1 min-w-0 pr-2">
-            <h3 className="text-base font-bold text-slate-900 line-clamp-2">
+            <h3 className="text-base font-bold text-slate-900 line-clamp-1 mb-1.5">
               {recording.title}
             </h3>
-            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-              <span className="flex items-center gap-1">
-                {getStatusIcon(recording.status)} {getStatusText(recording.status, recording.processing_step)}
+            <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+              <span className="flex items-center gap-1.5">
+                <StatusDot status={recording.status} />
+                <span className={recording.status === 'processing' ? 'text-amber-600' : ''}>
+                  {getStatusText(recording.status, recording.processing_step)}
+                </span>
               </span>
-              <span>·</span>
+              <span className="text-slate-300">|</span>
               <span>{formatDurationMinutes(recording.duration_seconds)}</span>
-              <span>·</span>
-              <span className="tracking-wide">{formattedDate}</span>
+              <span className="text-slate-300">|</span>
+              <span className="tracking-tight">{formattedDate}</span>
             </div>
 
             {/* Processing Status Info */}
@@ -363,27 +369,6 @@ export function RecordingCard({
             {/* Completed - Actions */}
             {recording.status === "completed" && (
               <div className="flex items-center gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                {/* 열기 버튼 - 가장 왼쪽, 강조 스타일 */}
-                <Link
-                  href={`/dashboard/recordings/${recording.id}`}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-900 rounded-lg text-xs font-medium text-white min-h-[36px] hover:bg-slate-800 transition-colors"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                    />
-                  </svg>
-                  <span>{t.history.open}</span>
-                </Link>
                 {recording.notion_page_url && (
                   <button
                     onClick={() => {
@@ -394,17 +379,10 @@ export function RecordingCard({
                         window.open(recording.notion_page_url!, '_blank', 'noopener,noreferrer');
                       }
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 min-h-[36px]"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                   >
-                    <Image src="/logos/notion.png" alt="Notion" width={14} height={14} />
-                    <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                      />
-                    </svg>
+                    <Image src="/logos/notion.png" alt="Notion" width={14} height={14} className="opacity-80" />
+                    <span>Notion</span>
                   </button>
                 )}
                 {recording.google_doc_url && (
@@ -412,41 +390,22 @@ export function RecordingCard({
                     href={recording.google_doc_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 rounded-lg text-xs font-medium text-blue-700 min-h-[36px]"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50/50 border border-blue-100 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    <Image src="/logos/google-docs.png" alt="Google Docs" width={14} height={14} />
-                    <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                      />
-                    </svg>
+                    <Image src="/logos/google-docs.png" alt="Google Docs" width={14} height={14} className="opacity-80" />
+                    <span>Google Docs</span>
                   </a>
                 )}
               </div>
             )}
 
-            {/* Failed - Actions */}
-            {recording.status === "failed" && recording.transcript && (
-              <div className="flex items-center gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={() => router.push(`/dashboard/recordings/${recording.id}`)}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 min-h-[36px]"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  <span>{t.history.viewTranscript}</span>
-                </button>
-              </div>
-            )}
+          </div>
+
+          {/* Chevron Right (Navigation Hint) */}
+          <div className="flex items-center justify-center pl-2 text-slate-300">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
           </div>
         </div>
       </div>
