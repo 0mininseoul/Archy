@@ -20,12 +20,26 @@ npm run build
 # Start production server
 npm run start
 
-# Lint check
+# Lint check (ESLint)
 npm run lint
+
+# Fix auto-fixable ESLint issues
+npm run lint -- --fix
 
 # Type check (no script in package.json - use directly)
 npx tsc --noEmit
 ```
+
+## Code Quality Tools
+
+### ESLint Configuration
+- Located at `.eslintrc.json`
+- Extends `next/core-web-vitals` and `@typescript-eslint/recommended`
+- Rules configured:
+  - Unused variables: warn (with `_` prefix ignore pattern)
+  - Explicit `any`: warn
+  - Console statements: warn (except `console.warn` and `console.error`)
+  - Prefer `const` over `let`: warn
 
 ## Architecture
 
@@ -367,6 +381,19 @@ See `.env.example` for full structure.
 8. **Google tokens expire**: Service auto-refreshes tokens using refresh_token
 9. **Referral codes auto-generate**: Via PostgreSQL trigger on user creation
 10. **Recording pinning**: Sorted by is_pinned DESC, then created_at DESC
+11. **ESLint warnings**: Run `npm run lint -- --fix` to auto-fix most issues before committing code
+
+## Task Execution Guidelines
+
+When the user requests a new task in a new session, follow this process:
+
+1. **Evaluate the Approach**: Think critically about the user's proposed approach. If you have a better alternative or improvement, suggest it to the user before proceeding.
+
+2. **Clarify Requirements**: If you need additional information or clarification to complete the task properly, ask the user BEFORE starting the implementation.
+
+3. **Proceed Immediately**: If the user's approach is solid and you have all necessary information, begin the implementation right away without asking for permission.
+
+**Key Principle**: Balance between being proactive (don't ask unnecessary questions) and being thoughtful (do raise concerns or suggest improvements when genuinely valuable).
 
 ## Testing Guidelines
 
