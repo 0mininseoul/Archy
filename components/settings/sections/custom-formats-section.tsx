@@ -175,7 +175,11 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
         // 실패 시 롤백
         pendingDefaultTempIdRef.current = null;
         setCustomFormats(previousFormats);
-        alert(data.error || t.settings.formats.saveFailed);
+        // API 에러 메시지를 번역된 텍스트로 변환
+        const errorMessage = data.error === "Maximum format limit reached"
+          ? t.settings.formats.maxFormats
+          : (data.error || t.settings.formats.saveFailed);
+        alert(errorMessage);
       }
     } catch (error) {
       console.error("Failed to create format:", error);
