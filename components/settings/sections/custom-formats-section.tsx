@@ -22,7 +22,6 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
   const [showFormatForm, setShowFormatForm] = useState(false);
   const [newFormatName, setNewFormatName] = useState("");
   const [newFormatPrompt, setNewFormatPrompt] = useState("");
-  const [formatLoading, setFormatLoading] = useState(false);
 
   // 수정 모드 상태
   const [editingFormat, setEditingFormat] = useState<CustomFormat | null>(null);
@@ -32,103 +31,147 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
   // 스마트 포맷이 기본값인지 확인 (커스텀 포맷 중 기본값이 없으면 스마트 포맷이 기본값)
   const isSmartFormatDefault = !customFormats.some(f => f.is_default);
 
-  const fetchCustomFormats = useCallback(async () => {
-    try {
-      const response = await fetch("/api/formats");
-      if (response.ok) {
-        const data = await response.json();
-        setCustomFormats(data.data?.formats || data.formats || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch custom formats:", error);
-    }
-  }, []);
-
-  const handleCreateFormat = useCallback(async () => {
-    if (!newFormatName || !newFormatPrompt) return;
-
-    setFormatLoading(true);
-    try {
-      const response = await fetch("/api/formats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newFormatName,
-          prompt: newFormatPrompt,
-          is_default: false,
-        }),
-      });
-
-      if (response.ok) {
-        await fetchCustomFormats();
-        setShowFormatForm(false);
-        setNewFormatName("");
-        setNewFormatPrompt("");
-        alert(t.settings.formats.saveSuccess);
-      } else {
-        const data = await response.json();
-        alert(data.error || t.settings.formats.saveFailed);
-      }
-    } catch (error) {
-      console.error("Failed to create format:", error);
-      alert(t.settings.formats.saveFailed);
-    } finally {
-      setFormatLoading(false);
-    }
-  }, [newFormatName, newFormatPrompt, t, fetchCustomFormats]);
-
-  const handleDeleteFormat = useCallback(async (id: string) => {
-    if (!confirm(t.settings.formats.deleteConfirm)) return;
-
-    try {
-      const response = await fetch(`/api/formats?id=${id}`, { method: "DELETE" });
-      if (response.ok) {
-        await fetchCustomFormats();
-        alert(t.settings.formats.deleteSuccess);
-      } else {
-        alert(t.settings.formats.deleteFailed);
-      }
-    } catch (error) {
-      console.error("Failed to delete format:", error);
-      alert(t.settings.formats.deleteFailed);
-    }
-  }, [t, fetchCustomFormats]);
-
-  // 커스텀 포맷을 기본값으로 설정
+  // 커스텀 포맷을 기본값으로 설정 (Optimistic Update)
   const handleSetDefaultFormat = useCallback(async (id: string) => {
+    // 이미 기본값인 경우 무시
+    const targetFormat = customFormats.find(f => f.id === id);
+    if (targetFormat?.is_default) return;
+
+    // Optimistic update - 즉시 UI 반영
+    const previousFormats = customFormats;
+    setCustomFormats(formats =>
+      formats.map(f => ({
+        ...f,
+        is_default: f.id === id,
+      }))
+    );
+
     try {
       const response = await fetch("/api/formats", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, is_default: true }),
       });
-      if (response.ok) {
-        await fetchCustomFormats();
+      if (!response.ok) {
+        // 실패 시 롤백
+        setCustomFormats(previousFormats);
+        alert(t.settings.formats.saveFailed);
       }
     } catch (error) {
       console.error("Failed to set default format:", error);
+      // 실패 시 롤백
+      setCustomFormats(previousFormats);
+      alert(t.settings.formats.saveFailed);
     }
-  }, [fetchCustomFormats]);
+  }, [customFormats, t]);
 
-  // 스마트 포맷을 기본값으로 설정 (모든 커스텀 포맷의 is_default를 false로)
+  // 스마트 포맷을 기본값으로 설정 (Optimistic Update)
   const handleSetSmartFormatDefault = useCallback(async () => {
     // 이미 스마트 포맷이 기본값이면 아무것도 안 함
     if (isSmartFormatDefault) return;
 
+    // Optimistic update - 즉시 UI 반영
+    const previousFormats = customFormats;
+    setCustomFormats(formats =>
+      formats.map(f => ({
+        ...f,
+        is_default: false,
+      }))
+    );
+
     try {
-      // 모든 커스텀 포맷의 is_default를 false로 설정
       const response = await fetch("/api/formats", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clear_all_default: true }),
       });
-      if (response.ok) {
-        await fetchCustomFormats();
+      if (!response.ok) {
+        // 실패 시 롤백
+        setCustomFormats(previousFormats);
+        alert(t.settings.formats.saveFailed);
       }
     } catch (error) {
       console.error("Failed to set smart format as default:", error);
+      // 실패 시 롤백
+      setCustomFormats(previousFormats);
+      alert(t.settings.formats.saveFailed);
     }
-  }, [isSmartFormatDefault, fetchCustomFormats]);
+  }, [isSmartFormatDefault, customFormats, t]);
+
+  // 포맷 생성 (Optimistic Update)
+  const handleCreateFormat = useCallback(async () => {
+    if (!newFormatName || !newFormatPrompt) return;
+
+    // Optimistic update - 임시 ID로 즉시 추가
+    const tempId = `temp-${Date.now()}`;
+    const newFormat: CustomFormat = {
+      id: tempId,
+      name: newFormatName.trim(),
+      prompt: newFormatPrompt.trim(),
+      is_default: false,
+      created_at: new Date().toISOString(),
+    };
+
+    const previousFormats = customFormats;
+    setCustomFormats(formats => [newFormat, ...formats]);
+    setShowFormatForm(false);
+    setNewFormatName("");
+    setNewFormatPrompt("");
+
+    try {
+      const response = await fetch("/api/formats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newFormat.name,
+          prompt: newFormat.prompt,
+          is_default: false,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const createdFormat = data.data?.format || data.format;
+        // 서버에서 받은 실제 ID로 교체
+        setCustomFormats(formats =>
+          formats.map(f => (f.id === tempId ? createdFormat : f))
+        );
+      } else {
+        const data = await response.json();
+        // 실패 시 롤백
+        setCustomFormats(previousFormats);
+        alert(data.error || t.settings.formats.saveFailed);
+      }
+    } catch (error) {
+      console.error("Failed to create format:", error);
+      // 실패 시 롤백
+      setCustomFormats(previousFormats);
+      alert(t.settings.formats.saveFailed);
+    }
+  }, [newFormatName, newFormatPrompt, customFormats, t]);
+
+  // 포맷 삭제 (Optimistic Update)
+  const handleDeleteFormat = useCallback(async (id: string) => {
+    if (!confirm(t.settings.formats.deleteConfirm)) return;
+
+    // Optimistic update - 즉시 삭제
+    const previousFormats = customFormats;
+    setCustomFormats(formats => formats.filter(f => f.id !== id));
+
+    try {
+      const response = await fetch(`/api/formats?id=${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        // 실패 시 롤백
+        setCustomFormats(previousFormats);
+        alert(t.settings.formats.deleteFailed);
+      }
+    } catch (error) {
+      console.error("Failed to delete format:", error);
+      // 실패 시 롤백
+      setCustomFormats(previousFormats);
+      alert(t.settings.formats.deleteFailed);
+    }
+  }, [customFormats, t]);
 
   // 수정 시작
   const handleStartEdit = useCallback((format: CustomFormat) => {
@@ -144,38 +187,49 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
     setEditFormatPrompt("");
   }, []);
 
-  // 수정 저장
+  // 수정 저장 (Optimistic Update)
   const handleSaveEdit = useCallback(async () => {
     if (!editingFormat || !editFormatName || !editFormatPrompt) return;
 
-    setFormatLoading(true);
+    const updatedName = editFormatName.trim();
+    const updatedPrompt = editFormatPrompt.trim();
+
+    // Optimistic update - 즉시 UI 반영
+    const previousFormats = customFormats;
+    setCustomFormats(formats =>
+      formats.map(f =>
+        f.id === editingFormat.id
+          ? { ...f, name: updatedName, prompt: updatedPrompt }
+          : f
+      )
+    );
+    setEditingFormat(null);
+    setEditFormatName("");
+    setEditFormatPrompt("");
+
     try {
       const response = await fetch("/api/formats", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: editingFormat.id,
-          name: editFormatName,
-          prompt: editFormatPrompt,
+          name: updatedName,
+          prompt: updatedPrompt,
         }),
       });
 
-      if (response.ok) {
-        await fetchCustomFormats();
-        setEditingFormat(null);
-        setEditFormatName("");
-        setEditFormatPrompt("");
-        alert(t.settings.formats.editSuccess);
-      } else {
+      if (!response.ok) {
+        // 실패 시 롤백
+        setCustomFormats(previousFormats);
         alert(t.settings.formats.editFailed);
       }
     } catch (error) {
       console.error("Failed to update format:", error);
+      // 실패 시 롤백
+      setCustomFormats(previousFormats);
       alert(t.settings.formats.editFailed);
-    } finally {
-      setFormatLoading(false);
     }
-  }, [editingFormat, editFormatName, editFormatPrompt, t, fetchCustomFormats]);
+  }, [editingFormat, editFormatName, editFormatPrompt, customFormats, t]);
 
   return (
     <div className="card p-4">
@@ -258,10 +312,10 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
                   </button>
                   <button
                     onClick={handleSaveEdit}
-                    disabled={!editFormatName || !editFormatPrompt || formatLoading}
+                    disabled={!editFormatName || !editFormatPrompt}
                     className="flex-1 px-3 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:bg-slate-300 min-h-[44px]"
                   >
-                    {formatLoading ? t.common.loading : t.common.save}
+                    {t.common.save}
                   </button>
                 </div>
               </div>
@@ -366,10 +420,10 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
               </button>
               <button
                 onClick={handleCreateFormat}
-                disabled={!newFormatName || !newFormatPrompt || formatLoading}
+                disabled={!newFormatName || !newFormatPrompt}
                 className="flex-1 px-3 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold disabled:bg-slate-300 min-h-[44px]"
               >
-                {formatLoading ? t.common.loading : t.common.save}
+                {t.common.save}
               </button>
             </div>
           </div>
