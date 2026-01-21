@@ -12,7 +12,7 @@ interface FinalizeRequest {
   sessionId?: string; // 새로운 세션 기반 방식
   transcripts?: ChunkTranscript[]; // 레거시 지원
   totalDurationSeconds: number;
-  format: string;
+  format?: string; // optional - 서버에서 사용자 기본 포맷 조회
 }
 
 interface FinalizeResponse {
@@ -117,7 +117,7 @@ export const POST = withAuth<FinalizeResponse>(
           title,
           audio_file_path: null,
           duration_seconds: totalDurationSeconds,
-          format: format || "meeting",
+          format: format || "smart",
           status: "processing",
           transcript: mergedTranscript,
         })
@@ -146,7 +146,7 @@ export const POST = withAuth<FinalizeResponse>(
     const result = await processFromTranscripts({
       recordingId,
       transcript: mergedTranscript,
-      format: format as Recording["format"],
+      format: (format || "smart") as Recording["format"],
       duration: totalDurationSeconds,
       userData: userData as User,
       title,

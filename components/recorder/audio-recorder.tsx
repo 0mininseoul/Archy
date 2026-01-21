@@ -6,7 +6,6 @@ import { formatDuration } from "@/lib/utils";
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob, duration: number) => void;
-  format: string;
 }
 
 function WaveformVisualizer({ analyserNode, isRecording, isPaused }: {
@@ -119,7 +118,7 @@ function WaveformVisualizer({ analyserNode, isRecording, isPaused }: {
   );
 }
 
-export function AudioRecorder({ onRecordingComplete, format }: AudioRecorderProps) {
+export function AudioRecorder({ onRecordingComplete }: AudioRecorderProps) {
   const {
     isRecording,
     isPaused,

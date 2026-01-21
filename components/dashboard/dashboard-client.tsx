@@ -93,7 +93,6 @@ export function DashboardClient() {
               body: JSON.stringify({
                 sessionId,
                 totalDurationSeconds: totalDuration,
-                format: "meeting",
               }),
             });
 
@@ -125,7 +124,6 @@ export function DashboardClient() {
             body: JSON.stringify({
               transcripts,
               totalDurationSeconds: totalDuration,
-              format: "meeting",
             }),
           });
 
@@ -169,7 +167,6 @@ export function DashboardClient() {
           <div className="card p-6 shadow-lg">
             <ChunkedAudioRecorder
               onRecordingComplete={handleRecordingComplete}
-              format="meeting"
             />
           </div>
         </div>

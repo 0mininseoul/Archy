@@ -13,7 +13,6 @@ import { ResumeModal } from "./resume-modal";
 
 interface ChunkedAudioRecorderProps {
   onRecordingComplete: (result: ChunkedRecordingResult) => void;
-  format: string;
 }
 
 function WaveformVisualizer({
