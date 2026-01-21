@@ -320,35 +320,6 @@ export function RecordingCard({
               <span className="tracking-tight">{formattedDate}</span>
             </div>
 
-            {/* Processing Status Info */}
-            {recording.status === "processing" && (
-              <div className="mt-2.5 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
-                <div className="flex items-start gap-2.5 text-xs text-blue-700">
-                  <svg
-                    className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 animate-spin"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                  <span className="leading-relaxed break-keep">
-                    {t.history.processingNotice.base}
-                    <span className="block mt-0.5">
-                      {pushEnabled && slackConnected && t.history.processingNotice.all}
-                      {pushEnabled && !slackConnected && t.history.processingNotice.push}
-                      {!pushEnabled && slackConnected && t.history.processingNotice.slack}
-                    </span>
-                  </span>
-                </div>
-              </div>
-            )}
-
             {/* Error Message */}
             {recording.status === "failed" && (
               <div className="mt-3 p-2 bg-red-50 border border-red-100 rounded-lg">
@@ -409,6 +380,35 @@ export function RecordingCard({
             </svg>
           </div>
         </div>
+
+        {/* Processing Status Info - Full Width */}
+        {recording.status === "processing" && (
+          <div className="mt-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
+            <div className="flex items-start gap-2.5 text-xs text-blue-700">
+              <svg
+                className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 animate-spin"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              <span className="leading-relaxed break-keep">
+                {t.history.processingNotice.base}
+                <span className="block mt-0.5">
+                  {pushEnabled && slackConnected && t.history.processingNotice.all}
+                  {pushEnabled && !slackConnected && t.history.processingNotice.push}
+                  {!pushEnabled && slackConnected && t.history.processingNotice.slack}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
