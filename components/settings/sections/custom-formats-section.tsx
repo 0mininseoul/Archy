@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 
 interface CustomFormat {
@@ -28,6 +28,9 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
   const [editFormatName, setEditFormatName] = useState("");
   const [editFormatPrompt, setEditFormatPrompt] = useState("");
 
+  // temp ID로 기본값 설정 시도 시 저장 (서버 응답 후 실제 ID로 PUT 호출)
+  const pendingDefaultTempIdRef = useRef<string | null>(null);
+
   // 스마트 포맷이 기본값인지 확인 (커스텀 포맷 중 기본값이 없으면 스마트 포맷이 기본값)
   const isSmartFormatDefault = !customFormats.some(f => f.is_default);
 
@@ -36,6 +39,21 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
     // 이미 기본값인 경우 무시
     const targetFormat = customFormats.find(f => f.id === id);
     if (targetFormat?.is_default) return;
+
+    // 임시 ID인 경우: UI만 업데이트하고 pending에 저장 (서버 응답 후 실제 PUT 호출)
+    if (id.startsWith("temp-")) {
+      pendingDefaultTempIdRef.current = id;
+      setCustomFormats(formats =>
+        formats.map(f => ({
+          ...f,
+          is_default: f.id === id,
+        }))
+      );
+      return;
+    }
+
+    // 다른 포맷 선택 시 pending 초기화
+    pendingDefaultTempIdRef.current = null;
 
     // Optimistic update - 즉시 UI 반영
     const previousFormats = customFormats;
@@ -55,13 +73,13 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
       if (!response.ok) {
         // 실패 시 롤백
         setCustomFormats(previousFormats);
-        alert(t.settings.formats.saveFailed);
+        alert(t.settings.formats.setDefaultFailed);
       }
     } catch (error) {
       console.error("Failed to set default format:", error);
       // 실패 시 롤백
       setCustomFormats(previousFormats);
-      alert(t.settings.formats.saveFailed);
+      alert(t.settings.formats.setDefaultFailed);
     }
   }, [customFormats, t]);
 
@@ -69,6 +87,9 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
   const handleSetSmartFormatDefault = useCallback(async () => {
     // 이미 스마트 포맷이 기본값이면 아무것도 안 함
     if (isSmartFormatDefault) return;
+
+    // pending default 초기화 (temp 포맷이 기본값이었다가 스마트 포맷 선택 시)
+    pendingDefaultTempIdRef.current = null;
 
     // Optimistic update - 즉시 UI 반영
     const previousFormats = customFormats;
@@ -88,13 +109,13 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
       if (!response.ok) {
         // 실패 시 롤백
         setCustomFormats(previousFormats);
-        alert(t.settings.formats.saveFailed);
+        alert(t.settings.formats.setDefaultFailed);
       }
     } catch (error) {
       console.error("Failed to set smart format as default:", error);
       // 실패 시 롤백
       setCustomFormats(previousFormats);
-      alert(t.settings.formats.saveFailed);
+      alert(t.settings.formats.setDefaultFailed);
     }
   }, [isSmartFormatDefault, customFormats, t]);
 
@@ -132,19 +153,34 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
       if (response.ok) {
         const data = await response.json();
         const createdFormat = data.data?.format || data.format;
+
         // 서버에서 받은 실제 ID로 교체
+        // pending default가 이 temp ID였다면 is_default: true로 유지
+        const shouldBeDefault = pendingDefaultTempIdRef.current === tempId;
         setCustomFormats(formats =>
-          formats.map(f => (f.id === tempId ? createdFormat : f))
+          formats.map(f => (f.id === tempId ? { ...createdFormat, is_default: shouldBeDefault || createdFormat.is_default } : f))
         );
+
+        // pending default였다면 서버에도 기본값 설정 요청
+        if (shouldBeDefault) {
+          pendingDefaultTempIdRef.current = null;
+          fetch("/api/formats", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: createdFormat.id, is_default: true }),
+          }).catch(err => console.error("Failed to set default after create:", err));
+        }
       } else {
         const data = await response.json();
         // 실패 시 롤백
+        pendingDefaultTempIdRef.current = null;
         setCustomFormats(previousFormats);
         alert(data.error || t.settings.formats.saveFailed);
       }
     } catch (error) {
       console.error("Failed to create format:", error);
       // 실패 시 롤백
+      pendingDefaultTempIdRef.current = null;
       setCustomFormats(previousFormats);
       alert(t.settings.formats.saveFailed);
     }

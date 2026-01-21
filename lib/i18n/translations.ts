@@ -270,6 +270,7 @@ export const translations = {
         deleteConfirm: "이 포맷을 삭제하시겠습니까?",
         editSuccess: "포맷이 수정되었습니다.",
         editFailed: "포맷 수정에 실패했습니다.",
+        setDefaultFailed: "기본값 설정에 실패했습니다.",
       },
       data: {
         title: "데이터 관리",
@@ -726,6 +727,7 @@ export const translations = {
         deleteConfirm: "Delete this format?",
         editSuccess: "Format updated successfully.",
         editFailed: "Failed to update format.",
+        setDefaultFailed: "Failed to set as default.",
       },
       data: {
         title: "Data Management",
