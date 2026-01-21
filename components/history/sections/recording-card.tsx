@@ -304,7 +304,7 @@ export function RecordingCard({
 
           {/* Content */}
           <div className="flex-1 min-w-0 pr-2">
-            <h3 className="text-base font-bold text-slate-900 line-clamp-1 mb-1.5">
+            <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-1.5">
               {recording.title}
             </h3>
             <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
@@ -322,10 +322,10 @@ export function RecordingCard({
 
             {/* Processing Status Info */}
             {recording.status === "processing" && (
-              <div className="mt-3 p-2 bg-blue-50 border border-blue-100 rounded-lg">
-                <div className="flex items-start gap-2 text-xs text-blue-700">
+              <div className="mt-2.5 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
+                <div className="flex items-start gap-2.5 text-xs text-blue-700">
                   <svg
-                    className="w-3 h-3 mt-0.5 flex-shrink-0 animate-spin"
+                    className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 animate-spin"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -337,12 +337,13 @@ export function RecordingCard({
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                     />
                   </svg>
-                  <span className="leading-relaxed">
+                  <span className="leading-relaxed break-keep">
                     {t.history.processingNotice.base}
-                    <br />
-                    {pushEnabled && slackConnected && t.history.processingNotice.all}
-                    {pushEnabled && !slackConnected && t.history.processingNotice.push}
-                    {!pushEnabled && slackConnected && t.history.processingNotice.slack}
+                    <span className="block mt-0.5">
+                      {pushEnabled && slackConnected && t.history.processingNotice.all}
+                      {pushEnabled && !slackConnected && t.history.processingNotice.push}
+                      {!pushEnabled && slackConnected && t.history.processingNotice.slack}
+                    </span>
                   </span>
                 </div>
               </div>

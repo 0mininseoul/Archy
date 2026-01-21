@@ -188,7 +188,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
               </button>
             </div>
           ) : (
-            <h1 className="text-lg font-bold text-slate-900 truncate flex-1">
+            <h1 className="text-lg font-bold text-slate-900 line-clamp-2 flex-1 leading-tight">
               {recordingTitle}
             </h1>
           )}
