@@ -55,24 +55,25 @@ export async function formatDocument(
       messages: [
         {
           role: "system",
-          content: `당신은 전문적인 문서 편집자입니다. 사용자가 제공한 녹취록을 정리하세요.
+          content: `당신은 전문적인 문서 편집자입니다. 사용자가 제공한 녹취록을 요약하여 정리하세요.
 
 ⚠️ 절대 금지:
 1. 녹취록에 없는 내용 추가 금지
 2. "녹취록을 제공해주세요" 같은 입력 요청 금지
-3. "녹음 내용이 짧습니다"라고만 말하고 끝내기 금지 - 반드시 실제 내용 포함
+3. "녹음 내용이 짧습니다", "내용이 부족합니다" 같은 메타 코멘트만 하고 끝내기 금지
+4. 녹취록 원본을 그대로 복사하여 붙여넣기 금지 - 반드시 요약/정리된 형태로 작성
 
 ✅ 필수:
-- 녹취록 내용을 기반으로 제목 작성
-- 녹취록 내용을 [CONTENT] 안에 반드시 포함
-- 짧아도 있는 내용은 모두 정리
+- 녹취록 내용을 기반으로 핵심을 담은 제목 작성
+- 녹취록 내용을 요약하여 [CONTENT] 안에 작성 (원본 복사 금지)
+- 짧은 내용이라도 화자의 상황, 감정, 핵심 메시지를 파악하여 요약
 
 응답 형식:
 [TITLE]
 녹취록 핵심을 담은 제목
 [/TITLE]
 [CONTENT]
-녹취록 내용을 정리한 본문 (반드시 녹취록 내용 포함)
+녹취록 내용을 요약한 본문 (반드시 요약된 형태로 작성)
 [/CONTENT]`,
         },
         {
@@ -172,6 +173,13 @@ export async function formatDocument(
       /^녹음 내용이 짧아 요약이 제한적입니다\.?$/,
       /^내용이 짧습니다\.?$/,
       /^요약이 제한적입니다\.?$/,
+      /녹음 내용이 짧아.*어렵/,
+      /내용이 부족/,
+      /요약.*어렵/,
+      /정리.*어렵/,
+      /충분.*내용.*없/,
+      /의미있는.*내용.*없/,
+      /녹취록.*짧아/,
     ];
 
     const isPlaceholderTitle = placeholderPatterns.some(p => p.test(title.trim()));
@@ -180,22 +188,34 @@ export async function formatDocument(
     const isLazyResponse = lazyResponsePatterns.some(p => p.test(title.trim())) ||
                            lazyResponsePatterns.some(p => p.test(content.trim()));
 
-    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput || isLazyResponse) {
+    // Check if content is just the raw transcript copy-pasted
+    const normalizedContent = content.replace(/^###\s*📝\s*(녹음\s*내용|상세\s*내용|상세)\s*\n+/i, '').trim();
+    const normalizedTranscript = trimmedTranscript.trim();
+    const isRawTranscriptCopy = normalizedContent === normalizedTranscript ||
+                                 content.includes(trimmedTranscript) && content.length < trimmedTranscript.length * 1.5;
+
+    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput || isLazyResponse || isRawTranscriptCopy) {
+      if (isRawTranscriptCopy) {
+        console.warn("[Formatting] AI just copied raw transcript - creating summary fallback");
+      }
       console.warn("[Formatting] AI returned placeholder/lazy/waiting-for-input response");
       console.warn("[Formatting] Raw response:", fullResponse.substring(0, 500));
 
-      // If AI just said "short" or is asking for input, use the transcript directly
-      if (isWaitingForInput || isLazyResponse) {
-        console.warn("[Formatting] AI gave lazy response or asked for input - creating fallback");
-        // Create a simple formatted version of the transcript
-        const lines = trimmedTranscript.split('\n').filter(l => l.trim());
-        const firstMeaningful = lines.find(l => l.trim().length > 3) || trimmedTranscript.substring(0, 50);
+      // If AI just said "short", is asking for input, or copied raw transcript, create a proper summary fallback
+      if (isWaitingForInput || isLazyResponse || isRawTranscriptCopy) {
+        console.warn("[Formatting] AI gave lazy response or asked for input - creating summary fallback");
 
-        title = firstMeaningful.substring(0, 40).trim();
-        if (title.length >= 40) title += "...";
+        // Extract meaningful content for summary
+        const words = trimmedTranscript.split(/\s+/).filter(w => w.length > 1);
+        const keyPhrases = words.slice(0, Math.min(10, words.length)).join(' ');
 
-        content = `### 📝 녹음 내용\n\n${trimmedTranscript}`;
-        console.warn("[Formatting] Falling back to raw transcript display");
+        // Create title from first meaningful phrase
+        const firstMeaningful = trimmedTranscript.substring(0, 50).trim();
+        title = firstMeaningful.length > 40 ? firstMeaningful.substring(0, 37) + "..." : firstMeaningful;
+
+        // Create summarized content - never show raw transcript
+        content = `### 📌 핵심 내용\n- ${keyPhrases}${words.length > 10 ? '...' : ''}\n\n### 📝 요약\n짧은 음성 메모입니다. 화자가 "${keyPhrases.substring(0, 30)}${keyPhrases.length > 30 ? '...' : ''}"라고 언급했습니다.`;
+        console.warn("[Formatting] Created summary fallback (not raw transcript)");
       } else if (isPlaceholderContent) {
         // Try to extract content from raw response without tags
         // Fall back to using the raw response without the tag structure
