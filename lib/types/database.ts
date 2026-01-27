@@ -84,7 +84,26 @@ export interface Recording {
   error_message?: string | null;
   error_step?: ErrorStep | null;
   is_hidden?: boolean;
+  is_pinned?: boolean;
   created_at: string;
+}
+
+// Recording list item - excludes large text fields for performance
+export interface RecordingListItem {
+  id: string;
+  title: string;
+  status: RecordingStatus;
+  processing_step?: ProcessingStep | null;
+  created_at: string;
+  duration_seconds: number;
+  is_pinned?: boolean;
+  error_step?: ErrorStep | null;
+  error_message?: string | null;
+  notion_page_url?: string | null;
+  google_doc_url?: string | null;
+  format: RecordingFormat;
+  // Optional fields that may be needed for detail view navigation
+  transcript?: string | null;
 }
 
 export interface RecordingInsert {

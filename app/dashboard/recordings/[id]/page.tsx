@@ -11,29 +11,19 @@ export default function RecordingDetailPage() {
   const params = useParams();
   const id = params.id as string;
 
-  // Get cached data immediately on render (before any effects)
+  // Get cached data for quick initial display (list items don't have full data)
   const { getRecordingById, isLoaded: recordingsLoaded } = useRecordingsStore();
-  const { settings, isLoaded: userLoaded } = useUserStore();
-  const cachedRecording = recordingsLoaded ? (getRecordingById(id) ?? null) : null;
+  const { settings } = useUserStore();
+  const cachedRecording = recordingsLoaded ? getRecordingById(id) : null;
 
-  // Use cached data as initial state for instant rendering
-  const [recording, setRecording] = useState<Recording | null>(cachedRecording);
-  const [isOwner, setIsOwner] = useState(!!cachedRecording);
+  const [recording, setRecording] = useState<Recording | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
   const [saveAudioEnabled, setSaveAudioEnabled] = useState(settings?.saveAudioEnabled ?? false);
-  const [isLoading, setIsLoading] = useState(!cachedRecording);
+  const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    // If already have cached recording, no need to fetch
-    if (cachedRecording) {
-      setRecording(cachedRecording);
-      setIsOwner(true);
-      setSaveAudioEnabled(settings?.saveAudioEnabled ?? false);
-      setIsLoading(false);
-      return;
-    }
-
-    // Not in cache - fetch from API
+    // Always fetch full recording data from API (list cache doesn't have formatted_content)
     const fetchRecording = async () => {
       try {
         const response = await fetch(`/api/recordings/${id}`);
@@ -61,21 +51,18 @@ export default function RecordingDetailPage() {
     };
 
     fetchRecording();
-  }, [id, getRecordingById, settings?.saveAudioEnabled]);
+  }, [id, settings?.saveAudioEnabled]);
 
-  // Show nothing (instant) if loading and we have cached data potential
-  if (isLoading && recordingsLoaded) {
-    // Check cache one more time
-    const cachedRecording = getRecordingById(id);
-    if (cachedRecording) {
-      return (
-        <RecordingDetailClient
-          recording={cachedRecording}
-          saveAudioEnabled={settings?.saveAudioEnabled ?? false}
-          isOwner={true}
-        />
-      );
-    }
+  // Show cached data while loading full data (for fast perceived loading)
+  if (isLoading && cachedRecording) {
+    // Cast to Recording for display - missing fields will be filled by API response
+    return (
+      <RecordingDetailClient
+        recording={cachedRecording as unknown as Recording}
+        saveAudioEnabled={settings?.saveAudioEnabled ?? false}
+        isOwner={true}
+      />
+    );
   }
 
   // Still loading - show minimal loading state (not skeleton)

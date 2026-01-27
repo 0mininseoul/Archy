@@ -1,5 +1,5 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
-import { Recording, User, MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
+import { Recording, RecordingListItem, User, MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { processRecording, handleProcessingError } from "@/lib/services/recording-processor";
 import { formatKSTDate } from "@/lib/utils";
 
@@ -114,19 +114,56 @@ export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "stat
   }
 );
 
-// GET /api/recordings - List recordings
-export const GET = withAuth<{ recordings: Recording[] }>(async ({ user, supabase }) => {
+// Fields needed for the recording list (exclude formatted_content which is large)
+const RECORDING_LIST_FIELDS = `
+  id,
+  title,
+  status,
+  processing_step,
+  created_at,
+  duration_seconds,
+  is_pinned,
+  error_step,
+  error_message,
+  notion_page_url,
+  google_doc_url,
+  format,
+  transcript
+`;
+
+const PAGE_SIZE = 20;
+
+// GET /api/recordings - List recordings with pagination
+export const GET = withAuth<{
+  recordings: RecordingListItem[];
+  hasMore: boolean;
+  nextOffset: number | null;
+}>(async ({ user, supabase, request }) => {
+  const url = new URL(request!.url);
+  const offset = parseInt(url.searchParams.get("offset") || "0");
+  const limit = parseInt(url.searchParams.get("limit") || String(PAGE_SIZE));
+
+  // Fetch one extra to check if there are more
   const { data: recordings, error } = await supabase
     .from("recordings")
-    .select("*")
+    .select(RECORDING_LIST_FIELDS)
     .eq("user_id", user.id)
     .neq("is_hidden", true)
     .order("is_pinned", { ascending: false })
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit);
 
   if (error) {
     return errorResponse(error.message, 500);
   }
 
-  return successResponse({ recordings: recordings ?? [] });
+  const fetchedRecordings = recordings ?? [];
+  const hasMore = fetchedRecordings.length > limit;
+  const returnRecordings = hasMore ? fetchedRecordings.slice(0, limit) : fetchedRecordings;
+
+  return successResponse({
+    recordings: returnRecordings,
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null,
+  });
 });

@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-import { Recording } from "@/types";
+import { RecordingListItem } from "@/lib/types/database";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import Image from "next/image";
@@ -13,7 +13,7 @@ import Image from "next/image";
 // =============================================================================
 
 interface RecordingCardProps {
-  recording: Recording;
+  recording: RecordingListItem;
   pushEnabled: boolean;
   slackConnected: boolean;
   onHide: (id: string) => void;
@@ -311,7 +311,7 @@ export function RecordingCard({
               <span className="flex items-center gap-1.5">
                 <StatusDot status={recording.status} />
                 <span className={recording.status === 'processing' ? 'text-amber-600' : ''}>
-                  {getStatusText(recording.status, recording.processing_step)}
+                  {getStatusText(recording.status, recording.processing_step ?? undefined)}
                 </span>
               </span>
               <span className="text-slate-300">|</span>
@@ -324,7 +324,7 @@ export function RecordingCard({
             {recording.status === "failed" && (
               <div className="mt-3 p-2 bg-red-50 border border-red-100 rounded-lg">
                 <p className="text-xs text-red-600">
-                  {getUserFriendlyErrorMessage(recording.error_step, recording.error_message)}
+                  {getUserFriendlyErrorMessage(recording.error_step ?? undefined, recording.error_message ?? undefined)}
                 </p>
               </div>
             )}
@@ -333,7 +333,7 @@ export function RecordingCard({
             {recording.status === "completed" && recording.error_step === "notion" && (
               <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded-lg">
                 <p className="text-xs text-amber-600">
-                  {getUserFriendlyErrorMessage(recording.error_step, recording.error_message)}
+                  {getUserFriendlyErrorMessage(recording.error_step ?? undefined, recording.error_message ?? undefined)}
                 </p>
               </div>
             )}
