@@ -49,14 +49,16 @@ export async function formatDocument(
 
 ⚠️ 중요: 녹취록에 없는 내용을 절대 만들어내지 마세요. 있는 내용만 정확하게 정리하세요.
 
-응답은 반드시 아래 형식을 따라주세요:
+응답은 반드시 아래 형식을 따라주세요. [TITLE]과 [CONTENT] 태그 사이에 실제 내용을 작성해야 합니다:
 
 [TITLE]
-(제목)
+실제 제목을 여기에 작성
 [/TITLE]
 [CONTENT]
-(정리된 내용)
-[/CONTENT]`,
+실제 정리된 내용을 여기에 마크다운 형식으로 작성
+[/CONTENT]
+
+주의: "(제목)", "(정리된 내용)" 같은 플레이스홀더 텍스트를 그대로 출력하지 마세요. 반드시 녹취록 내용을 기반으로 실제 제목과 내용을 작성하세요.`,
         },
         {
           role: "user",
@@ -117,6 +119,49 @@ export async function formatDocument(
       const contentStart = content.indexOf("### ");
       if (contentStart !== -1) {
         content = content.substring(contentStart);
+      }
+    }
+
+    // Validate that we didn't get placeholder text literally
+    const placeholderPatterns = [
+      /^\(제목\)$/,
+      /^\(정리된 내용\)$/,
+      /^실제 제목을 여기에 작성$/,
+      /^실제 정리된 내용을 여기에/,
+      /^\(핵심 \d\)$/,
+      /^\(짧은 제목\)$/,
+    ];
+
+    const isPlaceholderTitle = placeholderPatterns.some(p => p.test(title.trim()));
+    const isPlaceholderContent = placeholderPatterns.some(p => p.test(content.trim()));
+
+    if (isPlaceholderTitle || isPlaceholderContent) {
+      console.warn("[Formatting] AI returned placeholder text instead of actual content");
+      console.warn("[Formatting] Raw response:", fullResponse.substring(0, 500));
+
+      // Try to extract content from raw response without tags
+      if (isPlaceholderContent) {
+        // Fall back to using the raw response without the tag structure
+        const rawContent = fullResponse
+          .replace(/\[TITLE\][\s\S]*?\[\/TITLE\]/gi, "")
+          .replace(/\[CONTENT\]/gi, "")
+          .replace(/\[\/CONTENT\]/gi, "")
+          .trim();
+
+        if (rawContent.length > 10) {
+          content = rawContent;
+        }
+      }
+
+      // Generate a simple title from first meaningful words if title is placeholder
+      if (isPlaceholderTitle && content.length > 0) {
+        const firstLine = content.split('\n').find(line => line.trim().length > 5);
+        if (firstLine) {
+          title = firstLine.replace(/^[#\-*\s📌]+/, '').substring(0, 50).trim();
+          if (title.length > 40) {
+            title = title.substring(0, 40) + "...";
+          }
+        }
       }
     }
 
