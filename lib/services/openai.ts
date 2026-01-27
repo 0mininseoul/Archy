@@ -55,28 +55,25 @@ export async function formatDocument(
       messages: [
         {
           role: "system",
-          content: `당신은 전문적인 문서 편집자입니다. 사용자가 제공한 녹취록을 읽기 쉽고 구조화된 형식으로 정리하는 것이 당신의 임무입니다.
+          content: `당신은 전문적인 문서 편집자입니다. 사용자가 제공한 녹취록을 정리하세요.
 
-⚠️ 절대 금지 사항:
-1. 녹취록에 없는 내용을 만들어내지 마세요.
-2. "녹취록을 제공해주세요", "내용을 입력해주세요" 등 입력을 요청하는 응답을 하지 마세요.
-3. 녹취록이 짧거나 불완전해도, 있는 내용 그대로 정리하세요.
+⚠️ 절대 금지:
+1. 녹취록에 없는 내용 추가 금지
+2. "녹취록을 제공해주세요" 같은 입력 요청 금지
+3. "녹음 내용이 짧습니다"라고만 말하고 끝내기 금지 - 반드시 실제 내용 포함
 
-✅ 필수 수행 사항:
-- 사용자 메시지에 포함된 녹취록 텍스트를 바로 정리하세요.
-- 녹취록이 아무리 짧아도, 그 내용을 기반으로 제목과 요약을 작성하세요.
-- 내용이 부족하면 "녹음 내용이 짧습니다"라고 명시하되, 있는 내용은 반드시 포함하세요.
+✅ 필수:
+- 녹취록 내용을 기반으로 제목 작성
+- 녹취록 내용을 [CONTENT] 안에 반드시 포함
+- 짧아도 있는 내용은 모두 정리
 
-응답 형식 (반드시 이 형식을 따르세요):
-
+응답 형식:
 [TITLE]
-녹취록 내용을 요약한 실제 제목
+녹취록 핵심을 담은 제목
 [/TITLE]
 [CONTENT]
-실제 정리된 내용을 마크다운 형식으로 작성
-[/CONTENT]
-
-주의: "(제목)", "(정리된 내용)" 같은 플레이스홀더나 "내용을 입력해주세요" 같은 요청 문구를 절대 출력하지 마세요.`,
+녹취록 내용을 정리한 본문 (반드시 녹취록 내용 포함)
+[/CONTENT]`,
         },
         {
           role: "user",
@@ -168,17 +165,28 @@ export async function formatDocument(
       /waiting.*for.*input/i,
     ];
 
+    // Patterns that indicate AI just said "content is short" without actual summary
+    const lazyResponsePatterns = [
+      /^녹음 내용이 짧습니다\.?$/,
+      /^녹음 내용이 매우 짧아/,
+      /^녹음 내용이 짧아 요약이 제한적입니다\.?$/,
+      /^내용이 짧습니다\.?$/,
+      /^요약이 제한적입니다\.?$/,
+    ];
+
     const isPlaceholderTitle = placeholderPatterns.some(p => p.test(title.trim()));
     const isPlaceholderContent = placeholderPatterns.some(p => p.test(content.trim()));
     const isWaitingForInput = waitingForInputPatterns.some(p => p.test(content));
+    const isLazyResponse = lazyResponsePatterns.some(p => p.test(title.trim())) ||
+                           lazyResponsePatterns.some(p => p.test(content.trim()));
 
-    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput) {
-      console.warn("[Formatting] AI returned placeholder text or waiting-for-input response");
+    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput || isLazyResponse) {
+      console.warn("[Formatting] AI returned placeholder/lazy/waiting-for-input response");
       console.warn("[Formatting] Raw response:", fullResponse.substring(0, 500));
 
-      // If AI is asking for input instead of processing, use the transcript directly
-      if (isWaitingForInput) {
-        console.warn("[Formatting] AI asked for input instead of processing transcript");
+      // If AI just said "short" or is asking for input, use the transcript directly
+      if (isWaitingForInput || isLazyResponse) {
+        console.warn("[Formatting] AI gave lazy response or asked for input - creating fallback");
         // Create a simple formatted version of the transcript
         const lines = trimmedTranscript.split('\n').filter(l => l.trim());
         const firstMeaningful = lines.find(l => l.trim().length > 3) || trimmedTranscript.substring(0, 50);
