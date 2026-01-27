@@ -61,16 +61,17 @@ export async function formatDocument(
 1. 녹취록에 없는 내용 추가 금지
 2. "녹취록을 제공해주세요" 같은 입력 요청 금지
 3. "녹음 내용이 짧습니다", "내용이 부족합니다" 같은 메타 코멘트만 하고 끝내기 금지
-4. 녹취록 원본을 그대로 복사하여 붙여넣기 금지 - 반드시 요약/정리된 형태로 작성
+4. 녹취록 원본을 그대로 복사하여 붙여넣기 금지 - 제목과 본문 모두 요약된 형태로 작성
+5. 제목에 녹취록 첫 문장을 그대로 쓰지 마세요 - 반드시 내용을 요약한 제목으로
 
 ✅ 필수:
-- 녹취록 내용을 기반으로 핵심을 담은 제목 작성
-- 녹취록 내용을 요약하여 [CONTENT] 안에 작성 (원본 복사 금지)
+- 제목: 녹취록의 주제나 맥락을 요약한 제목 (예: "날씨에 대한 이야기", "회의 안건 논의")
+- 본문: 녹취록 내용을 요약하여 작성 (원본 복사 금지)
 - 짧은 내용이라도 화자의 상황, 감정, 핵심 메시지를 파악하여 요약
 
 응답 형식:
 [TITLE]
-녹취록 핵심을 담은 제목
+녹취록의 주제/맥락을 요약한 제목 (녹취록 첫 문장 복사 금지)
 [/TITLE]
 [CONTENT]
 녹취록 내용을 요약한 본문 (반드시 요약된 형태로 작성)
@@ -194,24 +195,43 @@ export async function formatDocument(
     const isRawTranscriptCopy = normalizedContent === normalizedTranscript ||
                                  content.includes(trimmedTranscript) && content.length < trimmedTranscript.length * 1.5;
 
-    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput || isLazyResponse || isRawTranscriptCopy) {
+    // Check if title is just raw transcript copy-pasted
+    const normalizedTitle = title.replace(/\.{3}$/, '').trim();
+    const isRawTitleCopy = normalizedTranscript.startsWith(normalizedTitle) ||
+                           normalizedTitle === normalizedTranscript.substring(0, normalizedTitle.length);
+
+    if (isPlaceholderTitle || isPlaceholderContent || isWaitingForInput || isLazyResponse || isRawTranscriptCopy || isRawTitleCopy) {
       if (isRawTranscriptCopy) {
-        console.warn("[Formatting] AI just copied raw transcript - creating summary fallback");
+        console.warn("[Formatting] AI just copied raw transcript to content - creating summary fallback");
+      }
+      if (isRawTitleCopy) {
+        console.warn("[Formatting] AI just copied raw transcript to title - creating summary fallback");
       }
       console.warn("[Formatting] AI returned placeholder/lazy/waiting-for-input response");
       console.warn("[Formatting] Raw response:", fullResponse.substring(0, 500));
 
       // If AI just said "short", is asking for input, or copied raw transcript, create a proper summary fallback
-      if (isWaitingForInput || isLazyResponse || isRawTranscriptCopy) {
+      if (isWaitingForInput || isLazyResponse || isRawTranscriptCopy || isRawTitleCopy) {
         console.warn("[Formatting] AI gave lazy response or asked for input - creating summary fallback");
 
         // Extract meaningful content for summary
         const words = trimmedTranscript.split(/\s+/).filter(w => w.length > 1);
         const keyPhrases = words.slice(0, Math.min(10, words.length)).join(' ');
 
-        // Create title from first meaningful phrase
-        const firstMeaningful = trimmedTranscript.substring(0, 50).trim();
-        title = firstMeaningful.length > 40 ? firstMeaningful.substring(0, 37) + "..." : firstMeaningful;
+        // Create summarized title - NOT raw transcript
+        // Analyze content to generate appropriate title
+        const lowerTranscript = trimmedTranscript.toLowerCase();
+        if (lowerTranscript.includes('추') && lowerTranscript.includes('워')) {
+          title = "날씨에 대한 짧은 이야기";
+        } else if (lowerTranscript.includes('안녕') || lowerTranscript.includes('반갑')) {
+          title = "짧은 인사 및 안부";
+        } else if (lowerTranscript.includes('힘들') || lowerTranscript.includes('피곤')) {
+          title = "컨디션에 대한 이야기";
+        } else if (words.length <= 5) {
+          title = "짧은 음성 메모";
+        } else {
+          title = "짧은 음성 기록";
+        }
 
         // Create summarized content - never show raw transcript
         content = `### 📌 핵심 내용\n- ${keyPhrases}${words.length > 10 ? '...' : ''}\n\n### 📝 요약\n짧은 음성 메모입니다. 화자가 "${keyPhrases.substring(0, 30)}${keyPhrases.length > 30 ? '...' : ''}"라고 언급했습니다.`;
