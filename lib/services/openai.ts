@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { buildPromptByQuality, analyzeTranscriptQuality } from "@/lib/prompts";
+import { buildUniversalPrompt } from "@/lib/prompts";
 
 export interface FormatResult {
   title: string;
@@ -8,7 +8,7 @@ export interface FormatResult {
 
 /**
  * 녹취록을 포맷에 맞춰 요약/정리합니다.
- * 전사본 품질에 따라 자동으로 적절한 프롬프트를 선택합니다.
+ * Universal Prompt를 사용하여 AI가 문서 구성을 직접 결정합니다.
  */
 export async function formatDocument(
   transcript: string,
@@ -30,23 +30,20 @@ export async function formatDocument(
     };
   }
 
-  // 품질 분석
-  const quality = analyzeTranscriptQuality(trimmedTranscript);
-  console.log(`[Formatting] Transcript quality: ${quality}, word count: ${trimmedTranscript.split(/\s+/).length}`);
+  console.log("[Formatting] Starting OpenAI formatting with Universal Prompt...");
 
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
 
-  // 커스텀 프롬프트가 있으면 그것을 우선 사용, 아니면 품질 기반 프롬프트 사용
+  // 커스텀 프롬프트가 있으면 그것을 우선 사용, 아니면 유니버설 프롬프트 사용
   let prompt: string;
   if (customPrompt) {
     prompt = customPrompt.replace("{{transcript}}", trimmedTranscript);
     console.log("[Formatting] Using custom format");
   } else {
-    const { prompt: qualityPrompt } = buildPromptByQuality(trimmedTranscript);
-    prompt = qualityPrompt;
-    console.log(`[Formatting] Using ${quality} quality prompt`);
+    prompt = buildUniversalPrompt(trimmedTranscript);
+    console.log("[Formatting] Using universal prompt");
   }
 
   try {
@@ -82,7 +79,7 @@ export async function formatDocument(
           content: prompt,
         },
       ],
-      max_tokens: quality === 'minimal' ? 500 : quality === 'sparse' ? 2000 : 4000,
+      max_tokens: 4000,
       temperature: 0.5,
     });
 
@@ -272,9 +269,3 @@ export async function formatDocument(
     );
   }
 }
-
-// Deprecated functions (kept to prevent import errors in other files until they are updated, 
-// but in this plan I will be updating the caller immediately. 
-// However, since I am editing this file first, I should remove them to strictly follow the plan 
-// and fix the caller in the next step. But to avoid temporary build errors if I was running a watcher 
-// (which I'm not), I'll just remove them.
