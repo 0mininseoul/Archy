@@ -54,8 +54,9 @@ export default function RecordingDetailPage() {
   }, [id, settings?.saveAudioEnabled]);
 
   // Show cached data while loading full data (for fast perceived loading)
-  if (isLoading && cachedRecording) {
-    // Cast to Recording for display - missing fields will be filled by API response
+  // Only use cache if it has formatted_content (full data), otherwise wait for API
+  // RecordingListItem from list cache doesn't include formatted_content
+  if (isLoading && cachedRecording && 'formatted_content' in cachedRecording && cachedRecording.formatted_content) {
     return (
       <RecordingDetailClient
         recording={cachedRecording as unknown as Recording}
