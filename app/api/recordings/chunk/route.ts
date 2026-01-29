@@ -76,10 +76,10 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         if (session && session.status === "recording") {
           // 이미 처리된 청크인지 확인 (중복 방지)
           if (chunkIndex > session.last_chunk_index) {
-            // 기존 전사본에 새 전사본 append
+            // 기존 전사본에 새 전사본 append (줄글로 이어서 작성)
             const existingTranscript = session.transcript || "";
             const newTranscript = existingTranscript
-              ? `${existingTranscript}\n\n${transcript}`
+              ? `${existingTranscript} ${transcript}`
               : transcript;
 
             // DB 업데이트
