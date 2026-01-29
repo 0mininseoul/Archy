@@ -77,7 +77,56 @@ export const POST = withAuth<FinalizeResponse>(
       console.log(
         `[Finalize] Finalizing session ${sessionId}, duration: ${totalDurationSeconds}s`
       );
-      console.log(`[Finalize] Transcript length from session: ${mergedTranscript.length}`);
+      console.log(`[Finalize] Initial transcript length: ${mergedTranscript.length}, last_chunk_index: ${session.last_chunk_index}`);
+
+      // 🔧 Race condition 방지: 마지막 청크 전사가 완료될 때까지 대기
+      // finalize가 chunk API보다 먼저 호출되면 마지막 청크가 아직 전사 중일 수 있음
+      // transcript 길이가 안정화될 때까지 (변화가 없을 때까지) polling
+      const maxWaitMs = 15000; // 최대 15초 대기
+      const pollIntervalMs = 1000; // 1초마다 체크
+      let waitedMs = 0;
+      let lastTranscriptLength = mergedTranscript.length;
+      let stableCount = 0;
+      const requiredStableCount = 2; // 2초 동안 변화 없으면 완료로 간주
+
+      console.log(`[Finalize] Waiting for transcript to stabilize...`);
+
+      while (waitedMs < maxWaitMs && stableCount < requiredStableCount) {
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+        waitedMs += pollIntervalMs;
+
+        const { data: refreshedSession } = await supabase
+          .from("recordings")
+          .select("transcript")
+          .eq("id", sessionId)
+          .eq("user_id", user.id)
+          .single();
+
+        const currentTranscript = refreshedSession?.transcript || "";
+        const currentLength = currentTranscript.length;
+
+        if (currentLength > lastTranscriptLength) {
+          // 새로운 전사가 추가됨, 계속 대기
+          console.log(`[Finalize] Transcript grew: ${lastTranscriptLength} -> ${currentLength}`);
+          mergedTranscript = currentTranscript;
+          lastTranscriptLength = currentLength;
+          stableCount = 0;
+        } else {
+          // 길이가 같음, stable count 증가
+          stableCount++;
+          if (currentLength > 0 && currentLength > mergedTranscript.length) {
+            mergedTranscript = currentTranscript;
+          }
+        }
+      }
+
+      if (stableCount >= requiredStableCount) {
+        console.log(`[Finalize] Transcript stabilized after ${waitedMs}ms, length: ${mergedTranscript.length}`);
+      } else {
+        console.warn(`[Finalize] Transcript wait timed out after ${maxWaitMs}ms, proceeding with length: ${mergedTranscript.length}`);
+      }
+
+      console.log(`[Finalize] Final transcript length: ${mergedTranscript.length}`);
 
       // 세션 상태를 'processing'으로 업데이트
       const { error: updateError } = await supabase
