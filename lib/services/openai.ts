@@ -237,7 +237,19 @@ export async function formatDocument(
   // Build prompt
   let prompt: string;
   if (customPrompt) {
-    prompt = customPrompt.replace("{{transcript}}", trimmedTranscript);
+    // 커스텀 프롬프트에도 [TITLE]/[CONTENT] 형식 안내를 추가
+    const customPromptWithTranscript = customPrompt.replace("{{transcript}}", trimmedTranscript);
+    prompt = `${customPromptWithTranscript}
+
+## 응답 형식 (반드시 준수)
+아래 형식으로 응답하세요. 태그는 반드시 포함해야 합니다.
+
+[TITLE]
+맥락을 반영한 제목 (한 줄)
+[/TITLE]
+[CONTENT]
+정리된 내용 (마크다운 형식)
+[/CONTENT]`;
     console.log("[Formatting] Using custom format");
   } else {
     prompt = buildUniversalPrompt(trimmedTranscript);
