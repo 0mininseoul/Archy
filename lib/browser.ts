@@ -57,13 +57,22 @@ export function detectInAppBrowserType(): InAppBrowserType {
     // Android WebView
     if (uaLower.includes("wv") && uaLower.includes("android")) return "unknown-webview";
     // iOS WebView (WKWebView 또는 UIWebView 감지)
-    // Safari가 아닌데 iOS인 경우
     if (/iphone|ipad|ipod/i.test(ua)) {
-        // Safari 브라우저가 아닌 경우 (Safari 제외)
-        const isSafari = /safari/i.test(ua) && !/crios|fxios|opios|edgios/i.test(ua);
+        // iOS의 정규 브라우저들 확인
+        // Chrome iOS: "CriOS", Firefox iOS: "FxiOS", Opera iOS: "OPiOS", Edge iOS: "EdgiOS"
+        const isChrome = /crios/i.test(ua);
+        const isFirefox = /fxios/i.test(ua);
+        const isOpera = /opios/i.test(ua);
+        const isEdge = /edgios/i.test(ua);
+        // Safari: UA에 "Safari"가 있고 다른 브라우저 식별자가 없는 경우
+        const isSafari = /safari/i.test(ua) && !isChrome && !isFirefox && !isOpera && !isEdge;
+
+        // 정규 브라우저인지 확인 (Safari, Chrome, Firefox, Opera, Edge)
+        const isRegularBrowser = isSafari || isChrome || isFirefox || isOpera || isEdge;
         const isStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone;
-        // Safari가 아니고, PWA 모드도 아닌 경우 WebView로 간주
-        if (!isSafari && !isStandalone) return "unknown-webview";
+
+        // 정규 브라우저가 아니고, PWA 모드도 아닌 경우 WebView로 간주
+        if (!isRegularBrowser && !isStandalone) return "unknown-webview";
     }
 
     return null;
