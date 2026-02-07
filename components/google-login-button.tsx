@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
-import { isInAppBrowser, isAndroid, openExternalBrowser } from "@/lib/browser";
+import { detectInAppBrowserType, isAndroid, openExternalBrowser, InAppBrowserType } from "@/lib/browser";
 import { InAppBrowserModal } from "@/components/in-app-browser-modal";
 
 interface GoogleLoginButtonProps {
@@ -15,16 +15,19 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
   const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const [showInAppModal, setShowInAppModal] = useState(false);
+  const [detectedBrowserType, setDetectedBrowserType] = useState<InAppBrowserType>(null);
 
   const handleLogin = async () => {
     // 인앱 브라우저 감지
-    if (isInAppBrowser()) {
+    const browserType = detectInAppBrowserType();
+    if (browserType) {
       if (isAndroid()) {
         // Android: 자동으로 외부 브라우저로 리다이렉트
         openExternalBrowser();
         return;
       } else {
-        // iOS: 안내 모달 표시
+        // iOS: 앱 타입을 저장하고 안내 모달 표시
+        setDetectedBrowserType(browserType);
         setShowInAppModal(true);
         return;
       }
@@ -79,6 +82,7 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
       <InAppBrowserModal
         isOpen={showInAppModal}
         onClose={() => setShowInAppModal(false)}
+        browserType={detectedBrowserType}
       />
     </>
   );

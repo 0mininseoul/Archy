@@ -448,11 +448,70 @@ export const translations = {
     inAppBrowser: {
       title: "외부 브라우저에서 열어주세요",
       description: "원활한 서비스 이용을 위해\nSafari에서 열어주세요.",
-      step1: "우측 하단의",
-      shareIcon: "공유 아이콘",
-      step2: "을 탭하세요",
-      step3: "'Safari로 열기'를 선택하세요",
       confirm: "확인",
+      // 앱별 안내
+      apps: {
+        kakaotalk: {
+          step1: "우측 상단의",
+          icon: "⋮",
+          step2: "메뉴를 탭하세요",
+          step3: "'다른 브라우저로 열기'를 선택하세요",
+        },
+        instagram: {
+          step1: "우측 상단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+        threads: {
+          step1: "우측 상단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+        facebook: {
+          step1: "우측 하단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+        linkedin: {
+          step1: "우측 상단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'브라우저에서 열기'를 선택하세요",
+        },
+        line: {
+          step1: "우측 상단의",
+          icon: "⋮",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari로 열기'를 선택하세요",
+        },
+        naver: {
+          step1: "우측 상단의",
+          icon: "⋮",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari로 열기'를 선택하세요",
+        },
+        telegram: {
+          step1: "우측 상단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+        twitter: {
+          step1: "우측 상단의",
+          icon: "⋯",
+          step2: "메뉴를 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+        default: {
+          step1: "상단 또는 하단의",
+          icon: "⋯",
+          step2: "메뉴나 공유 버튼을 탭하세요",
+          step3: "'Safari에서 열기'를 선택하세요",
+        },
+      },
     },
 
     // Errors
@@ -910,11 +969,70 @@ export const translations = {
     inAppBrowser: {
       title: "Open in External Browser",
       description: "For the best experience,\nplease open in Safari.",
-      step1: "Tap the",
-      shareIcon: "share icon",
-      step2: "at the bottom right",
-      step3: "Select 'Open in Safari'",
       confirm: "OK",
+      // App-specific instructions
+      apps: {
+        kakaotalk: {
+          step1: "Tap the",
+          icon: "⋮",
+          step2: "menu at the top right",
+          step3: "Select 'Open in other browser'",
+        },
+        instagram: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        threads: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        facebook: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the bottom right",
+          step3: "Select 'Open in Safari'",
+        },
+        linkedin: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the top right",
+          step3: "Select 'Open in browser'",
+        },
+        line: {
+          step1: "Tap the",
+          icon: "⋮",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        naver: {
+          step1: "Tap the",
+          icon: "⋮",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        telegram: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        twitter: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu at the top right",
+          step3: "Select 'Open in Safari'",
+        },
+        default: {
+          step1: "Tap the",
+          icon: "⋯",
+          step2: "menu or share button",
+          step3: "Select 'Open in Safari'",
+        },
+      },
     },
 
     // Errors

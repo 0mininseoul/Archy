@@ -1,20 +1,52 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
+import { InAppBrowserType } from "@/lib/browser";
 
 interface InAppBrowserModalProps {
     isOpen: boolean;
     onClose: () => void;
+    browserType?: InAppBrowserType;
 }
 
 /**
  * iOS용 인앱 브라우저 안내 모달
- * Safari로 열기 안내를 표시합니다.
+ * 앱별로 Safari로 열기 안내를 다르게 표시합니다.
  */
-export function InAppBrowserModal({ isOpen, onClose }: InAppBrowserModalProps) {
+export function InAppBrowserModal({ isOpen, onClose, browserType }: InAppBrowserModalProps) {
     const { t } = useI18n();
 
     if (!isOpen) return null;
+
+    // 앱 타입에 따른 안내 텍스트 가져오기
+    const getAppInstructions = () => {
+        const apps = t.inAppBrowser.apps;
+
+        switch (browserType) {
+            case "kakaotalk":
+                return apps.kakaotalk;
+            case "instagram":
+                return apps.instagram;
+            case "threads":
+                return apps.threads;
+            case "facebook":
+                return apps.facebook;
+            case "linkedin":
+                return apps.linkedin;
+            case "line":
+                return apps.line;
+            case "naver":
+                return apps.naver;
+            case "telegram":
+                return apps.telegram;
+            case "twitter":
+                return apps.twitter;
+            default:
+                return apps.default;
+        }
+    };
+
+    const instructions = getAppInstructions();
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -37,13 +69,11 @@ export function InAppBrowserModal({ isOpen, onClose }: InAppBrowserModalProps) {
                             1
                         </span>
                         <p className="text-slate-700 pt-0.5">
-                            {t.inAppBrowser.step1}{" "}
-                            <span className="inline-flex items-center justify-center w-6 h-6 bg-slate-200 rounded">
-                                <svg className="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8m-4-6l-4-4m0 0l-4 4m4-4v13" />
-                                </svg>
+                            {instructions.step1}{" "}
+                            <span className="inline-flex items-center justify-center w-6 h-6 bg-slate-200 rounded text-slate-700 font-bold">
+                                {instructions.icon}
                             </span>
-                            {" "}{t.inAppBrowser.step2}
+                            {" "}{instructions.step2}
                         </p>
                     </div>
 
@@ -53,7 +83,7 @@ export function InAppBrowserModal({ isOpen, onClose }: InAppBrowserModalProps) {
                             2
                         </span>
                         <p className="text-slate-700 pt-0.5">
-                            {t.inAppBrowser.step3}
+                            {instructions.step3}
                         </p>
                     </div>
                 </div>
