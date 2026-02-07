@@ -193,7 +193,7 @@ export function PlanManagementModal({ isOpen, onClose, isPro, proDaysRemaining }
                                 // Free user - show upgrade button
                                 <>
                                     <a
-                                        href={`/api/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRO_PRODUCT_ID}`}
+                                        href="/api/checkout?products=0683e62c-1010-4015-b50c-9bda01acd41e"
                                         className="block w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98] text-center"
                                     >
                                         <span className="text-slate-400 line-through mr-1.5">$9.99</span>
