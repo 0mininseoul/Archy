@@ -2,6 +2,7 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { Recording, User, MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { processFromTranscripts, handleProcessingError } from "@/lib/services/recording-processor";
 import { formatKSTDate } from "@/lib/utils";
+import { hasUnlimitedUsage } from "@/lib/promo";
 
 interface ChunkTranscript {
   chunkIndex: number;
@@ -40,12 +41,13 @@ export const POST = withAuth<FinalizeResponse>(
       return errorResponse("User not found", 404);
     }
 
-    // Check usage limit
+    // Check usage limit (Pro users have unlimited usage)
     const durationMinutes = Math.ceil(totalDurationSeconds / 60);
-    const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
-
-    if (userData.monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
-      return errorResponse("Monthly usage limit exceeded", 403);
+    if (!hasUnlimitedUsage(userData)) {
+      const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
+      if (userData.monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
+        return errorResponse("Monthly usage limit exceeded", 403);
+      }
     }
 
     let recordingId: string;

@@ -9,7 +9,7 @@ interface AccountSectionProps {
   email: string;
   name?: string | null;
   avatarUrl?: string | null;
-  usage: { used: number; limit: number };
+  usage: { used: number; limit: number | null; isPro?: boolean; proDaysRemaining?: number | null };
 }
 
 export function AccountSection({ email, name, avatarUrl, usage }: AccountSectionProps) {
@@ -45,8 +45,23 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
                 {name || "사용자"}
               </h2>
               <p className="text-sm text-slate-500 mb-2">{email}</p>
-              <div className="inline-flex items-center justify-center px-3 py-1 bg-[#333333] rounded-full">
-                <span className="text-white text-xs font-medium">Free</span>
+              <div className="flex items-center gap-2">
+                {usage.isPro ? (
+                  <>
+                    <div className="inline-flex items-center justify-center px-3 py-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full">
+                      <span className="text-white text-xs font-medium">Pro</span>
+                    </div>
+                    {usage.proDaysRemaining && (
+                      <span className="text-xs text-slate-500">
+                        {t.settings.account.proExpires.replace("{days}", String(usage.proDaysRemaining))}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <div className="inline-flex items-center justify-center px-3 py-1 bg-[#333333] rounded-full">
+                    <span className="text-white text-xs font-medium">Free</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -60,29 +75,29 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
           </button>
         </div>
 
-        {/* Usage Info (Bottom) - Replaced with minimal text or different UI if needed, 
-                but request said "remove old usage bar and title".
-                Current image shows "0분 사용 / 300분 사용가능" at the bottom.
-                Let's add that back in a cleaner way if needed, or stick to the image style.
-                The image shows a progress bar and text.
-                Wait, the prompt said: "기존에 있던 "계정 정보" 타이틀이나, 사용량 퍼센테이지는 빼줘."
-                BUT the second attached image SHOWS a usage bar and "0분 사용 300분 사용가능".
-                I should probably keep the usage bar but style it like the image (cleaner).
-                Actually, re-reading: "현재 계정 정보 카드 ui를 두 번째 첨부한 이미지처럼 업데이트하고 싶어."
-                The second image clearly has a usage bar and text 0분 사용 / 300분 사용가능.
-                So I will implement that style.
-            */}
+        {/* Usage Info */}
         <div className="mt-6">
-          <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-2">
-            <div
-              className="h-full bg-slate-900 transition-all duration-500"
-              style={{ width: `${Math.min((usage.used / usage.limit) * 100, 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-sm text-slate-900">
-            <span>{usage.used}분 사용</span>
-            <span className="text-slate-500">{usage.limit}분 사용가능</span>
-          </div>
+          {usage.isPro ? (
+            // Pro users - show unlimited
+            <div className="flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl">
+              <span className="text-lg">✨</span>
+              <span className="text-sm font-medium text-purple-700">{t.settings.account.unlimited}</span>
+            </div>
+          ) : (
+            // Free users - show usage bar
+            <>
+              <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-2">
+                <div
+                  className="h-full bg-slate-900 transition-all duration-500"
+                  style={{ width: `${usage.limit ? Math.min((usage.used / usage.limit) * 100, 100) : 0}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-sm text-slate-900">
+                <span>{usage.used}분 사용</span>
+                <span className="text-slate-500">{usage.limit}분 사용가능</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

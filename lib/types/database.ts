@@ -47,6 +47,11 @@ export interface User {
   referred_by?: string | null;
   bonus_minutes: number;
 
+  // Promo System
+  promo_code_id?: string | null;
+  promo_applied_at?: string | null;
+  promo_expires_at?: string | null;
+
   created_at: string;
 }
 
@@ -191,9 +196,30 @@ export interface GoogleFolder {
 }
 
 // -----------------------------------------------------------------------------
+// Promo Codes Table
+// -----------------------------------------------------------------------------
+
+export type PromoBenefitType = "pro_trial";
+
+export interface PromoCode {
+  id: string;
+  code: string;
+  name: string;
+  max_redemptions: number;
+  current_redemptions: number;
+  benefit_type: PromoBenefitType;
+  benefit_duration_days: number;
+  is_active: boolean;
+  starts_at: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+// -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
 
 export const MONTHLY_MINUTES_LIMIT = 350;
 export const REFERRAL_BONUS_MINUTES = 30;
 export const MAX_CUSTOM_FORMATS = 1;
+export const PRO_MAX_CUSTOM_FORMATS = 999; // Effectively unlimited for Pro users

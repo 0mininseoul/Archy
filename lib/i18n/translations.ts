@@ -210,6 +210,8 @@ export const translations = {
         noEmail: "이메일 정보 없음",
         usage: "사용량 제한",
         used: "사용됨",
+        proExpires: "{days}일 후 만료",
+        unlimited: "무제한 사용 가능",
       },
       invite: {
         title: "친구 초대",
@@ -359,6 +361,8 @@ export const translations = {
 
     // Onboarding
     onboarding: {
+      promoApplied: "프로모션이 적용되었습니다! Pro 혜택을 누려보세요.",
+      promoExpires: "{days}일 후 만료",
       step1: {
         title: "Archy에 오신 것을 환영합니다",
         description: "녹음 한 번으로 완성되는 자동 문서화 서비스입니다.",
@@ -668,6 +672,8 @@ export const translations = {
         noEmail: "No email info",
         usage: "Usage Limit",
         used: "Used",
+        proExpires: "Expires in {days} days",
+        unlimited: "Unlimited usage",
       },
       invite: {
         title: "Invite Friends",
@@ -817,6 +823,8 @@ export const translations = {
 
     // Onboarding
     onboarding: {
+      promoApplied: "Promo applied! Enjoy your Pro benefits.",
+      promoExpires: "Expires in {days} days",
       step1: {
         title: "Welcome to Archy",
         description: "One recording, automatic documentation.",

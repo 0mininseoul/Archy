@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 
 // 30 days in seconds for persistent login
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
@@ -10,6 +11,7 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   let next = searchParams.get("next");
   const locale = searchParams.get("locale"); // Get locale from query params
+  const promoCode = searchParams.get("promo"); // Get promo code from query params
 
   if (code) {
     const cookieStore = await cookies();
@@ -99,6 +101,58 @@ export async function GET(request: Request) {
           return NextResponse.redirect(errorUrl);
         }
         console.log("[Auth Callback] New user created:", user.id);
+
+        // Apply promo code if provided for new users
+        if (promoCode) {
+          try {
+            const supabaseAdmin = createServiceRoleClient();
+            const code = promoCode.trim().toUpperCase();
+
+            // Find and validate promo code
+            const { data: promo } = await supabaseAdmin
+              .from("promo_codes")
+              .select("*")
+              .eq("code", code)
+              .eq("is_active", true)
+              .single();
+
+            if (promo && promo.current_redemptions < promo.max_redemptions) {
+              // Check if promo is within valid date range
+              const now = new Date();
+              const startsAt = promo.starts_at ? new Date(promo.starts_at) : null;
+              const expiresAt = promo.expires_at ? new Date(promo.expires_at) : null;
+
+              if ((!startsAt || startsAt <= now) && (!expiresAt || expiresAt > now)) {
+                // Calculate expiry date for user's benefit
+                const benefitExpiresAt = new Date();
+                benefitExpiresAt.setDate(benefitExpiresAt.getDate() + promo.benefit_duration_days);
+
+                // Apply promo to user
+                await supabaseAdmin
+                  .from("users")
+                  .update({
+                    promo_code_id: promo.id,
+                    promo_applied_at: new Date().toISOString(),
+                    promo_expires_at: benefitExpiresAt.toISOString(),
+                  })
+                  .eq("id", user.id);
+
+                // Increment redemption count
+                await supabaseAdmin
+                  .from("promo_codes")
+                  .update({
+                    current_redemptions: promo.current_redemptions + 1,
+                  })
+                  .eq("id", promo.id);
+
+                console.log(`[Auth Callback] Applied promo code ${code} to user ${user.id}`);
+              }
+            }
+          } catch (promoError) {
+            // Don't block signup if promo application fails
+            console.error("[Auth Callback] Failed to apply promo code:", promoError);
+          }
+        }
       }
 
       // Determine redirect destination based on user status

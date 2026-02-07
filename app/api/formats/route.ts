@@ -1,5 +1,6 @@
 import { withAuth, successResponse, errorResponse, validateRequired } from "@/lib/api";
-import { CustomFormat, CustomFormatInsert, MAX_CUSTOM_FORMATS } from "@/lib/types/database";
+import { CustomFormat, CustomFormatInsert } from "@/lib/types/database";
+import { getCustomFormatLimit } from "@/lib/promo";
 
 // GET /api/formats - List custom formats
 export const GET = withAuth<{ formats: CustomFormat[] }>(async ({ user, supabase }) => {
@@ -27,13 +28,18 @@ export const POST = withAuth<{ format: CustomFormat }>(async ({ user, supabase, 
     return errorResponse(validationError, 400);
   }
 
-  // Check current format count
-  const { count } = await supabase
-    .from("custom_formats")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
+  // Get user data for Pro status check and format count in parallel
+  const [userResult, countResult] = await Promise.all([
+    supabase.from("users").select("promo_expires_at").eq("id", user.id).single(),
+    supabase.from("custom_formats").select("*", { count: "exact", head: true }).eq("user_id", user.id),
+  ]);
 
-  if (count !== null && count >= MAX_CUSTOM_FORMATS) {
+  const userData = userResult.data;
+  const { count } = countResult;
+
+  // Check format limit (Pro users have higher limit)
+  const formatLimit = getCustomFormatLimit(userData);
+  if (count !== null && count >= formatLimit) {
     return errorResponse("Maximum format limit reached", 400);
   }
 

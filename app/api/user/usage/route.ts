@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { getProStatus } from "@/lib/promo";
 
 export const runtime = "edge";
 
@@ -18,7 +19,7 @@ export async function GET() {
 
     const { data: userData, error } = await supabase
       .from("users")
-      .select("monthly_minutes_used, last_reset_at, bonus_minutes")
+      .select("monthly_minutes_used, last_reset_at, bonus_minutes, promo_expires_at")
       .eq("id", user.id)
       .single();
 
@@ -26,10 +27,14 @@ export async function GET() {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    const proStatus = getProStatus(userData);
+
     return NextResponse.json({
       used: userData.monthly_minutes_used,
-      limit: 350 + (userData.bonus_minutes || 0),
+      limit: proStatus.isPro ? null : 350 + (userData.bonus_minutes || 0),
       lastReset: userData.last_reset_at,
+      isPro: proStatus.isPro,
+      proDaysRemaining: proStatus.daysRemaining,
     });
   } catch (error) {
     console.error("API error:", error);

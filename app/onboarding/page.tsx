@@ -6,14 +6,38 @@ import { useI18n } from "@/lib/i18n";
 
 type OnboardingStep = 1 | 2;
 
+interface PromoStatus {
+  isPro: boolean;
+  daysRemaining: number | null;
+}
+
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
   const [showReferralInput, setShowReferralInput] = useState(false);
   const [referralCode, setReferralCode] = useState("");
   const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [referralMessage, setReferralMessage] = useState("");
+  const [promoStatus, setPromoStatus] = useState<PromoStatus | null>(null);
   const router = useRouter();
   const { t } = useI18n();
+
+  // Check if user has promo applied (from signup link)
+  useEffect(() => {
+    const checkPromoStatus = async () => {
+      try {
+        const response = await fetch("/api/promo/status");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.data?.isPro) {
+            setPromoStatus(data.data);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to check promo status:", error);
+      }
+    };
+    checkPromoStatus();
+  }, []);
 
   const handleApplyReferral = async () => {
     if (!referralCode.trim()) return;
@@ -81,6 +105,25 @@ function OnboardingContent() {
     <div className="app-container !overflow-y-auto">
       <main className="flex-1 flex flex-col items-center px-4 py-4">
         <div className="w-full max-w-sm space-y-3 flex-1 flex flex-col">
+          {/* Pro Promo Applied Banner */}
+          {promoStatus?.isPro && (
+            <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl animate-fade-in">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎉</span>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-purple-900">
+                    {t.onboarding.promoApplied}
+                  </p>
+                  {promoStatus.daysRemaining && (
+                    <p className="text-xs text-purple-600 mt-0.5">
+                      {t.onboarding.promoExpires.replace("{days}", String(promoStatus.daysRemaining))}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Progress Indicator */}
           <div className="flex items-center justify-center gap-2">
             {[1, 2].map((num) => (

@@ -1,6 +1,7 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
-import { Recording, User, MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
+import { MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { formatKSTDate } from "@/lib/utils";
+import { hasUnlimitedUsage } from "@/lib/promo";
 
 interface StartSessionResponse {
   sessionId: string;
@@ -15,7 +16,7 @@ export const POST = withAuth<StartSessionResponse>(
 
     // 유저 데이터와 기존 세션을 병렬로 조회 (속도 최적화)
     const [userResult, sessionResult] = await Promise.all([
-      supabase.from("users").select("monthly_minutes_used, bonus_minutes").eq("id", user.id).single(),
+      supabase.from("users").select("monthly_minutes_used, bonus_minutes, promo_expires_at").eq("id", user.id).single(),
       supabase.from("recordings").select("id").eq("user_id", user.id).eq("status", "recording").single(),
     ]);
 
@@ -35,10 +36,12 @@ export const POST = withAuth<StartSessionResponse>(
       });
     }
 
-    // Check if user has remaining minutes
-    const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
-    if (userData.monthly_minutes_used >= totalMinutesAvailable) {
-      return errorResponse("Monthly usage limit exceeded", 403);
+    // Check if user has remaining minutes (Pro users have unlimited usage)
+    if (!hasUnlimitedUsage(userData)) {
+      const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
+      if (userData.monthly_minutes_used >= totalMinutesAvailable) {
+        return errorResponse("Monthly usage limit exceeded", 403);
+      }
     }
 
     // Generate title

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
 import { isInAppBrowser, isAndroid, openExternalBrowser } from "@/lib/browser";
@@ -12,6 +13,7 @@ interface GoogleLoginButtonProps {
 
 export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
   const { t, locale } = useI18n();
+  const searchParams = useSearchParams();
   const [showInAppModal, setShowInAppModal] = useState(false);
 
   const handleLogin = async () => {
@@ -33,7 +35,13 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
 
     // Include locale in redirectTo to preserve language preference
     // Don't specify 'next' - let auth callback determine based on user status (new vs existing)
-    const redirectTo = `${window.location.origin}/api/auth/callback?locale=${locale}`;
+    let redirectTo = `${window.location.origin}/api/auth/callback?locale=${locale}`;
+
+    // Include promo code if present in URL
+    const promoCode = searchParams.get("promo");
+    if (promoCode) {
+      redirectTo += `&promo=${encodeURIComponent(promoCode)}`;
+    }
 
     await supabase.auth.signInWithOAuth({
       provider: "google",
