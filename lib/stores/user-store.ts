@@ -25,6 +25,9 @@ interface UserSettings {
     notionSaveTargetTitle: string | null;
     googleFolderId: string | null;
     googleFolderName: string | null;
+    // Pro status
+    isPro: boolean;
+    proDaysRemaining: number | null;
 }
 
 interface UserStore {
@@ -93,6 +96,8 @@ export const useUserStore = create<UserStore>((set, get) => ({
                     notionSaveTargetTitle: userData.notion_save_target_title || null,
                     googleFolderId: userData.google_folder_id || null,
                     googleFolderName: userData.google_folder_name || null,
+                    isPro: userData.is_pro || false,
+                    proDaysRemaining: userData.pro_days_remaining || null,
                 },
                 isLoaded: true,
                 lastFetchedAt: Date.now(),

@@ -63,7 +63,12 @@ export function SettingsClient() {
   const [notionConnected, setNotionConnected] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [slackConnected, setSlackConnected] = useState(false);
-  const [usage, setUsage] = useState({ used: 0, limit: 350 });
+  const [usage, setUsage] = useState<{
+    used: number;
+    limit: number | null;
+    isPro?: boolean;
+    proDaysRemaining?: number | null;
+  }>({ used: 0, limit: 350 });
   const [saveTarget, setSaveTarget] = useState<NotionSaveTarget | null>(null);
   const [googleFolder, setGoogleFolder] = useState<{ id: string | null; name: string | null }>({
     id: null,
@@ -103,7 +108,9 @@ export function SettingsClient() {
     if (settings) {
       setUsage({
         used: settings.monthlyMinutesUsed,
-        limit: 350 + settings.bonusMinutes,
+        limit: settings.isPro ? null : 350 + settings.bonusMinutes,
+        isPro: settings.isPro,
+        proDaysRemaining: settings.proDaysRemaining,
       });
       setPushEnabled(settings.pushEnabled);
       setAudioStorageEnabled(settings.saveAudioEnabled);

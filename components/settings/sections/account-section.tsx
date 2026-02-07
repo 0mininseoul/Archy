@@ -104,6 +104,8 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
       <PlanManagementModal
         isOpen={isPlanModalOpen}
         onClose={() => setIsPlanModalOpen(false)}
+        isPro={usage.isPro}
+        proDaysRemaining={usage.proDaysRemaining}
       />
     </>
   );

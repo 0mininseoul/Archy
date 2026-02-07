@@ -1,4 +1,5 @@
 import { withAuth, successResponse } from "@/lib/api";
+import { getProStatus } from "@/lib/promo";
 
 export const runtime = "edge";
 
@@ -19,10 +20,13 @@ export const GET = withAuth(async ({ user, supabase }) => {
       push_enabled,
       save_audio_enabled,
       monthly_minutes_used,
-      bonus_minutes
+      bonus_minutes,
+      promo_expires_at
     `)
         .eq("id", user.id)
         .single();
+
+    const proStatus = getProStatus(userData);
 
     return successResponse({
         email: user.email,
@@ -40,5 +44,7 @@ export const GET = withAuth(async ({ user, supabase }) => {
         save_audio_enabled: userData?.save_audio_enabled || false,
         monthly_minutes_used: userData?.monthly_minutes_used || 0,
         bonus_minutes: userData?.bonus_minutes || 0,
+        is_pro: proStatus.isPro,
+        pro_days_remaining: proStatus.daysRemaining,
     });
 });

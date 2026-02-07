@@ -9,9 +9,11 @@ import Image from "next/image";
 interface PlanManagementModalProps {
     isOpen: boolean;
     onClose: () => void;
+    isPro?: boolean;
+    proDaysRemaining?: number | null;
 }
 
-export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProps) {
+export function PlanManagementModal({ isOpen, onClose, isPro, proDaysRemaining }: PlanManagementModalProps) {
     const [mounted, setMounted] = useState(false);
     const dragControls = useDragControls();
 
@@ -174,13 +176,34 @@ export function PlanManagementModal({ isOpen, onClose }: PlanManagementModalProp
 
                         {/* Footer Button Area */}
                         <div className="px-6 pt-2 pb-8 bg-white border-t border-slate-50 mt-auto rounded-b-[2rem]">
-                            <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98]">
-                                <span className="text-slate-400 line-through mr-1.5">$9.99</span>
-                                <span>$3.99에 업그레이드</span>
-                            </button>
-                            <p className="text-center text-[10px] text-slate-400 mt-2.5 leading-tight">
-                                매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
-                            </p>
+                            {isPro ? (
+                                // Pro user - show current status
+                                <div className="text-center">
+                                    <div className="inline-flex items-center gap-2 px-6 py-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-full mb-3">
+                                        <span className="text-lg">✨</span>
+                                        <span className="font-bold text-purple-700">Pro 플랜 이용 중</span>
+                                    </div>
+                                    {proDaysRemaining && (
+                                        <p className="text-sm text-slate-500">
+                                            {proDaysRemaining}일 후 만료
+                                        </p>
+                                    )}
+                                </div>
+                            ) : (
+                                // Free user - show upgrade button
+                                <>
+                                    <a
+                                        href={`/api/checkout?products=${process.env.NEXT_PUBLIC_POLAR_PRO_PRODUCT_ID}`}
+                                        className="block w-full bg-slate-900 text-white font-bold py-4 rounded-full text-md shadow-lg hover:shadow-xl hover:bg-slate-800 transition-all transform active:scale-[0.98] text-center"
+                                    >
+                                        <span className="text-slate-400 line-through mr-1.5">$9.99</span>
+                                        <span>$3.99에 업그레이드</span>
+                                    </a>
+                                    <p className="text-center text-[10px] text-slate-400 mt-2.5 leading-tight">
+                                        매월 자동 갱신됩니다. 언제든 취소할 수 있습니다.
+                                    </p>
+                                </>
+                            )}
                         </div>
                     </motion.div>
                 </>
