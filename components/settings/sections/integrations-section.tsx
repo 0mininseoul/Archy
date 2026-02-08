@@ -55,6 +55,13 @@ export function IntegrationsSection({
   const [saveTargetSearch, setSaveTargetSearch] = useState("");
   const [dropdownLoading, setDropdownLoading] = useState(false);
 
+  // Manual Notion connection states
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualToken, setManualToken] = useState("");
+  const [manualPageUrl, setManualPageUrl] = useState("");
+  const [manualConnecting, setManualConnecting] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+
   // Google states
   const [googleConnected, setGoogleConnected] = useState(initialGoogleConnected);
   const [googleFolders, setGoogleFolders] = useState<GoogleFolder[]>([]);
@@ -143,6 +150,50 @@ export function IntegrationsSection({
       }
     } catch (error) {
       console.error("Failed to disconnect Notion:", error);
+    }
+  };
+
+  const handleManualConnect = async () => {
+    if (!manualToken.trim() || !manualPageUrl.trim()) return;
+
+    setManualConnecting(true);
+    setManualError(null);
+
+    try {
+      const response = await fetch("/api/user/notion-manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: manualToken.trim(),
+          pageUrl: manualPageUrl.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.data?.connected) {
+        setNotionConnected(true);
+        setSaveTarget(data.data.saveTarget);
+        setShowManualModal(false);
+        setManualToken("");
+        setManualPageUrl("");
+      } else {
+        // Handle specific error cases
+        if (response.status === 401) {
+          setManualError(t.settings.integrations.notion.manualModal.errorInvalidToken);
+        } else if (response.status === 400) {
+          setManualError(t.settings.integrations.notion.manualModal.errorInvalidUrl);
+        } else if (response.status === 403) {
+          setManualError(t.settings.integrations.notion.manualModal.errorNoAccess);
+        } else {
+          setManualError(t.settings.integrations.notion.manualModal.errorGeneric);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to connect Notion manually:", error);
+      setManualError(t.settings.integrations.notion.manualModal.errorGeneric);
+    } finally {
+      setManualConnecting(false);
     }
   };
 
@@ -432,7 +483,121 @@ export function IntegrationsSection({
               )}
             </div>
           )}
+
+          {/* Manual connection help button */}
+          {!notionConnected && (
+            <button
+              onClick={() => setShowManualModal(true)}
+              className="mt-3 text-xs text-slate-400 hover:text-slate-600 underline transition-colors"
+            >
+              {t.settings.integrations.notion.troubleshoot}
+            </button>
+          )}
         </div>
+
+        {/* Manual Notion Connection Modal */}
+        {showManualModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {t.settings.integrations.notion.manualModal.title}
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setShowManualModal(false);
+                      setManualToken("");
+                      setManualPageUrl("");
+                      setManualError(null);
+                    }}
+                    className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <p className="text-sm text-slate-600 mb-4">
+                  {t.settings.integrations.notion.manualModal.description}
+                </p>
+
+                <div className="bg-slate-50 rounded-xl p-4 mb-4 space-y-2">
+                  <p className="text-xs text-slate-600">
+                    {t.settings.integrations.notion.manualModal.step1}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {t.settings.integrations.notion.manualModal.step2}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {t.settings.integrations.notion.manualModal.step3}
+                  </p>
+                  <a
+                    href="https://www.notion.so/my-integrations"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-2"
+                  >
+                    {t.settings.integrations.notion.manualModal.guideLink}
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      {t.settings.integrations.notion.manualModal.tokenLabel}
+                    </label>
+                    <input
+                      type="password"
+                      value={manualToken}
+                      onChange={(e) => setManualToken(e.target.value)}
+                      placeholder={t.settings.integrations.notion.manualModal.tokenPlaceholder}
+                      className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                      {t.settings.integrations.notion.manualModal.pageUrlLabel}
+                    </label>
+                    <input
+                      type="url"
+                      value={manualPageUrl}
+                      onChange={(e) => setManualPageUrl(e.target.value)}
+                      placeholder={t.settings.integrations.notion.manualModal.pageUrlPlaceholder}
+                      className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                  </div>
+
+                  {manualError && (
+                    <div className="p-3 bg-red-50 border border-red-100 rounded-lg">
+                      <p className="text-sm text-red-600">{manualError}</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleManualConnect}
+                    disabled={manualConnecting || !manualToken.trim() || !manualPageUrl.trim()}
+                    className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  >
+                    {manualConnecting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        {t.settings.integrations.notion.manualModal.connecting}
+                      </>
+                    ) : (
+                      t.settings.integrations.notion.manualModal.connect
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Google Docs */}
         <div className="p-3 border border-slate-200 rounded-xl">
