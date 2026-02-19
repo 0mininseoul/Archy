@@ -439,6 +439,16 @@ export const translations = {
       getStarted: "무료로 시작하기",
     },
 
+    // Desktop Login Notice Modal
+    desktopLoginNotice: {
+      title: "모바일 이용을 권장드려요",
+      description: "Archy는 모바일 환경에 최적화된 서비스입니다.\nPC에서도 사용할 수 있지만 일부 기능은 제한될 수 있어요.\n모바일 브라우저에서 이용하시면 더 편리합니다.",
+      copy: "링크 복사",
+      copySuccess: "복사됨!",
+      copyFailed: "복사에 실패했어요. 아래 링크를 직접 복사해 주세요.",
+      close: "닫기",
+    },
+
     // PWA Modal
     pwaModal: {
       title: "앱으로 설치하기",
@@ -978,6 +988,16 @@ export const translations = {
     auth: {
       signInWithGoogle: "Get Started",
       getStarted: "Get Started Free",
+    },
+
+    // Desktop Login Notice Modal
+    desktopLoginNotice: {
+      title: "Mobile Is Recommended",
+      description: "Archy is optimized for mobile use.\nYou can still use it on desktop, but some features may be limited.\nFor the best experience, please continue on mobile.",
+      copy: "Copy Link",
+      copySuccess: "Copied!",
+      copyFailed: "Copy failed. Please copy the link manually.",
+      close: "Close",
     },
 
     // PWA Modal

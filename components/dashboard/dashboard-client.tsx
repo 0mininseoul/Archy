@@ -7,8 +7,10 @@ import { ChunkedAudioRecorder } from "@/components/recorder/chunked-audio-record
 import { ChunkedRecordingResult } from "@/hooks/useChunkedRecorder";
 import { BottomTab } from "@/components/navigation/bottom-tab";
 import { DashboardPWAInstallModal } from "@/components/pwa/dashboard-install-modal";
+import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal";
 import { useUserStore } from "@/lib/stores/user-store";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
+import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
 
 // =============================================================================
 // Component
@@ -17,6 +19,7 @@ import { useRecordingsStore } from "@/lib/stores/recordings-store";
 export function DashboardClient() {
   const router = useRouter();
   const [showPWAModal, setShowPWAModal] = useState(false);
+  const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
 
   // Use cached data from store
   const { connectionStatus, fetchUserData, isLoaded: userLoaded } = useUserStore();
@@ -33,6 +36,12 @@ export function DashboardClient() {
   const showSettingsTooltip = connectionStatus
     ? (!connectionStatus.notionConnected && !connectionStatus.googleConnected) || !connectionStatus.slackConnected
     : false;
+
+  useEffect(() => {
+    if (consumeDesktopLoginNoticeEligibility()) {
+      setShowDesktopLoginNotice(true);
+    }
+  }, []);
 
   useEffect(() => {
     // PWA install modal check
@@ -177,6 +186,12 @@ export function DashboardClient() {
 
       {/* PWA Install Modal */}
       {showPWAModal && <DashboardPWAInstallModal onClose={() => setShowPWAModal(false)} />}
+
+      {/* Desktop Login Notice Modal */}
+      <DesktopLoginNoticeModal
+        isOpen={showDesktopLoginNotice}
+        onClose={() => setShowDesktopLoginNotice(false)}
+      />
     </div>
   );
 }

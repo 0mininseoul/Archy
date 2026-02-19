@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal";
+import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
 
 type OnboardingStep = 1 | 2;
 
@@ -13,6 +15,7 @@ interface PromoStatus {
 
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
+  const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
   const [showReferralInput, setShowReferralInput] = useState(false);
   const [referralCode, setReferralCode] = useState("");
   const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -20,6 +23,13 @@ function OnboardingContent() {
   const [promoStatus, setPromoStatus] = useState<PromoStatus | null>(null);
   const router = useRouter();
   const { t } = useI18n();
+
+  // Check if user has promo applied (from signup link)
+  useEffect(() => {
+    if (consumeDesktopLoginNoticeEligibility()) {
+      setShowDesktopLoginNotice(true);
+    }
+  }, []);
 
   // Check if user has promo applied (from signup link)
   useEffect(() => {
@@ -321,6 +331,11 @@ function OnboardingContent() {
           </div>
         </div>
       </main>
+
+      <DesktopLoginNoticeModal
+        isOpen={showDesktopLoginNotice}
+        onClose={() => setShowDesktopLoginNotice(false)}
+      />
     </div>
   );
 }

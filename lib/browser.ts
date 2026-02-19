@@ -102,6 +102,34 @@ export function isIOS(): boolean {
 }
 
 /**
+ * 데스크탑/노트북 환경인지 추정
+ * - UA 단독 판단 대신 입력 장치/화면 정보와 함께 사용
+ * - iPadOS desktop UA(MacIntel) 예외 처리
+ */
+export function isDesktopEnvironment(): boolean {
+    if (typeof window === "undefined") return false;
+
+    const ua = navigator.userAgent.toLowerCase();
+    const uaData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
+    const isIPad = /ipad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isMobileUA = /android|iphone|ipod|mobile|blackberry|iemobile|opera mini/.test(ua);
+
+    if (isIPad || isMobileUA || uaData?.mobile === true) {
+        return false;
+    }
+
+    const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
+    const canHover = window.matchMedia("(hover: hover)").matches;
+
+    if (hasFinePointer && canHover) {
+        return true;
+    }
+
+    // Fallback: non-mobile UA and reasonably wide viewport
+    return window.innerWidth >= 1024;
+}
+
+/**
  * Android에서 intent:// 스킴으로 외부 브라우저 열기
  * @param url 열려는 URL (기본값: 현재 페이지)
  */

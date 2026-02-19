@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
 import { detectInAppBrowserType, isAndroid, openExternalBrowser, InAppBrowserType } from "@/lib/browser";
 import { InAppBrowserModal } from "@/components/in-app-browser-modal";
+import { markLoginIntent } from "@/lib/desktop-login-notice";
 
 interface GoogleLoginButtonProps {
   variant?: "nav" | "primary" | "cta";
@@ -35,6 +36,7 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
 
     // 일반 브라우저: 기존 로직
     const supabase = createClient();
+    markLoginIntent();
 
     // Include locale in redirectTo to preserve language preference
     // Don't specify 'next' - let auth callback determine based on user status (new vs existing)
