@@ -27,6 +27,9 @@ export function HistoryClient() {
   } = useRecordingsStore();
 
   const { connectionStatus, settings, fetchUserData, isLoaded: userLoaded } = useUserStore();
+  const hasActivePipeline = recordings.some(
+    (recording) => recording.status === "recording" || recording.status === "processing"
+  );
 
   // Fetch data on mount if not already loaded
   useEffect(() => {
@@ -59,22 +62,25 @@ export function HistoryClient() {
     };
   }, [hasMore, isLoadingMore, isLoading, fetchMoreRecordings]);
 
-  // Polling for processing recordings
+  // Polling for active recordings (recording + processing)
   useEffect(() => {
-    const hasProcessing = recordings.some((r) => r.status === "processing");
+    const pollRecordings = async () => {
+      try {
+        const response = await fetch("/api/recordings?offset=0&limit=20");
+        if (!response.ok) throw new Error("Failed to poll recordings");
 
-    if (hasProcessing) {
-      // Start polling
-      pollingIntervalRef.current = setInterval(async () => {
-        try {
-          const response = await fetch("/api/recordings");
-          const data = await response.json();
-          const freshRecordings = data.data?.recordings || data.recordings || [];
-          useRecordingsStore.getState().setRecordings(freshRecordings);
-        } catch (error) {
-          console.error("Failed to poll recordings:", error);
-        }
-      }, 3000);
+        const data = await response.json();
+        const freshRecordings = data.data?.recordings || data.recordings || [];
+        useRecordingsStore.getState().setRecordings(freshRecordings);
+      } catch (error) {
+        console.error("Failed to poll recordings:", error);
+      }
+    };
+
+    if (hasActivePipeline) {
+      // Fetch once immediately, then start interval polling
+      pollRecordings();
+      pollingIntervalRef.current = setInterval(pollRecordings, 3000);
     }
 
     return () => {
@@ -83,7 +89,7 @@ export function HistoryClient() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [recordings]);
+  }, [hasActivePipeline]);
 
   const handleHideRecording = useCallback(
     async (id: string) => {

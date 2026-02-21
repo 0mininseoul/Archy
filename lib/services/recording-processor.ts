@@ -73,10 +73,14 @@ async function updateProcessingStep(
   recordingId: string,
   step: ProcessingStep
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from("recordings")
     .update({ processing_step: step })
     .eq("id", recordingId);
+
+  if (error) {
+    logError(recordingId, `Failed to update processing_step to "${step}"`, error.message);
+  }
 }
 
 async function updateRecordingError(
@@ -271,7 +275,6 @@ async function stepNotionSave(
   }
 
   log(recordingId, "Step 3: Creating Notion page...");
-  await updateProcessingStep(supabase, recordingId, "notion");
 
   try {
     let targetId = userData.notion_database_id;
@@ -558,6 +561,7 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
   );
   const formattedContent = formatResult.data!.content;
   const finalTitle = formatResult.data!.title;
+  await updateProcessingStep(supabase, recordingId, "saving");
 
   // Step 3: Notion (optional)
   const notionResult = await stepNotionSave(
@@ -658,6 +662,7 @@ export async function processFromTranscripts(
 
   const formattedContent = formatResult.data!.content;
   const finalTitle = formatResult.data!.title;
+  await updateProcessingStep(supabase, recordingId, "saving");
 
   // Step 3: Notion (optional)
   const notionResult = await stepNotionSave(

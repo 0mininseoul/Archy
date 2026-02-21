@@ -29,6 +29,7 @@ function StatusDot({ status }: { status: string }) {
   const getColor = (s: string) => {
     switch (s) {
       case "completed": return "bg-green-500 shadow-green-200";
+      case "recording": return "bg-amber-400 shadow-amber-200 animate-pulse";
       case "processing": return "bg-amber-400 shadow-amber-200 animate-pulse";
       case "failed": return "bg-red-500 shadow-red-200";
       default: return "bg-slate-300 shadow-slate-200";
@@ -170,6 +171,9 @@ export function RecordingCard({
 
   const getStatusText = useCallback(
     (status: string, processingStep?: string) => {
+      if (status === "recording") {
+        return t.history.processingSteps.transcription;
+      }
       if (status === "processing" && processingStep) {
         switch (processingStep) {
           case "transcription":
@@ -310,7 +314,13 @@ export function RecordingCard({
             <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
               <span className="flex items-center gap-1.5">
                 <StatusDot status={recording.status} />
-                <span className={recording.status === 'processing' ? 'text-amber-600' : ''}>
+                <span
+                  className={
+                    recording.status === "recording" || recording.status === "processing"
+                      ? "text-amber-600"
+                      : ""
+                  }
+                >
                   {getStatusText(recording.status, recording.processing_step ?? undefined)}
                 </span>
               </span>
@@ -382,7 +392,7 @@ export function RecordingCard({
         </div>
 
         {/* Processing Status Info - Full Width */}
-        {recording.status === "processing" && (
+        {(recording.status === "recording" || recording.status === "processing") && (
           <div className="mt-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
             <div className="flex items-start gap-2.5 text-xs text-blue-700">
               <svg

@@ -135,6 +135,7 @@ export const POST = withAuth<FinalizeResponse>(
         .from("recordings")
         .update({
           status: "processing",
+          processing_step: "transcription",
           duration_seconds: totalDurationSeconds,
           session_paused_at: null,
         })

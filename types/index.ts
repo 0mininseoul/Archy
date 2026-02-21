@@ -35,7 +35,7 @@ export interface Recording {
 }
 
 export type RecordingFormat = "meeting" | "interview" | "lecture" | "custom";
-export type RecordingStatus = "processing" | "completed" | "failed";
+export type RecordingStatus = "recording" | "processing" | "completed" | "failed";
 export type ProcessingStep = "transcription" | "formatting" | "saving";
 export type ErrorStep = "upload" | "transcription" | "formatting" | "notion" | "slack";
 

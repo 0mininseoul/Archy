@@ -34,6 +34,7 @@ function getStatusIcon(status: string): string {
   switch (status) {
     case "completed":
       return "🟢";
+    case "recording":
     case "processing":
       return "🟡";
     case "failed":
@@ -117,6 +118,8 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
     switch (status) {
       case "completed":
         return t.history.status.completed;
+      case "recording":
+        return t.history.processingSteps.transcription;
       case "processing":
         return t.history.status.processing;
       case "failed":
@@ -392,10 +395,10 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
           )}
 
           {/* Processing State */}
-          {recording.status === "processing" && (
+          {(recording.status === "recording" || recording.status === "processing") && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin mb-4" />
-              <p className="text-slate-900 font-medium mb-1">처리 중...</p>
+              <p className="text-slate-900 font-medium mb-1">{getStatusText(recording.status)}</p>
               <p className="text-xs text-slate-500">잠시만 기다려주세요.</p>
             </div>
           )}

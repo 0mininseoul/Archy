@@ -67,10 +67,10 @@ export interface PushSubscriptionData {
 // Recordings Table
 // -----------------------------------------------------------------------------
 
-export type RecordingStatus = "processing" | "completed" | "failed";
+export type RecordingStatus = "recording" | "processing" | "completed" | "failed";
 export type RecordingFormat = "meeting" | "interview" | "lecture" | "custom";
 export type ErrorStep = "upload" | "transcription" | "formatting" | "notion" | "slack" | "google";
-export type ProcessingStep = "transcription" | "formatting" | "notion" | "slack" | "google" | "completed";
+export type ProcessingStep = "transcription" | "formatting" | "saving";
 
 export interface Recording {
   id: string;
