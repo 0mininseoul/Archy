@@ -2,36 +2,86 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeNotionCode } from "@/lib/services/notion";
 
+const DEFAULT_RETURN_TO = "/onboarding";
+
+function sanitizeReturnTo(returnTo: unknown, fallback: string = DEFAULT_RETURN_TO): string {
+  if (typeof returnTo !== "string") return fallback;
+  if (!returnTo.startsWith("/") || returnTo.startsWith("//")) return fallback;
+  return returnTo;
+}
+
+function resolveCanonicalOrigin(requestOrigin: string): string {
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!configuredAppUrl) return requestOrigin;
+
+  try {
+    return new URL(configuredAppUrl).origin;
+  } catch (error) {
+    console.error("[Notion Callback] Invalid NEXT_PUBLIC_APP_URL:", error);
+    return requestOrigin;
+  }
+}
+
+function buildRedirectUrl(
+  origin: string,
+  path: string,
+  options?: { errorCode?: string; params?: Record<string, string> }
+): string {
+  const safePath = sanitizeReturnTo(path, DEFAULT_RETURN_TO);
+  const redirectUrl = new URL(safePath, origin);
+
+  if (options?.errorCode) {
+    redirectUrl.searchParams.set("error", options.errorCode);
+  }
+
+  if (options?.params) {
+    Object.entries(options.params).forEach(([key, value]) => {
+      redirectUrl.searchParams.set(key, value);
+    });
+  }
+
+  return redirectUrl.toString();
+}
+
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
+  const requestUrl = new URL(request.url);
+  const { searchParams } = requestUrl;
   const code = searchParams.get("code");
   const error = searchParams.get("error");
   const state = searchParams.get("state");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const requestOrigin = requestUrl.origin;
+  const canonicalOrigin = resolveCanonicalOrigin(requestOrigin);
 
   // Parse returnTo and selectDb from state
-  let returnTo = "/onboarding";
+  let returnTo = DEFAULT_RETURN_TO;
   let selectDb = false;
   if (state) {
     try {
       const parsed = JSON.parse(state);
-      returnTo = parsed.returnTo || returnTo;
-      selectDb = parsed.selectDb === "true";
+      returnTo = sanitizeReturnTo(parsed?.returnTo, DEFAULT_RETURN_TO);
+      selectDb = parsed?.selectDb === "true" || parsed?.selectDb === true;
     } catch (e) {
-      console.error("Failed to parse state:", e);
+      console.error("[Notion Callback] Failed to parse state:", e);
     }
+  }
+
+  const configuredRedirectUri = process.env.NOTION_REDIRECT_URI;
+  if (process.env.NODE_ENV === "production" && !configuredRedirectUri) {
+    return NextResponse.redirect(
+      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_not_configured" })
+    );
   }
 
   if (error) {
     return NextResponse.redirect(
-      `${appUrl}${returnTo}?error=notion_auth_failed`
+      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_auth_failed" })
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `${appUrl}${returnTo}?error=no_code`
+      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "no_code" })
     );
   }
 
@@ -43,12 +93,12 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.redirect(`${appUrl}/`);
+      return NextResponse.redirect(buildRedirectUrl(canonicalOrigin, "/"));
     }
 
     // Exchange code for access token
     // IMPORTANT: The redirect_uri must match exactly what was used in the initial auth request
-    const redirectUri = process.env.NOTION_REDIRECT_URI || `${appUrl}/api/auth/notion/callback`;
+    const redirectUri = configuredRedirectUri || `${requestOrigin}/api/auth/notion/callback`;
     console.log("[Notion Callback] Using redirect URI:", redirectUri);
 
     const { access_token } = await exchangeNotionCode(code, redirectUri);
@@ -66,22 +116,23 @@ export async function GET(request: NextRequest) {
     if (updateError) {
       console.error("[Notion Callback] DB update error:", updateError);
       return NextResponse.redirect(
-        `${appUrl}${returnTo}?error=db_update_failed`
+        buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "db_update_failed" })
       );
     }
 
     console.log("[Notion Callback] Successfully saved token to DB");
 
-    const redirectUrl = new URL(`${appUrl}${returnTo}`);
-    redirectUrl.searchParams.set("notion", "connected");
+    const redirectParams: Record<string, string> = { notion: "connected" };
     if (selectDb) {
-      redirectUrl.searchParams.set("selectDb", "true");
+      redirectParams.selectDb = "true";
     }
-    return NextResponse.redirect(redirectUrl.toString());
+    return NextResponse.redirect(
+      buildRedirectUrl(canonicalOrigin, returnTo, { params: redirectParams })
+    );
   } catch (err) {
     console.error("Notion OAuth error:", err);
     return NextResponse.redirect(
-      `${appUrl}${returnTo}?error=notion_exchange_failed`
+      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_exchange_failed" })
     );
   }
 }

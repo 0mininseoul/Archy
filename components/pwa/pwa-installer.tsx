@@ -50,10 +50,10 @@ export function PWAInstaller() {
             (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
         if (isStandalone) {
-            // localStorage로 이미 기록했는지 체크
-            const alreadyRecorded = localStorage.getItem("pwa_install_recorded");
+            // localStorage 접근이 제한된 환경(iOS webview 등)에서도 크래시 없이 진행
+            const alreadyRecorded = safeGetLocalStorage("pwa_install_recorded");
             if (!alreadyRecorded) {
-                localStorage.setItem("pwa_install_recorded", "true");
+                safeSetLocalStorage("pwa_install_recorded", "true");
                 handleAppInstalled();
             }
         }
@@ -64,6 +64,27 @@ export function PWAInstaller() {
     }, []);
 
     return null;
+}
+
+function safeGetLocalStorage(key: string): string | null {
+    if (typeof window === "undefined") return null;
+
+    try {
+        return window.localStorage.getItem(key);
+    } catch (error) {
+        console.warn(`[PWA] localStorage get failed for key "${key}":`, error);
+        return null;
+    }
+}
+
+function safeSetLocalStorage(key: string, value: string): void {
+    if (typeof window === "undefined") return;
+
+    try {
+        window.localStorage.setItem(key, value);
+    } catch (error) {
+        console.warn(`[PWA] localStorage set failed for key "${key}":`, error);
+    }
 }
 
 /**
