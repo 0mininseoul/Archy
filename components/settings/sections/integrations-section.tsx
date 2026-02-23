@@ -954,17 +954,7 @@ export function IntegrationsSection({
         <div className="p-3 border border-slate-200 rounded-xl">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
-              {notionConnected && saveTarget ? (
-                <NotionItemIcon
-                  iconEmoji={saveTarget.iconEmoji}
-                  iconUrl={saveTarget.iconUrl}
-                  fallbackEmoji={getSaveTargetFallbackEmoji(saveTarget.type)}
-                  alt="Selected Notion save target icon"
-                  className="w-7 h-7 text-xl object-cover flex items-center justify-center"
-                />
-              ) : (
-                <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
-              )}
+              <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.notion.title}</h3>
