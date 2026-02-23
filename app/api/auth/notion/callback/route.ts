@@ -4,6 +4,12 @@ import { exchangeNotionCode } from "@/lib/services/notion";
 
 const DEFAULT_RETURN_TO = "/onboarding";
 
+interface NotionOAuthState {
+  returnTo?: unknown;
+  selectDb?: unknown;
+  traceId?: unknown;
+}
+
 function sanitizeReturnTo(returnTo: unknown, fallback: string = DEFAULT_RETURN_TO): string {
   if (typeof returnTo !== "string") return fallback;
   if (!returnTo.startsWith("/") || returnTo.startsWith("//")) return fallback;
@@ -43,6 +49,21 @@ function buildRedirectUrl(
   return redirectUrl.toString();
 }
 
+function toTraceId(value: unknown): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  return "trace-unknown";
+}
+
+function logWithTrace(traceId: string, message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.warn(`[Notion Callback][${traceId}] ${message}`, details);
+    return;
+  }
+  console.warn(`[Notion Callback][${traceId}] ${message}`);
+}
+
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const { searchParams } = requestUrl;
@@ -56,32 +77,55 @@ export async function GET(request: NextRequest) {
   // Parse returnTo and selectDb from state
   let returnTo = DEFAULT_RETURN_TO;
   let selectDb = false;
+  let traceId = "trace-unknown";
   if (state) {
     try {
-      const parsed = JSON.parse(state);
+      const parsed = JSON.parse(state) as NotionOAuthState;
       returnTo = sanitizeReturnTo(parsed?.returnTo, DEFAULT_RETURN_TO);
       selectDb = parsed?.selectDb === "true" || parsed?.selectDb === true;
+      traceId = toTraceId(parsed?.traceId);
     } catch (e) {
       console.error("[Notion Callback] Failed to parse state:", e);
     }
   }
 
   const configuredRedirectUri = process.env.NOTION_REDIRECT_URI;
+  logWithTrace(traceId, "Received callback", {
+    hasCode: Boolean(code),
+    hasError: Boolean(error),
+    returnTo,
+    selectDb,
+    requestOrigin,
+    canonicalOrigin,
+  });
+
   if (process.env.NODE_ENV === "production" && !configuredRedirectUri) {
+    logWithTrace(traceId, "Missing NOTION_REDIRECT_URI");
     return NextResponse.redirect(
-      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_not_configured" })
+      buildRedirectUrl(canonicalOrigin, returnTo, {
+        errorCode: "notion_not_configured",
+        params: { trace: traceId },
+      })
     );
   }
 
   if (error) {
+    logWithTrace(traceId, "Authorization denied or failed", { notionError: error });
     return NextResponse.redirect(
-      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_auth_failed" })
+      buildRedirectUrl(canonicalOrigin, returnTo, {
+        errorCode: "notion_auth_failed",
+        params: { trace: traceId },
+      })
     );
   }
 
   if (!code) {
+    logWithTrace(traceId, "Missing authorization code");
     return NextResponse.redirect(
-      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "no_code" })
+      buildRedirectUrl(canonicalOrigin, returnTo, {
+        errorCode: "no_code",
+        params: { trace: traceId },
+      })
     );
   }
 
@@ -93,16 +137,22 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.redirect(buildRedirectUrl(canonicalOrigin, "/"));
+      logWithTrace(traceId, "No authenticated user in callback");
+      return NextResponse.redirect(
+        buildRedirectUrl(canonicalOrigin, returnTo, {
+          errorCode: "no_session",
+          params: { trace: traceId },
+        })
+      );
     }
 
     // Exchange code for access token
     // IMPORTANT: The redirect_uri must match exactly what was used in the initial auth request
     const redirectUri = configuredRedirectUri || `${requestOrigin}/api/auth/notion/callback`;
-    console.log("[Notion Callback] Using redirect URI:", redirectUri);
+    logWithTrace(traceId, "Exchanging code", { redirectUri, userId: user.id });
 
     const { access_token } = await exchangeNotionCode(code, redirectUri);
-    console.log("[Notion Callback] Got access token, updating DB for user:", user.id);
+    logWithTrace(traceId, "Received access token, updating user");
 
     // Update user with Notion credentials
     const { error: updateError } = await supabase
@@ -114,25 +164,32 @@ export async function GET(request: NextRequest) {
       .eq("id", user.id);
 
     if (updateError) {
-      console.error("[Notion Callback] DB update error:", updateError);
+      console.error(`[Notion Callback][${traceId}] DB update error:`, updateError);
       return NextResponse.redirect(
-        buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "db_update_failed" })
+        buildRedirectUrl(canonicalOrigin, returnTo, {
+          errorCode: "db_update_failed",
+          params: { trace: traceId },
+        })
       );
     }
 
-    console.log("[Notion Callback] Successfully saved token to DB");
+    logWithTrace(traceId, "Successfully saved token to DB");
 
     const redirectParams: Record<string, string> = { notion: "connected" };
     if (selectDb) {
       redirectParams.selectDb = "true";
     }
+    logWithTrace(traceId, "OAuth completed", { returnTo, selectDb });
     return NextResponse.redirect(
       buildRedirectUrl(canonicalOrigin, returnTo, { params: redirectParams })
     );
   } catch (err) {
-    console.error("Notion OAuth error:", err);
+    console.error(`[Notion Callback][${traceId}] OAuth error:`, err);
     return NextResponse.redirect(
-      buildRedirectUrl(canonicalOrigin, returnTo, { errorCode: "notion_exchange_failed" })
+      buildRedirectUrl(canonicalOrigin, returnTo, {
+        errorCode: "notion_exchange_failed",
+        params: { trace: traceId },
+      })
     );
   }
 }

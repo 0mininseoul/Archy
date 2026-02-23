@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ClientErrorReporter } from "@/components/client-error-reporter";
 
 // Dynamic imports for analytics - loaded after initial render
 const AmplitudeAnalytics = dynamic(
@@ -23,10 +24,10 @@ const PWAInstaller = dynamic(
 export function ClientProviders() {
     return (
         <>
+            <ClientErrorReporter />
             <RegisterServiceWorkerComponent />
             <AmplitudeAnalytics />
             <PWAInstaller />
         </>
     );
 }
-

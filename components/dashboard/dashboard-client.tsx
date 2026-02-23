@@ -11,6 +11,7 @@ import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal
 import { useUserStore } from "@/lib/stores/user-store";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
 import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
+import { safeLocalStorageGetItem, safeLocalStorageSetItem } from "@/lib/safe-storage";
 
 // =============================================================================
 // Component
@@ -53,7 +54,9 @@ export function DashboardClient() {
       if (window.matchMedia("(display-mode: standalone)").matches) return;
       if ((navigator as Navigator & { standalone?: boolean }).standalone === true) return;
 
-      const dismissedTime = localStorage.getItem("pwa_install_dismissed");
+      const dismissedTime = safeLocalStorageGetItem("pwa_install_dismissed", {
+        logPrefix: "Dashboard",
+      });
       if (dismissedTime) {
         const dismissed = parseInt(dismissedTime, 10);
         const now = Date.now();
@@ -61,10 +64,14 @@ export function DashboardClient() {
         if (now - dismissed < twentyFourHours) return;
       }
 
-      const hasSeenPWAModal = localStorage.getItem("pwa_modal_seen");
+      const hasSeenPWAModal = safeLocalStorageGetItem("pwa_modal_seen", {
+        logPrefix: "Dashboard",
+      });
       if (!hasSeenPWAModal) {
         setShowPWAModal(true);
-        localStorage.setItem("pwa_modal_seen", "true");
+        safeLocalStorageSetItem("pwa_modal_seen", "true", {
+          logPrefix: "Dashboard",
+        });
       }
     };
 

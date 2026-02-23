@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
+import { safeLocalStorageSetItem } from "@/lib/safe-storage";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -78,7 +79,9 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
 
   const handleDismiss = () => {
     // 24시간 동안 다시 표시하지 않음
-    localStorage.setItem("pwa_install_dismissed", Date.now().toString());
+    safeLocalStorageSetItem("pwa_install_dismissed", Date.now().toString(), {
+      logPrefix: "DashboardPWAInstallModal",
+    });
     onClose();
   };
 

@@ -33,6 +33,15 @@ interface CustomFormat {
   created_at: string;
 }
 
+const NOTION_OAUTH_ERROR_CODES = new Set([
+  "notion_not_configured",
+  "notion_auth_failed",
+  "notion_exchange_failed",
+  "db_update_failed",
+  "no_code",
+  "no_session",
+]);
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -76,6 +85,7 @@ export function SettingsClient() {
   });
   const [pushEnabled, setPushEnabled] = useState(false);
   const [audioStorageEnabled, setAudioStorageEnabled] = useState(false);
+  const [notionOAuthErrorCode, setNotionOAuthErrorCode] = useState<string | null>(null);
 
   // Fetch user data and custom formats on mount
   useEffect(() => {
@@ -104,6 +114,9 @@ export function SettingsClient() {
       setNotionConnected(connectionStatus.notionConnected);
       setGoogleConnected(connectionStatus.googleConnected);
       setSlackConnected(connectionStatus.slackConnected);
+      if (connectionStatus.notionConnected) {
+        setNotionOAuthErrorCode(null);
+      }
     }
     if (settings) {
       setUsage({
@@ -132,18 +145,32 @@ export function SettingsClient() {
 
   // Handle OAuth callback URL params
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const isNotionJustConnected = params.get("notion") === "connected";
-    const isGoogleJustConnected = params.get("google") === "connected";
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const isNotionJustConnected = params.get("notion") === "connected";
+      const isGoogleJustConnected = params.get("google") === "connected";
+      const errorCode = params.get("error");
+      const isNotionOAuthError = errorCode ? NOTION_OAUTH_ERROR_CODES.has(errorCode) : false;
 
-    if (isNotionJustConnected || isGoogleJustConnected) {
-      window.history.replaceState({}, "", "/dashboard/settings");
+      if (isNotionJustConnected) {
+        setNotionOAuthErrorCode(null);
+      } else if (isNotionOAuthError && errorCode) {
+        setNotionOAuthErrorCode(errorCode);
+      }
 
-      // Invalidate cache and refresh data
-      invalidateUser();
-      setTimeout(() => {
-        fetchUserData();
-      }, 800);
+      if (isNotionJustConnected || isGoogleJustConnected || isNotionOAuthError) {
+        window.history.replaceState({}, "", "/dashboard/settings");
+      }
+
+      if (isNotionJustConnected || isGoogleJustConnected) {
+        // Invalidate cache and refresh data
+        invalidateUser();
+        setTimeout(() => {
+          fetchUserData();
+        }, 800);
+      }
+    } catch (error) {
+      console.warn("[Settings] Failed to parse OAuth callback params:", error);
     }
 
     // Check push notification support
@@ -223,6 +250,7 @@ export function SettingsClient() {
         notionConnected={notionConnected}
         slackConnected={slackConnected}
         googleConnected={googleConnected}
+        notionOAuthErrorCode={notionOAuthErrorCode}
         initialSaveTarget={saveTarget}
         initialGoogleFolder={googleFolder}
         onNotionDisconnect={handleNotionDisconnect}

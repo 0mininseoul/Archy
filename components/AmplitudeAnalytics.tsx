@@ -19,8 +19,11 @@ function getAppContext(): "pwa" | "browser" {
 
 export default function AmplitudeAnalytics() {
     useEffect(() => {
-        if (process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY) {
-            amplitude.init(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY, {
+        const apiKey = process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY;
+        if (!apiKey) return;
+
+        try {
+            amplitude.init(apiKey, {
                 defaultTracking: true,
             });
 
@@ -28,6 +31,8 @@ export default function AmplitudeAnalytics() {
             const appContext = getAppContext();
             const identify = new amplitude.Identify().set("app_context", appContext);
             amplitude.identify(identify);
+        } catch (error) {
+            console.warn("[Amplitude] Initialization failed:", error);
         }
     }, []);
 

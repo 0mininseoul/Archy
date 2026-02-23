@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { safeLocalStorageGetItem, safeLocalStorageSetItem } from "@/lib/safe-storage";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -28,7 +29,9 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
     }
 
     // 24시간 내 닫은 적 있는지 확인
-    const dismissedTime = localStorage.getItem("pwa_install_dismissed");
+    const dismissedTime = safeLocalStorageGetItem("pwa_install_dismissed", {
+      logPrefix: "PWAInstallPrompt",
+    });
     if (dismissedTime) {
       const dismissed = parseInt(dismissedTime, 10);
       const now = Date.now();
@@ -84,7 +87,9 @@ export function PWAInstallPrompt({ onComplete }: { onComplete: () => void }) {
   };
 
   const handleDismiss = () => {
-    localStorage.setItem("pwa_install_dismissed", Date.now().toString());
+    safeLocalStorageSetItem("pwa_install_dismissed", Date.now().toString(), {
+      logPrefix: "PWAInstallPrompt",
+    });
     setShowModal(false);
     onComplete();
   };

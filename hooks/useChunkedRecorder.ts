@@ -5,6 +5,11 @@ import {
   ChunkUploadManager,
   ChunkTranscriptResult,
 } from "@/lib/services/chunk-upload-manager";
+import {
+  safeLocalStorageGetItem,
+  safeLocalStorageRemoveItem,
+  safeLocalStorageSetItem,
+} from "@/lib/safe-storage";
 
 // 청크 설정
 const CHUNK_DURATION_SECONDS = 20; // 20초로 변경 (스마트 재개 시스템)
@@ -225,7 +230,11 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // 세션 저장 함수
   const saveSessionToStorage = useCallback((session: RecordingSession) => {
     try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      safeLocalStorageSetItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify(session),
+        { logPrefix: "ChunkedRecorder" }
+      );
       console.log("[ChunkedRecorder] Session saved to storage:", session);
     } catch (e) {
       console.warn("[ChunkedRecorder] Failed to save session:", e);
@@ -235,7 +244,9 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // 세션 로드 함수
   const loadSessionFromStorage = useCallback((): RecordingSession | null => {
     try {
-      const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+      const stored = safeLocalStorageGetItem(SESSION_STORAGE_KEY, {
+        logPrefix: "ChunkedRecorder",
+      });
       if (stored) {
         return JSON.parse(stored) as RecordingSession;
       }
@@ -248,7 +259,9 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // 세션 삭제 함수
   const clearSessionFromStorage = useCallback(() => {
     try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
+      safeLocalStorageRemoveItem(SESSION_STORAGE_KEY, {
+        logPrefix: "ChunkedRecorder",
+      });
     } catch (e) {
       console.warn("[ChunkedRecorder] Failed to clear session:", e);
     }

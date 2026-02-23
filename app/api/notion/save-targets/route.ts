@@ -1,13 +1,17 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import {
-  getNotionSaveTargets,
+  getNotionFastSaveTargets,
+  getNotionDeepSaveTargetsTick,
+  NotionDeepSyncState,
   NotionSaveTargetsResult,
-} from "@/lib/services/notion";
+} from "@/lib/services/notion-save-targets";
 
 export const runtime = "edge";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 200;
+const SYNC_STATE_TTL_MS = 10 * 60 * 1000;
+const SYNC_STATE_MAX_ENTRIES = 400;
 const DEFAULT_FAST_LIMIT = 15;
 const MAX_LIMIT = 100;
 
@@ -20,9 +24,20 @@ interface SaveTargetsCacheEntry {
   inFlight?: Promise<NotionSaveTargetsResult>;
 }
 
+interface SyncStateCacheEntry {
+  state: NotionDeepSyncState;
+  userId: string;
+  connectionFingerprint: string;
+  expiresAt: number;
+  lastAccessedAt: number;
+}
+
 declare global {
   var __archyNotionSaveTargetsCache:
     | Map<string, SaveTargetsCacheEntry>
+    | undefined;
+  var __archyNotionSaveTargetsSyncStateCache:
+    | Map<string, SyncStateCacheEntry>
     | undefined;
 }
 
@@ -37,6 +52,13 @@ function getServerCache(): Map<string, SaveTargetsCacheEntry> {
     globalThis.__archyNotionSaveTargetsCache = new Map();
   }
   return globalThis.__archyNotionSaveTargetsCache;
+}
+
+function getSyncStateCache(): Map<string, SyncStateCacheEntry> {
+  if (!globalThis.__archyNotionSaveTargetsSyncStateCache) {
+    globalThis.__archyNotionSaveTargetsSyncStateCache = new Map();
+  }
+  return globalThis.__archyNotionSaveTargetsSyncStateCache;
 }
 
 function cleanupServerCache(cache: Map<string, SaveTargetsCacheEntry>) {
@@ -62,6 +84,29 @@ function cleanupServerCache(cache: Map<string, SaveTargetsCacheEntry>) {
   }
 }
 
+function cleanupSyncStateCache(cache: Map<string, SyncStateCacheEntry>) {
+  const now = Date.now();
+
+  for (const [key, entry] of cache.entries()) {
+    if (entry.expiresAt <= now) {
+      cache.delete(key);
+    }
+  }
+
+  if (cache.size <= SYNC_STATE_MAX_ENTRIES) {
+    return;
+  }
+
+  const sortedEntries = Array.from(cache.entries()).sort(
+    (a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt
+  );
+  const removeCount = cache.size - SYNC_STATE_MAX_ENTRIES;
+
+  for (let i = 0; i < removeCount; i++) {
+    cache.delete(sortedEntries[i][0]);
+  }
+}
+
 function parseMode(value: string | null): SaveTargetMode {
   return value === "deep" ? "deep" : "fast";
 }
@@ -74,6 +119,12 @@ function parseLimit(value: string | null, fallback: number): number {
 
 function parseRefresh(value: string | null): boolean {
   return value === "1" || value === "true";
+}
+
+function parseSyncToken(value: string | null): string | null {
+  if (!value) return null;
+  const token = value.trim();
+  return token.length > 0 ? token : null;
 }
 
 function hashStringFNV1a(input: string): string {
@@ -106,6 +157,22 @@ function writeServerCache(cacheKey: string, data: NotionSaveTargetsResult) {
     lastAccessedAt: Date.now(),
   });
   cleanupServerCache(cache);
+}
+
+function readServerCache(cacheKey: string): NotionSaveTargetsResult | null {
+  const cache = getServerCache();
+  cleanupServerCache(cache);
+
+  const entry = cache.get(cacheKey);
+  if (!entry?.data) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(cacheKey);
+    return null;
+  }
+  entry.lastAccessedAt = Date.now();
+  return entry.data;
 }
 
 async function getCachedOrFetch(
@@ -162,6 +229,60 @@ async function getCachedOrFetch(
   }
 }
 
+function createSyncToken(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `sync_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+function readSyncState(
+  token: string,
+  userId: string,
+  connectionFingerprint: string
+): NotionDeepSyncState | null {
+  const cache = getSyncStateCache();
+  cleanupSyncStateCache(cache);
+
+  const entry = cache.get(token);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(token);
+    return null;
+  }
+  if (entry.userId !== userId || entry.connectionFingerprint !== connectionFingerprint) {
+    cache.delete(token);
+    return null;
+  }
+
+  entry.lastAccessedAt = Date.now();
+  return entry.state;
+}
+
+function writeSyncState(
+  token: string,
+  userId: string,
+  connectionFingerprint: string,
+  state: NotionDeepSyncState
+) {
+  const cache = getSyncStateCache();
+  cache.set(token, {
+    state,
+    userId,
+    connectionFingerprint,
+    expiresAt: Date.now() + SYNC_STATE_TTL_MS,
+    lastAccessedAt: Date.now(),
+  });
+  cleanupSyncStateCache(cache);
+}
+
+function deleteSyncState(token: string | null) {
+  if (!token) return;
+  const cache = getSyncStateCache();
+  cache.delete(token);
+}
+
 // GET /api/notion/save-targets - List save targets with fast/deep mode
 export const GET = withAuth<SaveTargetsResponseData>(
   async ({ user, supabase, request }) => {
@@ -183,6 +304,8 @@ export const GET = withAuth<SaveTargetsResponseData>(
       DEFAULT_FAST_LIMIT
     );
     const refresh = parseRefresh(request?.nextUrl.searchParams.get("refresh") || null);
+    const syncTokenParam = parseSyncToken(request?.nextUrl.searchParams.get("sync_token") || null);
+
     const connectionFingerprint = buildConnectionFingerprint({
       token: userData.notion_access_token,
       targetId: userData.notion_database_id ?? null,
@@ -190,39 +313,78 @@ export const GET = withAuth<SaveTargetsResponseData>(
       targetTitle: userData.notion_save_target_title ?? null,
     });
 
-    const cacheKey =
-      mode === "fast"
-        ? `${user.id}:notion-save-targets:${connectionFingerprint}:fast:${limit}`
-        : `${user.id}:notion-save-targets:${connectionFingerprint}:deep`;
+    const fastCacheKey = `${user.id}:notion-save-targets:${connectionFingerprint}:fast:${limit}`;
+    const deepCacheKey = `${user.id}:notion-save-targets:${connectionFingerprint}:deep`;
 
-    if (refresh) {
-      const freshData = await getNotionSaveTargets(userData.notion_access_token, {
-        mode,
-        limit,
-      });
-      writeServerCache(cacheKey, freshData);
+    if (mode === "fast") {
+      if (refresh) {
+        const freshData = await getNotionFastSaveTargets(userData.notion_access_token, {
+          limit,
+        });
+        writeServerCache(fastCacheKey, freshData);
+        return successResponse({
+          ...freshData,
+          meta: {
+            ...freshData.meta,
+            fromCache: false,
+          },
+        });
+      }
+
+      const { data, fromCache } = await getCachedOrFetch(fastCacheKey, () =>
+        getNotionFastSaveTargets(userData.notion_access_token, { limit })
+      );
 
       return successResponse({
-        ...freshData,
+        ...data,
         meta: {
-          ...freshData.meta,
-          fromCache: false,
+          ...data.meta,
+          fromCache,
         },
       });
     }
 
-    const { data, fromCache } = await getCachedOrFetch(cacheKey, () =>
-      getNotionSaveTargets(userData.notion_access_token, {
-        mode,
-        limit,
-      })
-    );
+    // deep mode
+    if (!refresh && !syncTokenParam) {
+      const cachedDeep = readServerCache(deepCacheKey);
+      if (cachedDeep && !cachedDeep.meta.partial) {
+        return successResponse({
+          ...cachedDeep,
+          meta: {
+            ...cachedDeep.meta,
+            fromCache: true,
+          },
+        });
+      }
+    }
+
+    let syncState: NotionDeepSyncState | undefined;
+    if (!refresh && syncTokenParam) {
+      syncState = readSyncState(syncTokenParam, user.id, connectionFingerprint) || undefined;
+    } else if (refresh && syncTokenParam) {
+      deleteSyncState(syncTokenParam);
+    }
+
+    const tick = await getNotionDeepSaveTargetsTick(userData.notion_access_token, {
+      state: syncState,
+      preferredTargetId: userData.notion_database_id ?? null,
+    });
+
+    let responseSyncToken: string | undefined;
+    if (tick.nextState) {
+      responseSyncToken = syncTokenParam || createSyncToken();
+      writeSyncState(responseSyncToken, user.id, connectionFingerprint, tick.nextState);
+    } else {
+      deleteSyncState(syncTokenParam);
+      writeServerCache(deepCacheKey, tick.result);
+    }
 
     return successResponse({
-      ...data,
+      ...tick.result,
       meta: {
-        ...data.meta,
-        fromCache,
+        ...tick.result.meta,
+        sync_token: responseSyncToken,
+        fromCache: false,
       },
     });
   }

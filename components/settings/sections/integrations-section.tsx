@@ -9,6 +9,8 @@ interface NotionDatabase {
   title: string;
   url?: string;
   last_edited_time?: string;
+  parent_type?: string;
+  parent_page_id?: string | null;
 }
 
 interface NotionPage {
@@ -16,6 +18,8 @@ interface NotionPage {
   title: string;
   url?: string;
   last_edited_time?: string;
+  parent_type?: string;
+  parent_page_id?: string | null;
 }
 
 interface NotionSaveTarget {
@@ -40,10 +44,45 @@ type NotionDropdownState =
 interface NotionSaveTargetsPayload {
   pages: NotionPage[];
   databases: NotionDatabase[];
+  root_page_ids?: string[];
+  root_database_ids?: string[];
   meta?: {
     mode: "fast" | "deep";
     partial?: boolean;
+    partial_reason?: string;
     fromCache?: boolean;
+    fetchedAt?: string;
+    scope?: "descendants";
+    sync_token?: string;
+    progress?: {
+      roots: number;
+      visited_nodes: number;
+      pending_nodes: number;
+    };
+  };
+}
+
+interface NotionSearchResultItem {
+  type: "page" | "database" | "database_item";
+  id: string;
+  title: string;
+  url: string;
+  source: "index" | "remote_search" | "db_query";
+  last_edited_time: string;
+  parent_type?: string;
+  parent_page_id?: string | null;
+  database_id?: string;
+}
+
+interface NotionSearchPayload {
+  results: NotionSearchResultItem[];
+  meta?: {
+    fromCache?: boolean;
+    partial?: boolean;
+    from_index?: number;
+    from_remote_search?: number;
+    from_db_query?: number;
+    scope_filtered?: boolean;
     fetchedAt?: string;
   };
 }
@@ -157,10 +196,42 @@ function clearNotionServerRefreshPending() {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function resolveNotionOAuthErrorMessage(
+  errorCode: string | null | undefined,
+  t: ReturnType<typeof useI18n>["t"]
+): string | null {
+  if (!errorCode) return null;
+
+  const messages = t.settings.integrations.notion.oauthErrors;
+  switch (errorCode) {
+    case "no_session":
+      return messages.noSession;
+    case "notion_not_configured":
+      return messages.notConfigured;
+    case "notion_auth_failed":
+      return messages.authFailed;
+    case "notion_exchange_failed":
+      return messages.exchangeFailed;
+    case "db_update_failed":
+      return messages.dbUpdateFailed;
+    case "no_code":
+      return messages.noCode;
+    default:
+      return messages.generic;
+  }
+}
+
 interface IntegrationsSectionProps {
   notionConnected: boolean;
   slackConnected: boolean;
   googleConnected: boolean;
+  notionOAuthErrorCode?: string | null;
   initialSaveTarget: NotionSaveTarget | null;
   initialGoogleFolder: { id: string | null; name: string | null };
   onNotionDisconnect: () => void;
@@ -171,6 +242,7 @@ export function IntegrationsSection({
   notionConnected: initialNotionConnected,
   slackConnected,
   googleConnected: initialGoogleConnected,
+  notionOAuthErrorCode,
   initialSaveTarget,
   initialGoogleFolder,
   onNotionDisconnect,
@@ -191,6 +263,17 @@ export function IntegrationsSection({
   const [notionDropdownError, setNotionDropdownError] = useState<string | null>(null);
   const [notionDeepSyncError, setNotionDeepSyncError] = useState<string | null>(null);
   const notionRequestIdRef = useRef(0);
+  const notionDropdownOpenRef = useRef(false);
+  const [notionSyncToken, setNotionSyncToken] = useState<string | null>(null);
+  const [notionDeepProgress, setNotionDeepProgress] = useState<{
+    roots: number;
+    visited_nodes: number;
+    pending_nodes: number;
+  } | null>(null);
+  const [notionSearchResults, setNotionSearchResults] = useState<NotionSearchResultItem[]>([]);
+  const [notionSearchLoading, setNotionSearchLoading] = useState(false);
+  const [notionSearchError, setNotionSearchError] = useState<string | null>(null);
+  const notionSearchRequestIdRef = useRef(0);
 
   // Manual Notion connection states
   const [showManualModal, setShowManualModal] = useState(false);
@@ -230,6 +313,17 @@ export function IntegrationsSection({
   }, [initialGoogleFolder]);
 
   useEffect(() => {
+    notionDropdownOpenRef.current = showSaveTargetDropdown;
+    if (!showSaveTargetDropdown) {
+      setNotionSyncToken(null);
+      setNotionDeepProgress(null);
+      setNotionSearchResults([]);
+      setNotionSearchLoading(false);
+      setNotionSearchError(null);
+    }
+  }, [showSaveTargetDropdown]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     try {
@@ -241,11 +335,61 @@ export function IntegrationsSection({
         setNotionDropdownState("idle");
         setNotionDropdownError(null);
         setNotionDeepSyncError(null);
+        setNotionDeepProgress(null);
       }
     } catch (error) {
       console.warn("[Notion Save Targets] Failed to inspect URL params:", error);
     }
   }, []);
+
+  useEffect(() => {
+    if (!showSaveTargetDropdown || !notionConnected) return;
+
+    const query = saveTargetSearch.trim();
+    if (!query) {
+      setNotionSearchResults([]);
+      setNotionSearchLoading(false);
+      setNotionSearchError(null);
+      return;
+    }
+
+    const requestId = notionSearchRequestIdRef.current + 1;
+    notionSearchRequestIdRef.current = requestId;
+    setNotionSearchLoading(true);
+    setNotionSearchError(null);
+
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/notion/save-targets/search?q=${encodeURIComponent(query)}&limit=30&include_db_items=1`
+        );
+        const payload = await response.json();
+
+        if (requestId !== notionSearchRequestIdRef.current) return;
+
+        if (!response.ok || !payload?.success || !payload?.data) {
+          throw new Error(payload?.error || "Failed to search Notion targets");
+        }
+
+        const data = payload.data as NotionSearchPayload;
+        setNotionSearchResults(Array.isArray(data.results) ? data.results : []);
+        setNotionSearchError(null);
+      } catch (error) {
+        console.error("Failed to search Notion save targets:", error);
+        if (requestId !== notionSearchRequestIdRef.current) return;
+        setNotionSearchResults([]);
+        setNotionSearchError(t.settings.integrations.notion.dropdown.searchFailed);
+      } finally {
+        if (requestId === notionSearchRequestIdRef.current) {
+          setNotionSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [saveTargetSearch, showSaveTargetDropdown, notionConnected, t.settings.integrations.notion.dropdown.searchFailed]);
 
   const handleConnect = (service: "notion" | "slack" | "google") => {
     window.location.href = `/api/auth/${service}?returnTo=/dashboard/settings`;
@@ -258,16 +402,30 @@ export function IntegrationsSection({
   };
 
   const fetchNotionSaveTargets = async (
-    mode: "fast" | "deep"
+    mode: "fast" | "deep",
+    options?: {
+      syncToken?: string | null;
+      refresh?: boolean;
+      skipClientCache?: boolean;
+    }
   ): Promise<NotionSaveTargetsPayload> => {
-    const cached = readNotionSaveTargetsCache(mode);
-    if (cached) {
-      return cached;
+    if (!options?.skipClientCache && !options?.syncToken && !options?.refresh) {
+      const cached = readNotionSaveTargetsCache(mode);
+      if (cached) {
+        return cached;
+      }
     }
 
-    const forceRefresh = shouldForceNotionServerRefresh();
+    const forceRefresh = Boolean(options?.refresh) || shouldForceNotionServerRefresh();
+    const searchParams = new URLSearchParams({
+      mode,
+      limit: "15",
+    });
+    if (forceRefresh) searchParams.set("refresh", "1");
+    if (options?.syncToken) searchParams.set("sync_token", options.syncToken);
+
     const response = await fetch(
-      `/api/notion/save-targets?mode=${mode}&limit=15${forceRefresh ? "&refresh=1" : ""}`
+      `/api/notion/save-targets?${searchParams.toString()}`
     );
     const payload = await response.json();
 
@@ -279,12 +437,90 @@ export function IntegrationsSection({
     }
 
     const data = payload.data as NotionSaveTargetsPayload;
-    writeNotionSaveTargetsCache(mode, data);
+
+    if (mode === "fast") {
+      writeNotionSaveTargetsCache("fast", data);
+    } else if (!data.meta?.partial) {
+      writeNotionSaveTargetsCache("deep", data);
+    }
+
     return data;
+  };
+
+  const runDeepSyncLoop = async (
+    requestId: number,
+    hasData: boolean,
+    initialSyncToken?: string | null
+  ) => {
+    setNotionDropdownState("deep_loading");
+    let syncToken = initialSyncToken || null;
+    let iteration = 0;
+
+    while (iteration < 30) {
+      if (requestId !== notionRequestIdRef.current || !notionDropdownOpenRef.current) {
+        return;
+      }
+
+      try {
+        const deepPayload = await fetchNotionSaveTargets("deep", {
+          syncToken,
+          skipClientCache: true,
+          refresh: iteration === 0 && shouldForceNotionServerRefresh(),
+        });
+        if (requestId !== notionRequestIdRef.current || !notionDropdownOpenRef.current) {
+          return;
+        }
+
+        applyNotionSaveTargets(deepPayload);
+        syncToken = deepPayload.meta?.sync_token ?? null;
+        setNotionSyncToken(syncToken);
+        setNotionDeepProgress(deepPayload.meta?.progress || null);
+        setNotionDropdownError(null);
+        setNotionDeepSyncError(null);
+
+        if (!deepPayload.meta?.partial || !syncToken) {
+          setNotionDropdownState("deep_ready");
+          clearNotionServerRefreshPending();
+          setNotionSyncToken(null);
+          setNotionDeepProgress(null);
+          return;
+        }
+
+        setNotionDropdownState("deep_loading");
+      } catch (error) {
+        console.error("Failed to fetch Notion deep save targets:", error);
+        if (requestId !== notionRequestIdRef.current || !notionDropdownOpenRef.current) {
+          return;
+        }
+
+        if (!hasData && databases.length === 0 && pages.length === 0) {
+          setNotionDropdownState("error");
+          setNotionDropdownError(t.settings.integrations.notion.dropdown.loadFailed);
+        } else {
+          setNotionDropdownState("fast_ready");
+          setNotionDeepSyncError(t.settings.integrations.notion.dropdown.syncFailed);
+        }
+        setNotionDeepProgress(null);
+        return;
+      }
+
+      iteration += 1;
+      await sleep(350);
+    }
+
+    if (requestId === notionRequestIdRef.current && notionDropdownOpenRef.current) {
+      setNotionDropdownState("fast_ready");
+      setNotionDeepSyncError(t.settings.integrations.notion.dropdown.syncFailed);
+      setNotionDeepProgress(null);
+    }
   };
 
   const openSaveTargetDropdown = async () => {
     setShowSaveTargetDropdown(true);
+    setSaveTargetSearch("");
+    setNotionSearchResults([]);
+    setNotionSearchError(null);
+    setNotionSearchLoading(false);
     setNotionDropdownError(null);
     setNotionDeepSyncError(null);
 
@@ -294,9 +530,10 @@ export function IntegrationsSection({
     let hasData = databases.length > 0 || pages.length > 0;
 
     const deepCached = readNotionSaveTargetsCache("deep");
-    if (deepCached) {
+    if (deepCached && !deepCached.meta?.partial) {
       applyNotionSaveTargets(deepCached);
       setNotionDropdownState("deep_ready");
+      setNotionDeepProgress(null);
       return;
     }
 
@@ -312,7 +549,9 @@ export function IntegrationsSection({
         if (requestId !== notionRequestIdRef.current) return;
         applyNotionSaveTargets(fastPayload);
         hasData = true;
+        clearNotionServerRefreshPending();
         setNotionDropdownState("fast_ready");
+        setNotionDeepProgress(null);
       } catch (error) {
         console.error("Failed to fetch Notion fast save targets:", error);
         if (requestId !== notionRequestIdRef.current) return;
@@ -324,30 +563,11 @@ export function IntegrationsSection({
           setNotionDropdownState("fast_ready");
           setNotionDropdownError(t.settings.integrations.notion.dropdown.loadFailed);
         }
+        setNotionDeepProgress(null);
       }
     }
 
-    setNotionDropdownState("deep_loading");
-    try {
-      const deepPayload = await fetchNotionSaveTargets("deep");
-      if (requestId !== notionRequestIdRef.current) return;
-      applyNotionSaveTargets(deepPayload);
-      clearNotionServerRefreshPending();
-      setNotionDropdownState("deep_ready");
-      setNotionDropdownError(null);
-      setNotionDeepSyncError(null);
-    } catch (error) {
-      console.error("Failed to fetch Notion deep save targets:", error);
-      if (requestId !== notionRequestIdRef.current) return;
-
-      if (!hasData) {
-        setNotionDropdownState("error");
-        setNotionDropdownError(t.settings.integrations.notion.dropdown.loadFailed);
-      } else {
-        setNotionDropdownState("fast_ready");
-        setNotionDeepSyncError(t.settings.integrations.notion.dropdown.syncFailed);
-      }
-    }
+    void runDeepSyncLoop(requestId, hasData, notionSyncToken);
   };
 
   const selectSaveTarget = async (target: NotionSaveTarget) => {
@@ -387,6 +607,8 @@ export function IntegrationsSection({
         setNotionDropdownState("idle");
         setNotionDropdownError(null);
         setNotionDeepSyncError(null);
+        setNotionDeepProgress(null);
+        setNotionSyncToken(null);
         onNotionDisconnect();
       }
     } catch (error) {
@@ -416,6 +638,9 @@ export function IntegrationsSection({
         clearNotionSaveTargetsCache();
         setNotionConnected(true);
         setSaveTarget(data.data.saveTarget);
+        setNotionDropdownState("idle");
+        setNotionDeepProgress(null);
+        setNotionSyncToken(null);
         setShowManualModal(false);
         setManualToken("");
         setManualPageUrl("");
@@ -559,17 +784,60 @@ export function IntegrationsSection({
     }
   };
 
-  const normalizedSearch = saveTargetSearch.toLowerCase();
-  const filteredDatabases = databases.filter((db) =>
+  const normalizedSearch = saveTargetSearch.trim().toLowerCase();
+  const localFilteredDatabases = databases.filter((db) =>
     (db.title || "").toLowerCase().includes(normalizedSearch)
   );
-  const filteredPages = pages.filter((page) =>
+  const localFilteredPages = pages.filter((page) =>
     (page.title || "").toLowerCase().includes(normalizedSearch)
   );
+  const isSearchMode = normalizedSearch.length > 0;
+  const localSearchResults: NotionSearchResultItem[] = isSearchMode
+    ? [
+        ...localFilteredDatabases.map((database) => ({
+          type: "database" as const,
+          id: database.id,
+          title: database.title,
+          url: database.url || `https://notion.so/${database.id.replace(/-/g, "")}`,
+          source: "index" as const,
+          last_edited_time: database.last_edited_time || new Date(0).toISOString(),
+          parent_type: database.parent_type,
+          parent_page_id: database.parent_page_id ?? null,
+        })),
+        ...localFilteredPages.map((page) => ({
+          type: "page" as const,
+          id: page.id,
+          title: page.title,
+          url: page.url || `https://notion.so/${page.id.replace(/-/g, "")}`,
+          source: "index" as const,
+          last_edited_time: page.last_edited_time || new Date(0).toISOString(),
+          parent_type: page.parent_type,
+          parent_page_id: page.parent_page_id ?? null,
+        })),
+      ]
+    : [];
+
+  const mergedSearchResults = isSearchMode
+    ? [...localSearchResults, ...notionSearchResults]
+        .filter((result, index, list) => {
+          const key = `${result.type}:${result.id}`;
+          return (
+            list.findIndex((candidate) => `${candidate.type}:${candidate.id}` === key) === index
+          );
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.last_edited_time).getTime() - new Date(a.last_edited_time).getTime()
+        )
+    : [];
+
   const searchTermMatchesExisting =
-    saveTargetSearch.trim() !== "" &&
-    (filteredDatabases.some((db) => (db.title || "").toLowerCase() === normalizedSearch) ||
-      filteredPages.some((page) => (page.title || "").toLowerCase() === normalizedSearch));
+    isSearchMode &&
+    mergedSearchResults.some(
+      (result) =>
+        (result.type === "page" || result.type === "database") &&
+        (result.title || "").toLowerCase() === normalizedSearch
+    );
 
   const hasSaveTargets = databases.length > 0 || pages.length > 0;
   const showBlockingLoadState =
@@ -578,6 +846,11 @@ export function IntegrationsSection({
     (notionDropdownState === "fast_loading" || notionDropdownState === "deep_loading");
   const showDeepSyncStatus = hasSaveTargets && notionDropdownState === "deep_loading";
   const showLoadErrorState = !hasSaveTargets && notionDropdownState === "error";
+  const pendingNodes = Math.max(0, notionDeepProgress?.pending_nodes || 0);
+  const notionOAuthErrorMessage = resolveNotionOAuthErrorMessage(
+    notionOAuthErrorCode,
+    t
+  );
 
   return (
     <div className="card p-4">
@@ -617,6 +890,20 @@ export function IntegrationsSection({
               </button>
             )}
           </div>
+
+          {notionOAuthErrorMessage && (
+            <div className="mt-3 px-3 py-2.5 rounded-lg border border-amber-200 bg-amber-50">
+              <p className="text-xs text-amber-800">{notionOAuthErrorMessage}</p>
+              {!notionConnected && (
+                <button
+                  onClick={() => handleConnect("notion")}
+                  className="mt-2 px-2.5 py-1.5 bg-amber-100 text-amber-900 rounded-md text-xs font-medium hover:bg-amber-200 transition-colors"
+                >
+                  {t.settings.integrations.notion.oauthErrors.retry}
+                </button>
+              )}
+            </div>
+          )}
 
           {notionConnected && (
             <div className="mt-3 relative">
@@ -661,7 +948,21 @@ export function IntegrationsSection({
                       <>
                         {showDeepSyncStatus && (
                           <div className="px-3 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100">
-                            {t.settings.integrations.notion.dropdown.syncing}
+                            {pendingNodes > 0
+                              ? `${t.settings.integrations.notion.dropdown.syncing} (${pendingNodes})`
+                              : t.settings.integrations.notion.dropdown.syncing}
+                          </div>
+                        )}
+
+                        {isSearchMode && notionSearchLoading && (
+                          <div className="px-3 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100">
+                            {t.settings.integrations.notion.dropdown.searching}
+                          </div>
+                        )}
+
+                        {isSearchMode && notionSearchError && (
+                          <div className="px-3 py-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
+                            {notionSearchError}
                           </div>
                         )}
 
@@ -699,55 +1000,110 @@ export function IntegrationsSection({
                           </div>
                         )}
 
-                        {filteredDatabases.length > 0 && (
-                          <div>
-                            <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
-                              데이터베이스
+                        {isSearchMode ? (
+                          mergedSearchResults.length > 0 ? (
+                            <div>
+                              <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
+                                {t.settings.integrations.notion.dropdown.searchResults}
+                              </div>
+                              {mergedSearchResults.map((result) => (
+                                <button
+                                  key={`${result.type}:${result.id}`}
+                                  onClick={() =>
+                                    selectSaveTarget({
+                                      type: result.type === "database" ? "database" : "page",
+                                      id: result.id,
+                                      title: result.title,
+                                    })
+                                  }
+                                  className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
+                                >
+                                  <span>
+                                    {result.type === "database"
+                                      ? "📊"
+                                      : result.type === "database_item"
+                                        ? "🧩"
+                                        : "📄"}
+                                  </span>
+                                  <span className="truncate flex-1">{result.title}</span>
+                                  {result.type === "database_item" && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                                      {t.settings.integrations.notion.dropdown.dbItemLabel}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
                             </div>
-                            {filteredDatabases.map((db) => (
-                              <button
-                                key={db.id}
-                                onClick={() => selectSaveTarget({ type: "database", id: db.id, title: db.title })}
-                                className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
-                              >
-                                <span>📊</span>
-                                <span className="truncate">{db.title}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        {filteredPages.length > 0 && (
-                          <div>
-                            <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
-                              페이지
-                            </div>
-                            {filteredPages.map((page) => (
-                              <button
-                                key={page.id}
-                                onClick={() => selectSaveTarget({ type: "page", id: page.id, title: page.title })}
-                                className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
-                              >
-                                <span>📄</span>
-                                <span className="truncate">{page.title}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        {showLoadErrorState ? (
-                          <div className="px-3 py-4 text-center text-sm text-slate-500">
-                            {notionDropdownError ||
-                              t.settings.integrations.notion.dropdown.loadFailed}
-                          </div>
-                        ) : (
-                          filteredDatabases.length === 0 &&
-                          filteredPages.length === 0 &&
-                          !saveTargetSearch.trim() && (
-                            <div className="px-3 py-4 text-center text-sm text-slate-500">
-                              연결된 페이지나 데이터베이스가 없습니다
-                            </div>
+                          ) : (
+                            !notionSearchLoading && (
+                              <div className="px-3 py-4 text-center text-sm text-slate-500">
+                                {t.settings.integrations.notion.dropdown.noSearchResults}
+                              </div>
+                            )
                           )
+                        ) : (
+                          <>
+                            {localFilteredDatabases.length > 0 && (
+                              <div>
+                                <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
+                                  데이터베이스
+                                </div>
+                                {localFilteredDatabases.map((db) => (
+                                  <button
+                                    key={db.id}
+                                    onClick={() =>
+                                      selectSaveTarget({ type: "database", id: db.id, title: db.title })
+                                    }
+                                    className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
+                                  >
+                                    <span>📊</span>
+                                    <span className="truncate">{db.title}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {localFilteredPages.length > 0 && (
+                              <div>
+                                <div className="px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-50">
+                                  페이지
+                                </div>
+                                {localFilteredPages.map((page) => (
+                                  <button
+                                    key={page.id}
+                                    onClick={() =>
+                                      selectSaveTarget({ type: "page", id: page.id, title: page.title })
+                                    }
+                                    className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
+                                  >
+                                    <span>📄</span>
+                                    <span className="truncate">{page.title}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {showLoadErrorState ? (
+                              <div className="px-3 py-4 text-center text-sm text-slate-500">
+                                {notionDropdownError ||
+                                  t.settings.integrations.notion.dropdown.loadFailed}
+                              </div>
+                            ) : (
+                              localFilteredDatabases.length === 0 &&
+                              localFilteredPages.length === 0 &&
+                              !saveTargetSearch.trim() && (
+                                <div className="px-3 py-4 text-center text-sm text-slate-500">
+                                  연결된 페이지나 데이터베이스가 없습니다
+                                </div>
+                              )
+                            )}
+                          </>
+                        )}
+
+                        {showDeepSyncStatus && (
+                          <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">
+                            {t.settings.integrations.notion.dropdown.partialSync}
+                          </div>
                         )}
                       </>
                     )}
