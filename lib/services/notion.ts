@@ -1,6 +1,66 @@
 // Notion API using fetch for Edge Runtime compatibility
 const NOTION_VERSION = "2022-06-28";
 const NOTION_API_BASE = "https://api.notion.com/v1";
+const NOTION_EXPLORE_BLOCK_TIMEOUT_MS = 1500;
+const DEFAULT_DEEP_TIMEOUT_MS = 10000;
+const DEFAULT_DEEP_MAX_DEPTH = 4;
+const DEFAULT_DEEP_CONCURRENCY = 4;
+const DEFAULT_FAST_LIMIT = 15;
+
+const BLOCKS_WITH_CHILDREN = [
+  "child_page",
+  "column_list",
+  "column",
+  "toggle",
+  "bulleted_list_item",
+  "numbered_list_item",
+  "to_do",
+  "quote",
+  "callout",
+  "synced_block",
+];
+
+export interface NotionDatabaseSummary {
+  id: string;
+  title: string;
+  url: string;
+  last_edited_time: string;
+}
+
+export interface NotionPageSummary {
+  id: string;
+  title: string;
+  url: string;
+  last_edited_time: string;
+}
+
+export interface NotionSaveTargetsResult {
+  pages: NotionPageSummary[];
+  databases: NotionDatabaseSummary[];
+  meta: {
+    mode: "fast" | "deep";
+    partial: boolean;
+    fetchedAt: string;
+  };
+}
+
+interface NotionSaveTargetsOptions {
+  mode: "fast" | "deep";
+  limit?: number;
+  timeoutMs?: number;
+  maxDepth?: number;
+  concurrency?: number;
+}
+
+interface Deadline {
+  hasTime: () => boolean;
+  remaining: () => number;
+}
+
+interface NotionBlockTask {
+  id: string;
+  depth: number;
+}
 
 function getHeaders(accessToken: string): Record<string, string> {
   return {
@@ -23,6 +83,122 @@ function extractPageTitle(properties: Record<string, any> | undefined): string {
   }
 
   return "Untitled";
+}
+
+function toIsoDate(value: unknown): string {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return new Date(0).toISOString();
+}
+
+function sortByLastEditedDesc<T extends { last_edited_time: string }>(items: T[]): T[] {
+  return [...items].sort(
+    (a, b) =>
+      new Date(b.last_edited_time).getTime() -
+      new Date(a.last_edited_time).getTime()
+  );
+}
+
+function createDeadline(timeoutMs: number): Deadline {
+  const end = Date.now() + timeoutMs;
+  return {
+    hasTime: () => Date.now() < end,
+    remaining: () => Math.max(0, end - Date.now()),
+  };
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function searchNotionObjects(
+  accessToken: string,
+  objectType: "database" | "page",
+  pageSize: number,
+  timeoutMs?: number
+): Promise<any[]> {
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: getHeaders(accessToken),
+    body: JSON.stringify({
+      filter: {
+        property: "object",
+        value: objectType,
+      },
+      sort: {
+        direction: "descending",
+        timestamp: "last_edited_time",
+      },
+      page_size: pageSize,
+    }),
+  };
+
+  const response = timeoutMs
+    ? await fetchWithTimeout(`${NOTION_API_BASE}/search`, requestInit, timeoutMs)
+    : await fetch(`${NOTION_API_BASE}/search`, requestInit);
+
+  if (!response.ok) {
+    throw new Error(`Failed to search Notion ${objectType}s`);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data?.results) ? data.results : [];
+}
+
+function mapNotionDatabase(database: any): NotionDatabaseSummary {
+  return {
+    id: database.id,
+    title: database.title?.[0]?.plain_text || "Untitled",
+    url: database.url || `https://notion.so/${database.id.replace(/-/g, "")}`,
+    last_edited_time: toIsoDate(database.last_edited_time),
+  };
+}
+
+function mapNotionPage(page: any): NotionPageSummary {
+  return {
+    id: page.id,
+    title: extractPageTitle(page.properties),
+    url: page.url || `https://notion.so/${page.id.replace(/-/g, "")}`,
+    last_edited_time: toIsoDate(page.last_edited_time),
+  };
+}
+
+async function fetchBlockChildrenWithTimeout(
+  accessToken: string,
+  blockId: string,
+  timeoutMs: number
+): Promise<any[] | null> {
+  try {
+    const response = await fetchWithTimeout(
+      `${NOTION_API_BASE}/blocks/${blockId}/children?page_size=100`,
+      {
+        method: "GET",
+        headers: getHeaders(accessToken),
+      },
+      timeoutMs
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    return Array.isArray(data?.results) ? data.results : [];
+  } catch {
+    return null;
+  }
 }
 
 export async function createNotionPage(
@@ -357,143 +533,214 @@ function convertMarkdownToBlocks(markdown: string): any[] {
   return blocks;
 }
 
+async function getFastNotionSaveTargets(
+  accessToken: string,
+  limit: number
+): Promise<NotionSaveTargetsResult> {
+  let partial = false;
+  const databaseMap = new Map<string, NotionDatabaseSummary>();
+  const pageMap = new Map<string, NotionPageSummary>();
+
+  const [databaseSearchResult, pageSearchResult] = await Promise.allSettled([
+    searchNotionObjects(accessToken, "database", 100),
+    searchNotionObjects(accessToken, "page", 100),
+  ]);
+
+  if (databaseSearchResult.status === "fulfilled") {
+    databaseSearchResult.value.forEach((database) => {
+      const mapped = mapNotionDatabase(database);
+      databaseMap.set(mapped.id, mapped);
+    });
+  } else {
+    partial = true;
+    console.warn("[Notion] Fast database search failed:", databaseSearchResult.reason);
+  }
+
+  if (pageSearchResult.status === "fulfilled") {
+    pageSearchResult.value.forEach((page) => {
+      const mapped = mapNotionPage(page);
+      pageMap.set(mapped.id, mapped);
+    });
+  } else {
+    partial = true;
+    console.warn("[Notion] Fast page search failed:", pageSearchResult.reason);
+  }
+
+  if (databaseMap.size === 0 && pageMap.size === 0) {
+    throw new Error("Failed to fetch save targets");
+  }
+
+  const combined = [
+    ...Array.from(databaseMap.values()).map((database) => ({ ...database, type: "database" as const })),
+    ...Array.from(pageMap.values()).map((page) => ({ ...page, type: "page" as const })),
+  ];
+
+  const limited = sortByLastEditedDesc(combined).slice(0, limit);
+
+  return {
+    databases: limited
+      .filter((item) => item.type === "database")
+      .map(({ type: _type, ...database }) => database),
+    pages: limited
+      .filter((item) => item.type === "page")
+      .map(({ type: _type, ...page }) => page),
+    meta: {
+      mode: "fast",
+      partial,
+      fetchedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function getDeepNotionSaveTargets(
+  accessToken: string,
+  options?: Pick<NotionSaveTargetsOptions, "timeoutMs" | "maxDepth" | "concurrency">
+): Promise<NotionSaveTargetsResult> {
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_DEEP_TIMEOUT_MS;
+  const maxDepth = options?.maxDepth ?? DEFAULT_DEEP_MAX_DEPTH;
+  const concurrency = options?.concurrency ?? DEFAULT_DEEP_CONCURRENCY;
+  const deadline = createDeadline(timeoutMs);
+  const databaseMap = new Map<string, NotionDatabaseSummary>();
+  const pageMap = new Map<string, NotionPageSummary>();
+  const visitedBlocks = new Set<string>();
+  const queue: NotionBlockTask[] = [];
+  let partial = false;
+
+  const searchTimeout = Math.max(300, Math.min(2500, deadline.remaining()));
+  const [databaseSearchResult, pageSearchResult] = await Promise.allSettled([
+    searchNotionObjects(accessToken, "database", 100, searchTimeout),
+    searchNotionObjects(accessToken, "page", 100, searchTimeout),
+  ]);
+
+  if (databaseSearchResult.status === "fulfilled") {
+    databaseSearchResult.value.forEach((database) => {
+      const mapped = mapNotionDatabase(database);
+      databaseMap.set(mapped.id, mapped);
+    });
+  } else {
+    partial = true;
+    console.warn("[Notion] Deep database search failed:", databaseSearchResult.reason);
+  }
+
+  if (pageSearchResult.status === "fulfilled") {
+    pageSearchResult.value.forEach((page) => {
+      const mapped = mapNotionPage(page);
+      pageMap.set(mapped.id, mapped);
+      queue.push({ id: mapped.id, depth: 0 });
+    });
+  } else {
+    partial = true;
+    console.warn("[Notion] Deep page search failed:", pageSearchResult.reason);
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, DEFAULT_DEEP_CONCURRENCY));
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (deadline.hasTime()) {
+      const task = queue.shift();
+      if (!task) break;
+
+      if (task.depth > maxDepth || visitedBlocks.has(task.id)) {
+        continue;
+      }
+      visitedBlocks.add(task.id);
+
+      const blockTimeout = Math.max(
+        200,
+        Math.min(NOTION_EXPLORE_BLOCK_TIMEOUT_MS, deadline.remaining())
+      );
+      if (blockTimeout <= 0) {
+        partial = true;
+        break;
+      }
+
+      const blocks = await fetchBlockChildrenWithTimeout(
+        accessToken,
+        task.id,
+        blockTimeout
+      );
+      if (!blocks) {
+        partial = true;
+        continue;
+      }
+
+      for (const block of blocks) {
+        if (block.type === "child_database") {
+          databaseMap.set(block.id, {
+            id: block.id,
+            title: block.child_database?.title || "Untitled",
+            url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+            last_edited_time: toIsoDate(block.last_edited_time),
+          });
+          continue;
+        }
+
+        if (block.type === "child_page") {
+          pageMap.set(block.id, {
+            id: block.id,
+            title: block.child_page?.title || "Untitled",
+            url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+            last_edited_time: toIsoDate(block.last_edited_time),
+          });
+        }
+
+        if (
+          block.has_children &&
+          BLOCKS_WITH_CHILDREN.includes(block.type) &&
+          task.depth < maxDepth
+        ) {
+          queue.push({ id: block.id, depth: task.depth + 1 });
+        }
+      }
+    }
+  });
+
+  await Promise.all(workers);
+
+  if (!deadline.hasTime() || queue.length > 0) {
+    partial = true;
+  }
+
+  const databases = sortByLastEditedDesc(Array.from(databaseMap.values()));
+  const pages = sortByLastEditedDesc(Array.from(pageMap.values()));
+
+  if (databases.length === 0 && pages.length === 0) {
+    throw new Error("Failed to fetch save targets");
+  }
+
+  return {
+    databases,
+    pages,
+    meta: {
+      mode: "deep",
+      partial,
+      fetchedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export async function getNotionSaveTargets(
+  accessToken: string,
+  options: NotionSaveTargetsOptions
+): Promise<NotionSaveTargetsResult> {
+  if (options.mode === "fast") {
+    const limit = options.limit ?? DEFAULT_FAST_LIMIT;
+    return getFastNotionSaveTargets(accessToken, Math.max(1, limit));
+  }
+
+  return getDeepNotionSaveTargets(accessToken, options);
+}
+
 // Get user's databases
-export async function getNotionDatabases(accessToken: string): Promise<any[]> {
+export async function getNotionDatabases(accessToken: string): Promise<NotionDatabaseSummary[]> {
   try {
-    const databaseMap = new Map<string, any>();
-    const visitedBlocks = new Set<string>();
-
-    // Block types that can have children
-    const BLOCKS_WITH_CHILDREN = [
-      "child_page",
-      "column_list",
-      "column",
-      "toggle",
-      "bulleted_list_item",
-      "numbered_list_item",
-      "to_do",
-      "quote",
-      "callout",
-      "synced_block",
-    ];
-
-    // Helper function to recursively explore blocks and find databases
-    async function exploreBlockChildren(blockId: string, depth: number = 0): Promise<void> {
-      // Limit recursion depth to prevent infinite loops
-      if (depth > 5 || visitedBlocks.has(blockId)) return;
-      visitedBlocks.add(blockId);
-
-      try {
-        const blocksResponse = await fetch(
-          `${NOTION_API_BASE}/blocks/${blockId}/children?page_size=100`,
-          {
-            method: "GET",
-            headers: getHeaders(accessToken),
-          }
-        );
-
-        if (!blocksResponse.ok) {
-          console.log(`[Notion] Failed to get children for ${blockId}: ${blocksResponse.status}`);
-          return;
-        }
-
-        const blocksData = await blocksResponse.json();
-        console.log(`[Notion] Found ${blocksData.results.length} blocks in ${blockId}`);
-
-        for (const block of blocksData.results) {
-          // Found a child_database
-          if (block.type === "child_database") {
-            const dbId = block.id;
-            console.log(`[Notion] Found child_database: ${block.child_database?.title}`);
-            if (!databaseMap.has(dbId)) {
-              databaseMap.set(dbId, {
-                id: dbId,
-                title: block.child_database?.title || "Untitled",
-                url: `https://notion.so/${dbId.replace(/-/g, "")}`,
-                last_edited_time: block.last_edited_time,
-              });
-            }
-          }
-          // Recursively explore blocks that can have children
-          else if (BLOCKS_WITH_CHILDREN.includes(block.type) && block.has_children) {
-            await exploreBlockChildren(block.id, depth + 1);
-          }
-        }
-      } catch (error) {
-        // Skip blocks we can't read
-        console.warn(`[Notion] Could not read blocks for ${blockId}:`, error);
-      }
-    }
-
-    // 1. Search for databases directly (explicit filter)
-    const dbSearchResponse = await fetch(`${NOTION_API_BASE}/search`, {
-      method: "POST",
-      headers: getHeaders(accessToken),
-      body: JSON.stringify({
-        filter: {
-          property: "object",
-          value: "database",
-        },
-        sort: {
-          direction: "descending",
-          timestamp: "last_edited_time",
-        },
-      }),
+    const result = await getNotionSaveTargets(accessToken, {
+      mode: "deep",
+      timeoutMs: DEFAULT_DEEP_TIMEOUT_MS,
+      maxDepth: DEFAULT_DEEP_MAX_DEPTH,
+      concurrency: DEFAULT_DEEP_CONCURRENCY,
     });
-
-    if (dbSearchResponse.ok) {
-      const dbSearchData = await dbSearchResponse.json();
-      console.log(`[Notion] Search found ${dbSearchData.results.length} databases directly`);
-      dbSearchData.results.forEach((db: any) => {
-        databaseMap.set(db.id, {
-          id: db.id,
-          title: db.title?.[0]?.plain_text || "Untitled",
-          url: db.url,
-          last_edited_time: db.last_edited_time,
-        });
-      });
-    }
-
-    // 2. Search for pages and recursively explore their children
-    const pageSearchResponse = await fetch(`${NOTION_API_BASE}/search`, {
-      method: "POST",
-      headers: getHeaders(accessToken),
-      body: JSON.stringify({
-        filter: {
-          property: "object",
-          value: "page",
-        },
-        sort: {
-          direction: "descending",
-          timestamp: "last_edited_time",
-        },
-      }),
-    });
-
-    if (pageSearchResponse.ok) {
-      const pageSearchData = await pageSearchResponse.json();
-      console.log(`[Notion] Search found ${pageSearchData.results.length} pages`);
-
-      // Log page titles for debugging
-      pageSearchData.results.forEach((page: any) => {
-        const title = extractPageTitle(page.properties);
-        console.log(`[Notion] Page: ${title} (${page.id})`);
-      });
-
-      // Explore each page's children recursively
-      for (const page of pageSearchData.results) {
-        await exploreBlockChildren(page.id, 0);
-      }
-    }
-
-    console.log(`[Notion] Total databases found: ${databaseMap.size}`);
-
-    // Convert map to array and sort by last_edited_time
-    return Array.from(databaseMap.values()).sort(
-      (a, b) =>
-        new Date(b.last_edited_time).getTime() -
-        new Date(a.last_edited_time).getTime()
-    );
+    return result.databases;
   } catch (error) {
     console.error("Failed to fetch Notion databases:", error);
     throw new Error("Failed to fetch databases");
@@ -626,112 +873,15 @@ export async function createNotionStandalonePage(
 }
 
 // Get user's pages (for creating database)
-export async function getNotionPages(accessToken: string): Promise<any[]> {
+export async function getNotionPages(accessToken: string): Promise<NotionPageSummary[]> {
   try {
-    const pageMap = new Map<string, any>();
-    const visitedBlocks = new Set<string>();
-
-    // Block types that can have children
-    const BLOCKS_WITH_CHILDREN = [
-      "child_page",
-      "column_list",
-      "column",
-      "toggle",
-      "bulleted_list_item",
-      "numbered_list_item",
-      "to_do",
-      "quote",
-      "callout",
-      "synced_block",
-    ];
-
-    // Helper function to recursively explore blocks and find child pages
-    async function exploreBlockChildren(blockId: string, depth: number = 0): Promise<void> {
-      // Limit recursion depth to prevent infinite loops
-      if (depth > 5 || visitedBlocks.has(blockId)) return;
-      visitedBlocks.add(blockId);
-
-      try {
-        const blocksResponse = await fetch(
-          `${NOTION_API_BASE}/blocks/${blockId}/children?page_size=100`,
-          {
-            method: "GET",
-            headers: getHeaders(accessToken),
-          }
-        );
-
-        if (!blocksResponse.ok) return;
-
-        const blocksData = await blocksResponse.json();
-
-        for (const block of blocksData.results) {
-          // Found a child_page - add it and recursively explore
-          if (block.type === "child_page") {
-            const pageId = block.id;
-            if (!pageMap.has(pageId)) {
-              pageMap.set(pageId, {
-                id: pageId,
-                title: block.child_page?.title || "Untitled",
-                url: `https://notion.so/${pageId.replace(/-/g, "")}`,
-                last_edited_time: block.last_edited_time,
-              });
-            }
-            await exploreBlockChildren(block.id, depth + 1);
-          }
-          // Recursively explore other blocks that can have children
-          else if (BLOCKS_WITH_CHILDREN.includes(block.type) && block.has_children) {
-            await exploreBlockChildren(block.id, depth + 1);
-          }
-        }
-      } catch (error) {
-        // Skip blocks we can't read
-        console.warn(`Could not read blocks for ${blockId}:`, error);
-      }
-    }
-
-    // 1. Search for pages directly
-    const response = await fetch(`${NOTION_API_BASE}/search`, {
-      method: "POST",
-      headers: getHeaders(accessToken),
-      body: JSON.stringify({
-        filter: {
-          property: "object",
-          value: "page",
-        },
-        sort: {
-          direction: "descending",
-          timestamp: "last_edited_time",
-        },
-      }),
+    const result = await getNotionSaveTargets(accessToken, {
+      mode: "deep",
+      timeoutMs: DEFAULT_DEEP_TIMEOUT_MS,
+      maxDepth: DEFAULT_DEEP_MAX_DEPTH,
+      concurrency: DEFAULT_DEEP_CONCURRENCY,
     });
-
-    if (!response.ok) {
-      throw new Error("Failed to search Notion");
-    }
-
-    const data = await response.json();
-
-    // Add pages from search results
-    data.results.forEach((page: any) => {
-      pageMap.set(page.id, {
-        id: page.id,
-        title: extractPageTitle(page.properties),
-        url: page.url,
-        last_edited_time: page.last_edited_time,
-      });
-    });
-
-    // 2. Recursively explore each page's children to find child pages
-    for (const page of data.results) {
-      await exploreBlockChildren(page.id, 0);
-    }
-
-    // Convert map to array and sort by last_edited_time
-    return Array.from(pageMap.values()).sort(
-      (a, b) =>
-        new Date(b.last_edited_time).getTime() -
-        new Date(a.last_edited_time).getTime()
-    );
+    return result.pages;
   } catch (error) {
     console.error("Failed to fetch Notion pages:", error);
     throw new Error("Failed to fetch pages");

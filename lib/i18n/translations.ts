@@ -234,6 +234,12 @@ export const translations = {
           configure: "설정",
           connect: "Notion 연결",
           troubleshoot: "Notion 연동이 안 되시나요?",
+          dropdown: {
+            loading: "Notion 항목을 불러오는 중입니다. 최대 10초 정도 걸릴 수 있어요.",
+            syncing: "전체 항목을 계속 동기화하는 중입니다...",
+            syncFailed: "전체 목록 동기화가 지연되고 있어요. 잠시 후 다시 열어주세요.",
+            loadFailed: "Notion 목록을 불러오지 못했어요. 잠시 후 다시 시도해주세요.",
+          },
           manualModal: {
             title: "수동 연결 설정",
             description: "다른 워크스페이스의 게스트인 경우, 워크스페이스 관리자에게 Internal Integration을 요청해야 합니다.",
@@ -785,6 +791,12 @@ export const translations = {
           configure: "Configure",
           connect: "Connect Notion",
           troubleshoot: "Having trouble connecting Notion?",
+          dropdown: {
+            loading: "Loading Notion items. This can take up to about 10 seconds.",
+            syncing: "Still syncing the full list in the background...",
+            syncFailed: "Full list sync is delayed. Please try opening again shortly.",
+            loadFailed: "Failed to load Notion items. Please try again in a moment.",
+          },
           manualModal: {
             title: "Manual Connection Setup",
             description: "If you're a guest in another workspace, you need to request an Internal Integration from the workspace admin.",
