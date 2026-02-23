@@ -55,6 +55,7 @@ interface ClientSaveTargetsCacheEntry {
 
 const NOTION_CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
 const NOTION_SESSION_CACHE_PREFIX = "archy_notion_save_targets_v1";
+const NOTION_SERVER_REFRESH_PENDING_KEY = "archy_notion_save_targets_refresh_pending_v1";
 const notionSaveTargetsInMemoryCache: Record<
   "fast" | "deep",
   ClientSaveTargetsCacheEntry | null
@@ -129,8 +130,30 @@ function clearNotionSaveTargetsCache() {
   try {
     sessionStorage.removeItem(getNotionSessionCacheKey("fast"));
     sessionStorage.removeItem(getNotionSessionCacheKey("deep"));
+    sessionStorage.setItem(NOTION_SERVER_REFRESH_PENDING_KEY, "1");
   } catch (error) {
     console.warn("[Notion Save Targets] Failed to clear cache:", error);
+  }
+}
+
+function shouldForceNotionServerRefresh(): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    return sessionStorage.getItem(NOTION_SERVER_REFRESH_PENDING_KEY) === "1";
+  } catch (error) {
+    console.warn("[Notion Save Targets] Failed to read refresh flag:", error);
+    return false;
+  }
+}
+
+function clearNotionServerRefreshPending() {
+  if (typeof window === "undefined") return;
+
+  try {
+    sessionStorage.removeItem(NOTION_SERVER_REFRESH_PENDING_KEY);
+  } catch (error) {
+    console.warn("[Notion Save Targets] Failed to clear refresh flag:", error);
   }
 }
 
@@ -189,6 +212,12 @@ export function IntegrationsSection({
   }, [initialNotionConnected]);
 
   useEffect(() => {
+    if (!notionConnected) {
+      clearNotionSaveTargetsCache();
+    }
+  }, [notionConnected]);
+
+  useEffect(() => {
     setSaveTarget(initialSaveTarget);
   }, [initialSaveTarget]);
 
@@ -199,6 +228,24 @@ export function IntegrationsSection({
   useEffect(() => {
     setGoogleFolder(initialGoogleFolder);
   }, [initialGoogleFolder]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("notion") === "connected") {
+        clearNotionSaveTargetsCache();
+        setDatabases([]);
+        setPages([]);
+        setNotionDropdownState("idle");
+        setNotionDropdownError(null);
+        setNotionDeepSyncError(null);
+      }
+    } catch (error) {
+      console.warn("[Notion Save Targets] Failed to inspect URL params:", error);
+    }
+  }, []);
 
   const handleConnect = (service: "notion" | "slack" | "google") => {
     window.location.href = `/api/auth/${service}?returnTo=/dashboard/settings`;
@@ -218,7 +265,10 @@ export function IntegrationsSection({
       return cached;
     }
 
-    const response = await fetch(`/api/notion/save-targets?mode=${mode}&limit=15`);
+    const forceRefresh = shouldForceNotionServerRefresh();
+    const response = await fetch(
+      `/api/notion/save-targets?mode=${mode}&limit=15${forceRefresh ? "&refresh=1" : ""}`
+    );
     const payload = await response.json();
 
     if (!response.ok || !payload?.success || !payload?.data) {
@@ -282,6 +332,7 @@ export function IntegrationsSection({
       const deepPayload = await fetchNotionSaveTargets("deep");
       if (requestId !== notionRequestIdRef.current) return;
       applyNotionSaveTargets(deepPayload);
+      clearNotionServerRefreshPending();
       setNotionDropdownState("deep_ready");
       setNotionDropdownError(null);
       setNotionDeepSyncError(null);

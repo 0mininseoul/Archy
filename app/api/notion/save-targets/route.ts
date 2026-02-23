@@ -72,6 +72,42 @@ function parseLimit(value: string | null, fallback: number): number {
   return Math.max(1, Math.min(MAX_LIMIT, Math.floor(parsed)));
 }
 
+function parseRefresh(value: string | null): boolean {
+  return value === "1" || value === "true";
+}
+
+function hashStringFNV1a(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function buildConnectionFingerprint(connection: {
+  token: string;
+  targetId: string | null;
+  targetType: string | null;
+  targetTitle: string | null;
+}): string {
+  const tokenHash = hashStringFNV1a(connection.token);
+  const targetHash = hashStringFNV1a(
+    `${connection.targetId ?? ""}|${connection.targetType ?? ""}|${connection.targetTitle ?? ""}`
+  );
+  return `${tokenHash}:${targetHash}`;
+}
+
+function writeServerCache(cacheKey: string, data: NotionSaveTargetsResult) {
+  const cache = getServerCache();
+  cache.set(cacheKey, {
+    data,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+    lastAccessedAt: Date.now(),
+  });
+  cleanupServerCache(cache);
+}
+
 async function getCachedOrFetch(
   cacheKey: string,
   loader: () => Promise<NotionSaveTargetsResult>
@@ -131,7 +167,9 @@ export const GET = withAuth<SaveTargetsResponseData>(
   async ({ user, supabase, request }) => {
     const { data: userData } = await supabase
       .from("users")
-      .select("notion_access_token")
+      .select(
+        "notion_access_token, notion_database_id, notion_save_target_type, notion_save_target_title"
+      )
       .eq("id", user.id)
       .single();
 
@@ -144,11 +182,34 @@ export const GET = withAuth<SaveTargetsResponseData>(
       request?.nextUrl.searchParams.get("limit") || null,
       DEFAULT_FAST_LIMIT
     );
+    const refresh = parseRefresh(request?.nextUrl.searchParams.get("refresh") || null);
+    const connectionFingerprint = buildConnectionFingerprint({
+      token: userData.notion_access_token,
+      targetId: userData.notion_database_id ?? null,
+      targetType: userData.notion_save_target_type ?? null,
+      targetTitle: userData.notion_save_target_title ?? null,
+    });
 
     const cacheKey =
       mode === "fast"
-        ? `${user.id}:notion-save-targets:fast:${limit}`
-        : `${user.id}:notion-save-targets:deep`;
+        ? `${user.id}:notion-save-targets:${connectionFingerprint}:fast:${limit}`
+        : `${user.id}:notion-save-targets:${connectionFingerprint}:deep`;
+
+    if (refresh) {
+      const freshData = await getNotionSaveTargets(userData.notion_access_token, {
+        mode,
+        limit,
+      });
+      writeServerCache(cacheKey, freshData);
+
+      return successResponse({
+        ...freshData,
+        meta: {
+          ...freshData.meta,
+          fromCache: false,
+        },
+      });
+    }
 
     const { data, fromCache } = await getCachedOrFetch(cacheKey, () =>
       getNotionSaveTargets(userData.notion_access_token, {
