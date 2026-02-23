@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { Fragment, useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { RecordingListItem } from "@/lib/types/database";
@@ -117,7 +117,6 @@ export function RecordingCard({
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Constants
-  const MIN_SWIPE_DISTANCE = 50;
   const MAX_SWIPE_LEFT = -80;
   const MAX_SWIPE_RIGHT = 80;
 
@@ -163,7 +162,9 @@ export function RecordingCard({
   const handlePin = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onPin && onPin(recording.id, !recording.is_pinned);
+      if (onPin) {
+        onPin(recording.id, !recording.is_pinned);
+      }
       setSwipeOffset(0);
     },
     [recording.id, recording.is_pinned, onPin]
@@ -247,6 +248,7 @@ export function RecordingCard({
 
   // Format date to KST
   const formattedDate = formatRecordingDateKST(recording.created_at);
+  const titleWords = recording.title.trim().split(/\s+/).filter(Boolean);
 
   return (
     <div className="relative overflow-hidden rounded-xl bg-slate-100 group">
@@ -279,7 +281,7 @@ export function RecordingCard({
 
       {/* Main Card Content */}
       <div
-        className={`bg-white p-4 relative transition-transform duration-200 ease-out border ${recording.transcript ? "cursor-pointer active:bg-slate-50" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-100 shadow-sm"}`}
+        className={`bg-white py-4 pl-4 pr-3 relative transition-transform duration-200 ease-out border ${recording.transcript ? "cursor-pointer active:bg-slate-50" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-100 shadow-sm"}`}
         style={{ transform: `translateX(${swipeOffset}px)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -307,12 +309,19 @@ export function RecordingCard({
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0 pr-2">
-            <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-1.5">
-              {recording.title}
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-1.5 [word-break:keep-all] [overflow-wrap:normal]">
+              {titleWords.length > 1
+                ? titleWords.map((word, index) => (
+                    <Fragment key={`${recording.id}-title-word-${index}`}>
+                      <span className="inline-block">{word}</span>
+                      {index < titleWords.length - 1 && " "}
+                    </Fragment>
+                  ))
+                : recording.title}
             </h3>
-            <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
-              <span className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs text-slate-500 font-medium">
+              <span className="flex items-center gap-1.5 whitespace-nowrap">
                 <StatusDot status={recording.status} />
                 <span
                   className={
@@ -324,10 +333,14 @@ export function RecordingCard({
                   {getStatusText(recording.status, recording.processing_step ?? undefined)}
                 </span>
               </span>
-              <span className="text-slate-300">|</span>
-              <span>{formatDurationMinutes(recording.duration_seconds)}</span>
-              <span className="text-slate-300">|</span>
-              <span className="tracking-tight">{formattedDate}</span>
+              <span className="whitespace-nowrap">
+                <span className="text-slate-300 mr-1">|</span>
+                {formatDurationMinutes(recording.duration_seconds)}
+              </span>
+              <span className="whitespace-nowrap tracking-tight">
+                <span className="text-slate-300 mr-1">|</span>
+                {formattedDate}
+              </span>
             </div>
 
             {/* Error Message */}
@@ -384,7 +397,7 @@ export function RecordingCard({
           </div>
 
           {/* Chevron Right (Navigation Hint) */}
-          <div className="flex items-center justify-center pl-2 text-slate-300">
+          <div className="flex items-center justify-center pl-1 text-slate-300">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
