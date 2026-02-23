@@ -39,8 +39,16 @@ interface NotionSearchObject {
   url?: string;
   last_edited_time?: string;
   parent?: NotionParent;
+  icon?: NotionIcon;
   title?: Array<{ plain_text?: string }>;
   properties?: Record<string, unknown>;
+}
+
+interface NotionIcon {
+  type?: "emoji" | "external" | "file";
+  emoji?: string;
+  external?: { url?: string };
+  file?: { url?: string };
 }
 
 interface NotionSearchResponse {
@@ -70,6 +78,7 @@ interface NotionDatabaseQueryResponse {
     url?: string;
     last_edited_time?: string;
     parent?: NotionParent;
+    icon?: NotionIcon;
     properties?: Record<string, unknown>;
   }>;
   has_more?: boolean;
@@ -81,6 +90,8 @@ export interface NotionDatabaseSummary {
   title: string;
   url: string;
   last_edited_time: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
 }
@@ -90,6 +101,8 @@ export interface NotionPageSummary {
   title: string;
   url: string;
   last_edited_time: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
 }
@@ -129,6 +142,8 @@ export interface NotionSearchResult {
   url: string;
   source: SearchResultSource;
   last_edited_time: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
   database_id?: string;
@@ -164,6 +179,10 @@ export interface NotionDeepSyncState {
   root_database_ids: string[];
   known_page_ids: string[];
   known_database_ids: string[];
+  search_page_ids?: string[];
+  search_database_ids?: string[];
+  search_next_cursor?: string | null;
+  search_completed?: boolean;
   initialized_at: string;
 }
 
@@ -203,6 +222,14 @@ interface NotionBlockTask {
 interface SearchSnapshot {
   pages: NotionSearchObject[];
   databases: NotionSearchObject[];
+  partial: boolean;
+}
+
+interface SearchChunk {
+  pages: NotionSearchObject[];
+  databases: NotionSearchObject[];
+  nextCursor: string | null;
+  hasMore: boolean;
   partial: boolean;
 }
 
@@ -276,6 +303,31 @@ function safeUrl(url: string | undefined, id: string): string {
   return `https://notion.so/${id.replace(/-/g, "")}`;
 }
 
+function extractIcon(icon: NotionIcon | undefined): {
+  iconEmoji: string | null;
+  iconUrl: string | null;
+} {
+  if (!icon || typeof icon !== "object") {
+    return { iconEmoji: null, iconUrl: null };
+  }
+
+  if (icon.type === "emoji" && typeof icon.emoji === "string" && icon.emoji.length > 0) {
+    return { iconEmoji: icon.emoji, iconUrl: null };
+  }
+
+  const externalUrl = icon.external?.url;
+  if (typeof externalUrl === "string" && externalUrl.length > 0) {
+    return { iconEmoji: null, iconUrl: externalUrl };
+  }
+
+  const fileUrl = icon.file?.url;
+  if (typeof fileUrl === "string" && fileUrl.length > 0) {
+    return { iconEmoji: null, iconUrl: fileUrl };
+  }
+
+  return { iconEmoji: null, iconUrl: null };
+}
+
 async function fetchWithTimeout(
   input: string,
   init: RequestInit,
@@ -316,22 +368,28 @@ async function notionFetchJson<T>(
 }
 
 function mapPageSummary(page: NotionSearchObject): NotionPageSummary {
+  const { iconEmoji, iconUrl } = extractIcon(page.icon);
   return {
     id: page.id,
     title: extractPageTitle(page.properties),
     url: safeUrl(page.url, page.id),
     last_edited_time: toIsoDate(page.last_edited_time),
+    icon_emoji: iconEmoji,
+    icon_url: iconUrl,
     parent_type: page.parent?.type,
     parent_page_id: page.parent?.page_id ?? null,
   };
 }
 
 function mapDatabaseSummary(database: NotionSearchObject): NotionDatabaseSummary {
+  const { iconEmoji, iconUrl } = extractIcon(database.icon);
   return {
     id: database.id,
     title: database.title?.[0]?.plain_text || "Untitled",
     url: safeUrl(database.url, database.id),
     last_edited_time: toIsoDate(database.last_edited_time),
+    icon_emoji: iconEmoji,
+    icon_url: iconUrl,
     parent_type: database.parent?.type,
     parent_page_id: database.parent?.page_id ?? null,
   };
@@ -344,9 +402,11 @@ function mapDatabaseItemResult(
     last_edited_time?: string;
     properties?: Record<string, unknown>;
     parent?: NotionParent;
+    icon?: NotionIcon;
   },
   databaseId: string
 ): NotionSearchResult {
+  const { iconEmoji, iconUrl } = extractIcon(item.icon);
   return {
     type: "database_item",
     id: item.id,
@@ -354,6 +414,8 @@ function mapDatabaseItemResult(
     url: safeUrl(item.url, item.id),
     source: "db_query",
     last_edited_time: toIsoDate(item.last_edited_time),
+    icon_emoji: iconEmoji,
+    icon_url: iconUrl,
     parent_type: item.parent?.type,
     parent_page_id: item.parent?.page_id ?? null,
     database_id: databaseId,
@@ -371,9 +433,9 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
   return output;
 }
 
-function inferRootContext(
-  pages: NotionSearchObject[],
-  databases: NotionSearchObject[],
+function inferRootContextFromSummaries(
+  pages: NotionPageSummary[],
+  databases: NotionDatabaseSummary[],
   preferredTargetId?: string | null
 ): RootContext {
   const pageIdSet = new Set(pages.map((page) => page.id));
@@ -381,19 +443,17 @@ function inferRootContext(
 
   const rootPageIds = pages
     .filter((page) => {
-      const parentType = page.parent?.type;
-      if (parentType !== "page_id") return true;
-      if (!page.parent?.page_id) return true;
-      return !pageIdSet.has(page.parent.page_id);
+      if (page.parent_type !== "page_id") return true;
+      if (!page.parent_page_id) return true;
+      return !pageIdSet.has(page.parent_page_id);
     })
     .map((page) => page.id);
 
   const rootDatabaseIds = databases
     .filter((database) => {
-      const parentType = database.parent?.type;
-      if (parentType !== "page_id") return true;
-      if (!database.parent?.page_id) return true;
-      return !pageIdSet.has(database.parent.page_id);
+      if (database.parent_type !== "page_id") return true;
+      if (!database.parent_page_id) return true;
+      return !pageIdSet.has(database.parent_page_id);
     })
     .map((database) => database.id);
 
@@ -412,6 +472,53 @@ function inferRootContext(
   return { rootPageIds, rootDatabaseIds };
 }
 
+async function searchNotionObjectsPage(
+  accessToken: string,
+  query: string | undefined,
+  cursor: string | null,
+  timeoutMs?: number
+): Promise<SearchChunk> {
+  const body: Record<string, unknown> = {
+    page_size: 100,
+    sort: {
+      direction: "descending",
+      timestamp: "last_edited_time",
+    },
+  };
+
+  const trimmedQuery = query?.trim();
+  if (trimmedQuery) {
+    body.query = trimmedQuery;
+  }
+  if (cursor) {
+    body.start_cursor = cursor;
+  }
+
+  const data = await notionFetchJson<NotionSearchResponse>(
+    accessToken,
+    `${NOTION_API_BASE}/search`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    timeoutMs
+  );
+
+  const results = Array.isArray(data.results) ? data.results : [];
+  const pages = results.filter((item) => item.object === "page");
+  const databases = results.filter((item) => item.object === "database");
+  const hasMore = Boolean(data.has_more);
+  const nextCursor = hasMore ? data.next_cursor || null : null;
+
+  return {
+    pages,
+    databases,
+    hasMore,
+    nextCursor,
+    partial: Boolean(hasMore && !nextCursor),
+  };
+}
+
 async function searchAllPagesAndDatabases(
   accessToken: string,
   query?: string
@@ -422,40 +529,11 @@ async function searchAllPagesAndDatabases(
   let partial = false;
 
   do {
-    const body: Record<string, unknown> = {
-      page_size: 100,
-      sort: {
-        direction: "descending",
-        timestamp: "last_edited_time",
-      },
-    };
-
-    const trimmedQuery = query?.trim();
-    if (trimmedQuery) {
-      body.query = trimmedQuery;
-    }
-
-    if (cursor) {
-      body.start_cursor = cursor;
-    }
-
-    const data = await notionFetchJson<NotionSearchResponse>(
-      accessToken,
-      `${NOTION_API_BASE}/search`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
-    );
-
-    const results = Array.isArray(data.results) ? data.results : [];
-    for (const item of results) {
-      if (item.object === "page") pages.push(item);
-      if (item.object === "database") databases.push(item);
-    }
-
-    cursor = data.has_more ? data.next_cursor || null : null;
-    partial = Boolean(data.has_more && !data.next_cursor);
+    const chunk = await searchNotionObjectsPage(accessToken, query, cursor, 2000);
+    pages.push(...chunk.pages);
+    databases.push(...chunk.databases);
+    cursor = chunk.nextCursor;
+    partial = chunk.partial;
   } while (cursor);
 
   return {
@@ -700,6 +778,10 @@ function buildStateMaps(state?: NotionDeepSyncState): {
   rootDatabaseIds: Set<string>;
   knownPageIds: Set<string>;
   knownDatabaseIds: Set<string>;
+  searchPageIds: Set<string>;
+  searchDatabaseIds: Set<string>;
+  searchNextCursor: string | null;
+  searchCompleted: boolean;
 } {
   const pageMap = new Map<string, NotionPageSummary>();
   const databaseMap = new Map<string, NotionDatabaseSummary>();
@@ -722,6 +804,10 @@ function buildStateMaps(state?: NotionDeepSyncState): {
     rootDatabaseIds: new Set(state?.root_database_ids || []),
     knownPageIds: new Set(state?.known_page_ids || []),
     knownDatabaseIds: new Set(state?.known_database_ids || []),
+    searchPageIds: new Set(state?.search_page_ids || []),
+    searchDatabaseIds: new Set(state?.search_database_ids || []),
+    searchNextCursor: state?.search_next_cursor || null,
+    searchCompleted: state ? state.search_completed !== false : false,
   };
 }
 
@@ -737,20 +823,92 @@ async function initializeDeepState(
   rootDatabaseIds: Set<string>;
   knownPageIds: Set<string>;
   knownDatabaseIds: Set<string>;
+  searchPageIds: Set<string>;
+  searchDatabaseIds: Set<string>;
+  searchNextCursor: string | null;
+  searchCompleted: boolean;
   partial: boolean;
 }> {
-  const snapshot = await searchAllPagesAndDatabases(accessToken);
   const pageMap = new Map<string, NotionPageSummary>();
   const databaseMap = new Map<string, NotionDatabaseSummary>();
+  const knownPageIds = new Set<string>();
+  const knownDatabaseIds = new Set<string>();
+  const searchPageIds = new Set<string>();
+  const searchDatabaseIds = new Set<string>();
 
-  for (const page of snapshot.pages) {
-    pageMap.set(page.id, mapPageSummary(page));
-  }
-  for (const database of snapshot.databases) {
-    databaseMap.set(database.id, mapDatabaseSummary(database));
+  const applyChunk = (chunk: SearchChunk) => {
+    for (const page of chunk.pages) {
+      const mapped = mapPageSummary(page);
+      pageMap.set(mapped.id, mapped);
+      knownPageIds.add(mapped.id);
+      searchPageIds.add(mapped.id);
+    }
+    for (const database of chunk.databases) {
+      const mapped = mapDatabaseSummary(database);
+      databaseMap.set(mapped.id, mapped);
+      knownDatabaseIds.add(mapped.id);
+      searchDatabaseIds.add(mapped.id);
+    }
+  };
+
+  let searchNextCursor: string | null = null;
+  let searchCompleted = true;
+  let partial = false;
+
+  try {
+    const firstChunk = await searchNotionObjectsPage(accessToken, undefined, null, 1200);
+    applyChunk(firstChunk);
+    searchNextCursor = firstChunk.nextCursor;
+    searchCompleted = !firstChunk.hasMore || !firstChunk.nextCursor;
+    partial = firstChunk.partial;
+  } catch {
+    partial = true;
   }
 
-  const roots = inferRootContext(snapshot.pages, snapshot.databases, preferredTargetId);
+  if (pageMap.size === 0 && databaseMap.size === 0) {
+    const [databaseResult, pageResult] = await Promise.allSettled([
+      searchNotionObjectsSinglePage(accessToken, "database"),
+      searchNotionObjectsSinglePage(accessToken, "page"),
+    ]);
+
+    if (databaseResult.status === "fulfilled") {
+      for (const database of databaseResult.value.results) {
+        const mapped = mapDatabaseSummary(database);
+        databaseMap.set(mapped.id, mapped);
+        knownDatabaseIds.add(mapped.id);
+        searchDatabaseIds.add(mapped.id);
+      }
+    }
+    if (pageResult.status === "fulfilled") {
+      for (const page of pageResult.value.results) {
+        const mapped = mapPageSummary(page);
+        pageMap.set(mapped.id, mapped);
+        knownPageIds.add(mapped.id);
+        searchPageIds.add(mapped.id);
+      }
+    }
+
+    partial =
+      partial ||
+      databaseResult.status === "rejected" ||
+      pageResult.status === "rejected" ||
+      (databaseResult.status === "fulfilled" && databaseResult.value.partial) ||
+      (pageResult.status === "fulfilled" && pageResult.value.partial);
+    searchCompleted = true;
+    searchNextCursor = null;
+  }
+
+  const searchablePages = Array.from(searchPageIds)
+    .map((id) => pageMap.get(id))
+    .filter((value): value is NotionPageSummary => Boolean(value));
+  const searchableDatabases = Array.from(searchDatabaseIds)
+    .map((id) => databaseMap.get(id))
+    .filter((value): value is NotionDatabaseSummary => Boolean(value));
+  const roots = inferRootContextFromSummaries(
+    searchablePages,
+    searchableDatabases,
+    preferredTargetId
+  );
 
   return {
     pageMap,
@@ -759,9 +917,13 @@ async function initializeDeepState(
     visited: new Set(),
     rootPageIds: new Set(roots.rootPageIds),
     rootDatabaseIds: new Set(roots.rootDatabaseIds),
-    knownPageIds: new Set(snapshot.pages.map((page) => page.id)),
-    knownDatabaseIds: new Set(snapshot.databases.map((database) => database.id)),
-    partial: snapshot.partial,
+    knownPageIds,
+    knownDatabaseIds,
+    searchPageIds,
+    searchDatabaseIds,
+    searchNextCursor,
+    searchCompleted,
+    partial,
   };
 }
 
@@ -774,6 +936,10 @@ function snapshotState(input: {
   rootDatabaseIds: Set<string>;
   knownPageIds: Set<string>;
   knownDatabaseIds: Set<string>;
+  searchPageIds: Set<string>;
+  searchDatabaseIds: Set<string>;
+  searchNextCursor: string | null;
+  searchCompleted: boolean;
   initializedAt?: string;
 }): NotionDeepSyncState {
   return {
@@ -785,6 +951,10 @@ function snapshotState(input: {
     root_database_ids: Array.from(input.rootDatabaseIds),
     known_page_ids: Array.from(input.knownPageIds),
     known_database_ids: Array.from(input.knownDatabaseIds),
+    search_page_ids: Array.from(input.searchPageIds),
+    search_database_ids: Array.from(input.searchDatabaseIds),
+    search_next_cursor: input.searchNextCursor,
+    search_completed: input.searchCompleted,
     initialized_at: input.initializedAt || new Date().toISOString(),
   };
 }
@@ -807,8 +977,57 @@ export async function getNotionDeepSaveTargetsTick(
 
   let partialReason: NotionPartialReason | undefined;
   let initializationPartial = false;
+  let searchFetchFailed = false;
 
   let stateData = buildStateMaps(options?.state);
+
+  const queueHasTask = (id: string): boolean =>
+    stateData.queue.some((task) => task.id === id);
+
+  const refreshRootsFromSearch = () => {
+    const searchPages = Array.from(stateData.searchPageIds)
+      .map((id) => stateData.pageMap.get(id))
+      .filter((value): value is NotionPageSummary => Boolean(value));
+    const searchDatabases = Array.from(stateData.searchDatabaseIds)
+      .map((id) => stateData.databaseMap.get(id))
+      .filter((value): value is NotionDatabaseSummary => Boolean(value));
+
+    const roots = inferRootContextFromSummaries(
+      searchPages,
+      searchDatabases,
+      options?.preferredTargetId
+    );
+    stateData.rootPageIds = new Set(roots.rootPageIds);
+    stateData.rootDatabaseIds = new Set(roots.rootDatabaseIds);
+
+    for (const rootId of roots.rootPageIds) {
+      if (stateData.visited.has(rootId) || queueHasTask(rootId)) continue;
+      stateData.queue.push({ id: rootId, depth: 0 });
+    }
+  };
+
+  const applySearchChunk = (chunk: SearchChunk) => {
+    for (const page of chunk.pages) {
+      const mapped = mapPageSummary(page);
+      stateData.pageMap.set(mapped.id, mapped);
+      stateData.knownPageIds.add(mapped.id);
+      stateData.searchPageIds.add(mapped.id);
+    }
+    for (const database of chunk.databases) {
+      const mapped = mapDatabaseSummary(database);
+      stateData.databaseMap.set(mapped.id, mapped);
+      stateData.knownDatabaseIds.add(mapped.id);
+      stateData.searchDatabaseIds.add(mapped.id);
+    }
+
+    stateData.searchNextCursor = chunk.nextCursor;
+    stateData.searchCompleted = !chunk.hasMore || !chunk.nextCursor;
+    if (chunk.partial) {
+      searchFetchFailed = true;
+      stateData.searchCompleted = true;
+    }
+    refreshRootsFromSearch();
+  };
 
   if (!options?.state) {
     try {
@@ -822,10 +1041,34 @@ export async function getNotionDeepSaveTargetsTick(
         rootDatabaseIds: initialized.rootDatabaseIds,
         knownPageIds: initialized.knownPageIds,
         knownDatabaseIds: initialized.knownDatabaseIds,
+        searchPageIds: initialized.searchPageIds,
+        searchDatabaseIds: initialized.searchDatabaseIds,
+        searchNextCursor: initialized.searchNextCursor,
+        searchCompleted: initialized.searchCompleted,
       };
       initializationPartial = initialized.partial;
     } catch {
       partialReason = "notion_search_failed";
+      searchFetchFailed = true;
+      stateData.searchCompleted = true;
+    }
+  }
+
+  let searchPagesFetched = 0;
+  while (deadline.hasTime() && !stateData.searchCompleted && searchPagesFetched < 2) {
+    try {
+      const chunk = await searchNotionObjectsPage(
+        accessToken,
+        undefined,
+        stateData.searchNextCursor,
+        Math.max(250, Math.min(900, deadline.remaining()))
+      );
+      applySearchChunk(chunk);
+      searchPagesFetched += 1;
+    } catch {
+      searchFetchFailed = true;
+      stateData.searchCompleted = true;
+      break;
     }
   }
 
@@ -859,11 +1102,14 @@ export async function getNotionDeepSaveTargetsTick(
 
         for (const block of children.blocks) {
           if (block.type === "child_page") {
+            const existing = stateData.pageMap.get(block.id);
             const mapped: NotionPageSummary = {
               id: block.id,
               title: block.child_page?.title || "Untitled",
               url: safeUrl(undefined, block.id),
               last_edited_time: toIsoDate(block.last_edited_time),
+              icon_emoji: existing?.icon_emoji ?? null,
+              icon_url: existing?.icon_url ?? null,
               parent_type: "page_id",
               parent_page_id: task.id,
             };
@@ -872,11 +1118,14 @@ export async function getNotionDeepSaveTargetsTick(
           }
 
           if (block.type === "child_database") {
+            const existing = stateData.databaseMap.get(block.id);
             const mapped: NotionDatabaseSummary = {
               id: block.id,
               title: block.child_database?.title || "Untitled",
               url: safeUrl(undefined, block.id),
               last_edited_time: toIsoDate(block.last_edited_time),
+              icon_emoji: existing?.icon_emoji ?? null,
+              icon_url: existing?.icon_url ?? null,
               parent_type: "page_id",
               parent_page_id: task.id,
             };
@@ -912,15 +1161,22 @@ export async function getNotionDeepSaveTargetsTick(
   }
 
   const partial =
-    stateData.queue.length > 0 || initializationPartial || childFetchFailed || timeExceeded;
+    stateData.queue.length > 0 ||
+    !stateData.searchCompleted ||
+    initializationPartial ||
+    childFetchFailed ||
+    searchFetchFailed ||
+    timeExceeded;
 
   if (timeExceeded) {
     partialReason = "timeout";
+  } else if (searchFetchFailed) {
+    partialReason = "notion_search_failed";
   } else if (childFetchFailed) {
     partialReason = "notion_children_failed";
   } else if (initializationPartial) {
     partialReason = "notion_search_failed";
-  } else if (stateData.queue.length > 0) {
+  } else if (stateData.queue.length > 0 || !stateData.searchCompleted) {
     partialReason = "budget_exhausted";
   }
 
@@ -930,7 +1186,7 @@ export async function getNotionDeepSaveTargetsTick(
     progress: {
       roots: stateData.rootPageIds.size + stateData.rootDatabaseIds.size,
       visited_nodes: stateData.visited.size,
-      pending_nodes: stateData.queue.length,
+      pending_nodes: stateData.queue.length + (stateData.searchCompleted ? 0 : 1),
     },
     rootPageIds: Array.from(stateData.rootPageIds),
     rootDatabaseIds: Array.from(stateData.rootDatabaseIds),
@@ -952,6 +1208,10 @@ export async function getNotionDeepSaveTargetsTick(
     rootDatabaseIds: stateData.rootDatabaseIds,
     knownPageIds: stateData.knownPageIds,
     knownDatabaseIds: stateData.knownDatabaseIds,
+    searchPageIds: stateData.searchPageIds,
+    searchDatabaseIds: stateData.searchDatabaseIds,
+    searchNextCursor: stateData.searchNextCursor,
+    searchCompleted: stateData.searchCompleted,
     initializedAt: options?.state?.initialized_at,
   });
 
@@ -1086,6 +1346,8 @@ export async function searchNotionSaveTargets(
         url: page.url,
         source: "index",
         last_edited_time: page.last_edited_time,
+        icon_emoji: page.icon_emoji ?? null,
+        icon_url: page.icon_url ?? null,
         parent_type: page.parent_type,
         parent_page_id: page.parent_page_id ?? null,
       });
@@ -1099,6 +1361,8 @@ export async function searchNotionSaveTargets(
         url: database.url,
         source: "index",
         last_edited_time: database.last_edited_time,
+        icon_emoji: database.icon_emoji ?? null,
+        icon_url: database.icon_url ?? null,
         parent_type: database.parent_type,
         parent_page_id: database.parent_page_id ?? null,
       });
@@ -1116,6 +1380,8 @@ export async function searchNotionSaveTargets(
         url: mapped.url,
         source: "remote_search" as const,
         last_edited_time: mapped.last_edited_time,
+        icon_emoji: mapped.icon_emoji ?? null,
+        icon_url: mapped.icon_url ?? null,
         parent_type: mapped.parent_type,
         parent_page_id: mapped.parent_page_id,
       };
@@ -1129,6 +1395,8 @@ export async function searchNotionSaveTargets(
         url: mapped.url,
         source: "remote_search" as const,
         last_edited_time: mapped.last_edited_time,
+        icon_emoji: mapped.icon_emoji ?? null,
+        icon_url: mapped.icon_url ?? null,
         parent_type: mapped.parent_type,
         parent_page_id: mapped.parent_page_id,
       };

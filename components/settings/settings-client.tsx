@@ -23,6 +23,8 @@ interface NotionSaveTarget {
   type: "database" | "page";
   id: string;
   title: string;
+  iconEmoji?: string | null;
+  iconUrl?: string | null;
 }
 
 interface CustomFormat {
@@ -133,6 +135,8 @@ export function SettingsClient() {
           type: settings.notionSaveTargetType,
           id: settings.notionDatabaseId,
           title: settings.notionSaveTargetTitle,
+          iconEmoji: settings.notionSaveTargetIconEmoji,
+          iconUrl: settings.notionSaveTargetIconUrl,
         });
       }
 

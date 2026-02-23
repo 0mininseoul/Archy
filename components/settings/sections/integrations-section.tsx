@@ -9,6 +9,8 @@ interface NotionDatabase {
   title: string;
   url?: string;
   last_edited_time?: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
 }
@@ -18,6 +20,8 @@ interface NotionPage {
   title: string;
   url?: string;
   last_edited_time?: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
 }
@@ -26,6 +30,8 @@ interface NotionSaveTarget {
   type: "database" | "page";
   id: string;
   title: string;
+  iconEmoji?: string | null;
+  iconUrl?: string | null;
 }
 
 interface GoogleFolder {
@@ -69,6 +75,8 @@ interface NotionSearchResultItem {
   url: string;
   source: "index" | "remote_search" | "db_query";
   last_edited_time: string;
+  icon_emoji?: string | null;
+  icon_url?: string | null;
   parent_type?: string;
   parent_page_id?: string | null;
   database_id?: string;
@@ -225,6 +233,72 @@ function resolveNotionOAuthErrorMessage(
     default:
       return messages.generic;
   }
+}
+
+function getSaveTargetFallbackEmoji(type: "database" | "page"): string {
+  return type === "database" ? "📊" : "📄";
+}
+
+function mergeNotionItems<T extends { id: string; last_edited_time?: string }>(
+  existing: T[],
+  incoming: T[]
+): T[] {
+  const map = new Map<string, T>();
+
+  for (const item of existing) {
+    map.set(item.id, item);
+  }
+
+  for (const item of incoming) {
+    map.set(item.id, item);
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = new Date(a.last_edited_time || new Date(0).toISOString()).getTime();
+    const bTime = new Date(b.last_edited_time || new Date(0).toISOString()).getTime();
+    return bTime - aTime;
+  });
+}
+
+interface NotionItemIconProps {
+  iconEmoji?: string | null;
+  iconUrl?: string | null;
+  fallbackEmoji: string;
+  alt: string;
+  className?: string;
+}
+
+function NotionItemIcon({
+  iconEmoji,
+  iconUrl,
+  fallbackEmoji,
+  alt,
+  className,
+}: NotionItemIconProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const textClassName = `inline-flex items-center justify-center ${className || ""}`.trim();
+  const hasEmoji = typeof iconEmoji === "string" && iconEmoji.length > 0;
+  const hasUrl = typeof iconUrl === "string" && iconUrl.length > 0;
+
+  if (hasEmoji) {
+    return <span className={textClassName}>{iconEmoji}</span>;
+  }
+
+  if (hasUrl && !imageFailed) {
+    return (
+      <Image
+        src={iconUrl}
+        alt={alt}
+        width={20}
+        height={20}
+        className={className}
+        unoptimized
+        onError={() => setImageFailed(true)}
+      />
+    );
+  }
+
+  return <span className={textClassName}>{fallbackEmoji}</span>;
 }
 
 interface IntegrationsSectionProps {
@@ -397,8 +471,8 @@ export function IntegrationsSection({
 
   // Notion handlers
   const applyNotionSaveTargets = (payload: NotionSaveTargetsPayload) => {
-    setDatabases(payload.databases || []);
-    setPages(payload.pages || []);
+    setDatabases((prev) => mergeNotionItems(prev, payload.databases || []));
+    setPages((prev) => mergeNotionItems(prev, payload.pages || []));
   };
 
   const fetchNotionSaveTargets = async (
@@ -580,6 +654,8 @@ export function IntegrationsSection({
           pageId: target.type === "page" ? target.id : null,
           saveTargetType: target.type,
           title: target.title,
+          iconEmoji: target.iconEmoji || null,
+          iconUrl: target.iconUrl || null,
         }),
       });
 
@@ -676,7 +752,13 @@ export function IntegrationsSection({
       if (response.ok) {
         const data = await response.json();
         const pageId = data.data?.pageId || data.pageId;
-        await selectSaveTarget({ type: "page", id: pageId, title: title.trim() });
+        await selectSaveTarget({
+          type: "page",
+          id: pageId,
+          title: title.trim(),
+          iconEmoji: "📄",
+          iconUrl: null,
+        });
       }
     } catch (error) {
       console.error("Failed to create page:", error);
@@ -705,7 +787,13 @@ export function IntegrationsSection({
         if (dbResponse.ok) {
           const dbData = await dbResponse.json();
           const databaseId = dbData.data?.databaseId || dbData.databaseId;
-          await selectSaveTarget({ type: "database", id: databaseId, title: title.trim() });
+          await selectSaveTarget({
+            type: "database",
+            id: databaseId,
+            title: title.trim(),
+            iconEmoji: "📊",
+            iconUrl: null,
+          });
         }
       }
     } catch (error) {
@@ -801,6 +889,8 @@ export function IntegrationsSection({
           url: database.url || `https://notion.so/${database.id.replace(/-/g, "")}`,
           source: "index" as const,
           last_edited_time: database.last_edited_time || new Date(0).toISOString(),
+          icon_emoji: database.icon_emoji ?? null,
+          icon_url: database.icon_url ?? null,
           parent_type: database.parent_type,
           parent_page_id: database.parent_page_id ?? null,
         })),
@@ -811,6 +901,8 @@ export function IntegrationsSection({
           url: page.url || `https://notion.so/${page.id.replace(/-/g, "")}`,
           source: "index" as const,
           last_edited_time: page.last_edited_time || new Date(0).toISOString(),
+          icon_emoji: page.icon_emoji ?? null,
+          icon_url: page.icon_url ?? null,
           parent_type: page.parent_type,
           parent_page_id: page.parent_page_id ?? null,
         })),
@@ -862,7 +954,17 @@ export function IntegrationsSection({
         <div className="p-3 border border-slate-200 rounded-xl">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
-              <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
+              {notionConnected && saveTarget ? (
+                <NotionItemIcon
+                  iconEmoji={saveTarget.iconEmoji}
+                  iconUrl={saveTarget.iconUrl}
+                  fallbackEmoji={getSaveTargetFallbackEmoji(saveTarget.type)}
+                  alt="Selected Notion save target icon"
+                  className="w-7 h-7 text-xl object-cover flex items-center justify-center"
+                />
+              ) : (
+                <Image src="/logos/notion.png" alt="Notion" width={28} height={28} />
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-slate-900 text-sm">{t.settings.integrations.notion.title}</h3>
@@ -911,8 +1013,21 @@ export function IntegrationsSection({
                 onClick={openSaveTargetDropdown}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-left text-sm font-medium text-slate-700 flex items-center justify-between min-h-[44px]"
               >
-                <span className="truncate">
-                  {saveTarget ? `📁 ${saveTarget.title}` : "기본 저장 위치 선택"}
+                <span className="truncate flex items-center gap-2 min-w-0">
+                  {saveTarget ? (
+                    <>
+                      <NotionItemIcon
+                        iconEmoji={saveTarget.iconEmoji}
+                        iconUrl={saveTarget.iconUrl}
+                        fallbackEmoji={getSaveTargetFallbackEmoji(saveTarget.type)}
+                        alt="Selected Notion save target icon"
+                        className="w-4 h-4 text-base object-cover flex-shrink-0"
+                      />
+                      <span className="truncate">{saveTarget.title}</span>
+                    </>
+                  ) : (
+                    "기본 저장 위치 선택"
+                  )}
                 </span>
                 <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1014,17 +1129,25 @@ export function IntegrationsSection({
                                       type: result.type === "database" ? "database" : "page",
                                       id: result.id,
                                       title: result.title,
+                                      iconEmoji: result.icon_emoji ?? null,
+                                      iconUrl: result.icon_url ?? null,
                                     })
                                   }
                                   className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
                                 >
-                                  <span>
-                                    {result.type === "database"
-                                      ? "📊"
-                                      : result.type === "database_item"
-                                        ? "🧩"
-                                        : "📄"}
-                                  </span>
+                                  <NotionItemIcon
+                                    iconEmoji={result.icon_emoji}
+                                    iconUrl={result.icon_url}
+                                    fallbackEmoji={
+                                      result.type === "database"
+                                        ? "📊"
+                                        : result.type === "database_item"
+                                          ? "🧩"
+                                          : "📄"
+                                    }
+                                    alt={`${result.type} icon`}
+                                    className="w-4 h-4 text-base object-cover flex-shrink-0"
+                                  />
                                   <span className="truncate flex-1">{result.title}</span>
                                   {result.type === "database_item" && (
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
@@ -1052,11 +1175,23 @@ export function IntegrationsSection({
                                   <button
                                     key={db.id}
                                     onClick={() =>
-                                      selectSaveTarget({ type: "database", id: db.id, title: db.title })
+                                      selectSaveTarget({
+                                        type: "database",
+                                        id: db.id,
+                                        title: db.title,
+                                        iconEmoji: db.icon_emoji ?? null,
+                                        iconUrl: db.icon_url ?? null,
+                                      })
                                     }
                                     className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
                                   >
-                                    <span>📊</span>
+                                    <NotionItemIcon
+                                      iconEmoji={db.icon_emoji}
+                                      iconUrl={db.icon_url}
+                                      fallbackEmoji="📊"
+                                      alt="database icon"
+                                      className="w-4 h-4 text-base object-cover flex-shrink-0"
+                                    />
                                     <span className="truncate">{db.title}</span>
                                   </button>
                                 ))}
@@ -1072,11 +1207,23 @@ export function IntegrationsSection({
                                   <button
                                     key={page.id}
                                     onClick={() =>
-                                      selectSaveTarget({ type: "page", id: page.id, title: page.title })
+                                      selectSaveTarget({
+                                        type: "page",
+                                        id: page.id,
+                                        title: page.title,
+                                        iconEmoji: page.icon_emoji ?? null,
+                                        iconUrl: page.icon_url ?? null,
+                                      })
                                     }
                                     className="w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 flex items-center gap-2 min-h-[44px]"
                                   >
-                                    <span>📄</span>
+                                    <NotionItemIcon
+                                      iconEmoji={page.icon_emoji}
+                                      iconUrl={page.icon_url}
+                                      fallbackEmoji="📄"
+                                      alt="page icon"
+                                      className="w-4 h-4 text-base object-cover flex-shrink-0"
+                                    />
                                     <span className="truncate">{page.title}</span>
                                   </button>
                                 ))}

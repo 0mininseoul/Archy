@@ -3,6 +3,44 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 const NOTION_API_URL = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 
+interface NotionIcon {
+  type?: "emoji" | "external" | "file";
+  emoji?: string;
+  external?: { url?: string };
+  file?: { url?: string };
+}
+
+function extractIconFields(icon: NotionIcon | undefined): {
+  iconEmoji: string | null;
+  iconUrl: string | null;
+} {
+  if (!icon || typeof icon !== "object") {
+    return { iconEmoji: null, iconUrl: null };
+  }
+
+  if (icon.type === "emoji" && typeof icon.emoji === "string" && icon.emoji.length > 0) {
+    return { iconEmoji: icon.emoji, iconUrl: null };
+  }
+
+  const externalUrl = icon.external?.url;
+  if (typeof externalUrl === "string" && externalUrl.length > 0) {
+    return { iconEmoji: null, iconUrl: externalUrl };
+  }
+
+  const fileUrl = icon.file?.url;
+  if (typeof fileUrl === "string" && fileUrl.length > 0) {
+    return { iconEmoji: null, iconUrl: fileUrl };
+  }
+
+  return { iconEmoji: null, iconUrl: null };
+}
+
+function isMissingNotionIconColumnError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const message = "message" in error ? String((error as { message?: unknown }).message || "") : "";
+  return message.includes("notion_save_target_icon_") && message.includes("does not exist");
+}
+
 // Extract page ID from Notion URL
 function extractPageId(url: string): string | null {
   try {
@@ -70,6 +108,8 @@ async function getPageInfo(token: string, pageId: string): Promise<{
   accessible: boolean;
   title?: string;
   isDatabase?: boolean;
+  iconEmoji?: string | null;
+  iconUrl?: string | null;
   error?: string;
 }> {
   try {
@@ -90,7 +130,8 @@ async function getPageInfo(token: string, pageId: string): Promise<{
       } else if (pageData.properties?.Name?.title?.[0]?.plain_text) {
         title = pageData.properties.Name.title[0].plain_text;
       }
-      return { accessible: true, title, isDatabase: false };
+      const { iconEmoji, iconUrl } = extractIconFields(pageData.icon);
+      return { accessible: true, title, isDatabase: false, iconEmoji, iconUrl };
     }
 
     // Try as a database
@@ -104,7 +145,8 @@ async function getPageInfo(token: string, pageId: string): Promise<{
     if (dbResponse.ok) {
       const dbData = await dbResponse.json();
       const title = dbData.title?.[0]?.plain_text || "Untitled Database";
-      return { accessible: true, title, isDatabase: true };
+      const { iconEmoji, iconUrl } = extractIconFields(dbData.icon);
+      return { accessible: true, title, isDatabase: true, iconEmoji, iconUrl };
     }
 
     // Check error type
@@ -124,7 +166,13 @@ async function getPageInfo(token: string, pageId: string): Promise<{
 // POST /api/user/notion-manual - Connect Notion with manual token
 export const POST = withAuth<{
   connected: boolean;
-  saveTarget?: { type: "database" | "page"; id: string; title: string };
+  saveTarget?: {
+    type: "database" | "page";
+    id: string;
+    title: string;
+    iconEmoji?: string | null;
+    iconUrl?: string | null;
+  };
 }>(async ({ user, supabase, request }) => {
   const body = await request!.json();
   const { token, pageUrl } = body;
@@ -166,15 +214,23 @@ export const POST = withAuth<{
 
   // Save to database
   const targetType = pageInfo.isDatabase ? "database" : "page";
-  const { error } = await supabase
-    .from("users")
-    .update({
-      notion_access_token: token,
-      notion_database_id: pageId,
-      notion_save_target_type: targetType,
-      notion_save_target_title: pageInfo.title,
-    })
-    .eq("id", user.id);
+  const basePayload = {
+    notion_access_token: token,
+    notion_database_id: pageId,
+    notion_save_target_type: targetType,
+    notion_save_target_title: pageInfo.title,
+  };
+  const payloadWithIcon = {
+    ...basePayload,
+    notion_save_target_icon_emoji: pageInfo.iconEmoji || null,
+    notion_save_target_icon_url: pageInfo.iconUrl || null,
+  };
+
+  let { error } = await supabase.from("users").update(payloadWithIcon).eq("id", user.id);
+  if (error && isMissingNotionIconColumnError(error)) {
+    const fallback = await supabase.from("users").update(basePayload).eq("id", user.id);
+    error = fallback.error;
+  }
 
   if (error) {
     return errorResponse("Failed to save connection", 500);
@@ -186,6 +242,8 @@ export const POST = withAuth<{
       type: targetType,
       id: pageId,
       title: pageInfo.title || "Untitled",
+      iconEmoji: pageInfo.iconEmoji || null,
+      iconUrl: pageInfo.iconUrl || null,
     },
   });
 });

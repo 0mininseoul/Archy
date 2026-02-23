@@ -19,6 +19,8 @@ export interface User {
   notion_database_id?: string | null;
   notion_save_target_type?: "database" | "page" | null;
   notion_save_target_title?: string | null;
+  notion_save_target_icon_emoji?: string | null;
+  notion_save_target_icon_url?: string | null;
 
   // Slack Integration
   slack_access_token?: string | null;
@@ -188,6 +190,8 @@ export interface NotionSaveTarget {
   type: "database" | "page";
   id: string;
   title: string;
+  iconEmoji?: string | null;
+  iconUrl?: string | null;
 }
 
 export interface GoogleFolder {

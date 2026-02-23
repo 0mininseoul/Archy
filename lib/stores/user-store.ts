@@ -23,6 +23,8 @@ interface UserSettings {
     notionDatabaseId: string | null;
     notionSaveTargetType: "database" | "page" | null;
     notionSaveTargetTitle: string | null;
+    notionSaveTargetIconEmoji: string | null;
+    notionSaveTargetIconUrl: string | null;
     googleFolderId: string | null;
     googleFolderName: string | null;
     // Pro status
@@ -94,6 +96,8 @@ export const useUserStore = create<UserStore>((set, get) => ({
                     notionDatabaseId: userData.notion_database_id || null,
                     notionSaveTargetType: userData.notion_save_target_type || null,
                     notionSaveTargetTitle: userData.notion_save_target_title || null,
+                    notionSaveTargetIconEmoji: userData.notion_save_target_icon_emoji || null,
+                    notionSaveTargetIconUrl: userData.notion_save_target_icon_url || null,
                     googleFolderId: userData.google_folder_id || null,
                     googleFolderName: userData.google_folder_name || null,
                     isPro: userData.is_pro || false,
