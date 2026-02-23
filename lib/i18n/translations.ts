@@ -499,7 +499,7 @@ export const translations = {
     // In-App Browser Modal
     inAppBrowser: {
       title: "외부 브라우저에서 열어주세요",
-      description: "원활한 서비스 이용을 위해\nSafari에서 열어주세요.",
+      description: "원활한 서비스 이용을 위해\n외부 브라우저에서 열어주세요.",
       confirm: "확인",
       // 앱별 안내
       apps: {
@@ -513,7 +513,7 @@ export const translations = {
           step1: "우측 상단의",
           icon: "⋯",
           step2: "메뉴를 탭하세요",
-          step3: "'Safari에서 열기'를 선택하세요",
+          step3: "'외부 브라우저에서 열기'를 선택하세요",
         },
         threads: {
           step1: "우측 상단의",
@@ -1072,7 +1072,7 @@ export const translations = {
     // In-App Browser Modal
     inAppBrowser: {
       title: "Open in External Browser",
-      description: "For the best experience,\nplease open in Safari.",
+      description: "For the best experience,\nplease open in an external browser.",
       confirm: "OK",
       // App-specific instructions
       apps: {
@@ -1086,7 +1086,7 @@ export const translations = {
           step1: "Tap the",
           icon: "⋯",
           step2: "menu at the top right",
-          step3: "Select 'Open in Safari'",
+          step3: "Select 'Open in external browser'",
         },
         threads: {
           step1: "Tap the",
