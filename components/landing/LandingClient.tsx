@@ -57,7 +57,7 @@ export function LandingClient() {
                         </p>
 
                         <div className="flex flex-col items-center justify-center gap-4 pt-1 sm:pt-4 animate-slide-up" style={{ animationDelay: "0.2s" }}>
-                            <GoogleLoginButton variant="cta" />
+                            <GoogleLoginButton variant="cta" label={`${t.auth.getStarted} (Beta)`} />
                         </div>
                     </div>
                 </div>

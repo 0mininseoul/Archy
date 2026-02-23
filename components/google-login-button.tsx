@@ -10,9 +10,10 @@ import { markLoginIntent } from "@/lib/desktop-login-notice";
 
 interface GoogleLoginButtonProps {
   variant?: "nav" | "primary" | "cta";
+  label?: string;
 }
 
-export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
+export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonProps) {
   const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const [showInAppModal, setShowInAppModal] = useState(false);
@@ -72,7 +73,7 @@ export function GoogleLoginButton({ variant = "nav" }: GoogleLoginButtonProps) {
   };
 
   // nav: "시작하기", cta/primary: "무료로 시작하기"
-  const buttonText = variant === "nav" ? t.auth.signInWithGoogle : t.auth.getStarted;
+  const buttonText = label ?? (variant === "nav" ? t.auth.signInWithGoogle : t.auth.getStarted);
 
   return (
     <>
