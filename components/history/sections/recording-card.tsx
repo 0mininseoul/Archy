@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { RecordingListItem } from "@/lib/types/database";
@@ -248,7 +248,6 @@ export function RecordingCard({
 
   // Format date to KST
   const formattedDate = formatRecordingDateKST(recording.created_at);
-  const titleWords = recording.title.trim().split(/\s+/).filter(Boolean);
 
   return (
     <div className="relative overflow-hidden rounded-xl bg-slate-100 group">
@@ -310,17 +309,10 @@ export function RecordingCard({
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-1.5 [word-break:keep-all] [overflow-wrap:normal]">
-              {titleWords.length > 1
-                ? titleWords.map((word, index) => (
-                    <Fragment key={`${recording.id}-title-word-${index}`}>
-                      <span className="inline-block">{word}</span>
-                      {index < titleWords.length - 1 && " "}
-                    </Fragment>
-                  ))
-                : recording.title}
+            <h3 className="text-base font-bold text-slate-900 leading-tight mb-1.5 break-keep [overflow-wrap:normal]">
+              {recording.title}
             </h3>
-            <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs text-slate-500 font-medium">
+            <div className="flex items-center gap-1 text-xs text-slate-500 font-medium whitespace-nowrap">
               <span className="flex items-center gap-1.5 whitespace-nowrap">
                 <StatusDot status={recording.status} />
                 <span
@@ -333,11 +325,11 @@ export function RecordingCard({
                   {getStatusText(recording.status, recording.processing_step ?? undefined)}
                 </span>
               </span>
-              <span className="whitespace-nowrap">
+              <span className="whitespace-nowrap shrink-0">
                 <span className="text-slate-300 mr-1">|</span>
                 {formatDurationMinutes(recording.duration_seconds)}
               </span>
-              <span className="whitespace-nowrap tracking-tight">
+              <span className="whitespace-nowrap tracking-tight shrink-0">
                 <span className="text-slate-300 mr-1">|</span>
                 {formattedDate}
               </span>
