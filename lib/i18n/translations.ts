@@ -76,7 +76,7 @@ export const translations = {
           },
           share: {
             title: "공유",
-            description: "Notion, Google Docs에 자동 저장되고 Slack으로 공유됩니다.",
+            description: "Notion, Google Docs에 자동 저장되고\nSlack으로 공유됩니다.",
           },
         },
       },
@@ -617,11 +617,11 @@ export const translations = {
         description: "Stop worrying about taking notes. Focus on the conversation and let Archy handle the rest.",
         recording: {
           title: "Crystal Clear Recording",
-          description: "High-quality web recording with auto-save and cloud backup. Record up to 120 minutes.",
+          description: "High-quality web recording with auto-save and cloud backup. Record up to 350 minutes.",
         },
         transcription: {
           title: "Instant Transcription",
-          description: "Powered by Whisper API for 99% accuracy in multiple languages.",
+          description: "AI quickly and accurately transcribes multilingual audio into text.",
         },
         summarization: {
           title: "AI Summarization",
@@ -650,7 +650,7 @@ export const translations = {
           },
           share: {
             title: "Share",
-            description: "Automatically saved to Notion and shared via Slack.",
+            description: "Automatically saved to Notion and Google Docs, then shared via Slack.",
           },
         },
       },
@@ -659,7 +659,7 @@ export const translations = {
         description: "Connect with the tools you already use every day.",
         notion: "Auto-save documents",
         slack: "Instant notifications",
-        google: "Secure login",
+        google: "Auto-save documents",
       },
       cta: {
         title: "Start capturing your ideas today",

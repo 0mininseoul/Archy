@@ -169,7 +169,7 @@ export function LandingClient() {
                                 <h3 className="text-sm sm:text-lg font-bold text-slate-900 mb-1 sm:mb-2">
                                     {item.title}
                                 </h3>
-                                <p className="text-slate-600 text-xs sm:text-sm leading-snug">
+                                <p className="text-slate-600 text-xs sm:text-sm leading-snug whitespace-pre-line sm:whitespace-normal">
                                     {item.description}
                                 </p>
                             </div>
@@ -193,7 +193,7 @@ export function LandingClient() {
                     <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-center sm:gap-8">
                         {[
                             { name: "Notion", logo: "/logos/notion.png", description: t.landing.integrations.notion },
-                            { name: "Google", logo: "/logos/google-docs.png", description: t.landing.integrations.google },
+                            { name: "Google Docs", logo: "/logos/google-docs.png", description: t.landing.integrations.google },
                             { name: "Slack", logo: "/logos/slack.png", description: t.landing.integrations.slack },
                         ].map((integration, idx) => (
                             <div key={idx} className="card p-3 sm:p-8 text-center sm:min-w-[200px] hover:-translate-y-1 transition-transform duration-300">
