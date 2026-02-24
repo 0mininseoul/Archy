@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import * as amplitude from "@amplitude/analytics-browser";
 import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
 import { detectInAppBrowserType, isAndroid, openExternalBrowser, InAppBrowserType } from "@/lib/browser";
@@ -22,6 +23,22 @@ export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonP
   const handleLogin = async () => {
     // 인앱 브라우저 감지
     const browserType = detectInAppBrowserType();
+    const promoCode = searchParams.get("promo");
+
+    try {
+      amplitude.track("signup_started", {
+        signup_method: "google_oauth",
+        source: "landing",
+        button_variant: variant,
+        locale,
+        has_promo_code: Boolean(promoCode),
+        in_app_browser: Boolean(browserType),
+        path: window.location.pathname,
+      });
+    } catch (error) {
+      console.warn("[Amplitude] Failed to track signup_started:", error);
+    }
+
     if (browserType) {
       if (isAndroid()) {
         // Android: 자동으로 외부 브라우저로 리다이렉트
@@ -44,7 +61,6 @@ export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonP
     let redirectTo = `${window.location.origin}/api/auth/callback?locale=${locale}`;
 
     // Include promo code if present in URL
-    const promoCode = searchParams.get("promo");
     if (promoCode) {
       redirectTo += `&promo=${encodeURIComponent(promoCode)}`;
     }

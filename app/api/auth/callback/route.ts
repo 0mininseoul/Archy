@@ -179,6 +179,11 @@ export async function GET(request: Request) {
     const appUrl = origin || process.env.NEXT_PUBLIC_APP_URL;
     const redirectUrl = new URL(next || "/", appUrl);
 
+    // 신규 가입 유저가 온보딩에 도착했을 때만 클라이언트에서 signup_completed 이벤트를 기록한다.
+    if (isNewUser && redirectUrl.pathname === "/onboarding") {
+      redirectUrl.searchParams.set("signup", "completed");
+    }
+
     console.log("[Auth Callback] Redirecting to:", redirectUrl.toString());
     console.log("[Auth Callback] Setting cookies:", cookiesToSetOnResponse.map(c => c.name));
 

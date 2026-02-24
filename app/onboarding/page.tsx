@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import * as amplitude from "@amplitude/analytics-browser";
 import { useI18n } from "@/lib/i18n";
 import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal";
 import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
@@ -21,7 +22,9 @@ function OnboardingContent() {
   const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [referralMessage, setReferralMessage] = useState("");
   const [promoStatus, setPromoStatus] = useState<PromoStatus | null>(null);
+  const hasTrackedSignupCompletionRef = useRef(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
 
   // Check if user has promo applied (from signup link)
@@ -30,6 +33,32 @@ function OnboardingContent() {
       setShowDesktopLoginNotice(true);
     }
   }, []);
+
+  useEffect(() => {
+    const signupStatus = searchParams.get("signup");
+    if (signupStatus !== "completed" || hasTrackedSignupCompletionRef.current) {
+      return;
+    }
+
+    hasTrackedSignupCompletionRef.current = true;
+
+    try {
+      amplitude.track("signup_completed", {
+        signup_method: "google_oauth",
+        completion_entry: "onboarding",
+        path: window.location.pathname,
+      });
+    } catch {
+      console.warn("[Amplitude] Failed to track signup_completed");
+    }
+
+    const cleanedParams = new URLSearchParams(searchParams.toString());
+    cleanedParams.delete("signup");
+    const nextUrl = cleanedParams.toString()
+      ? `/onboarding?${cleanedParams.toString()}`
+      : "/onboarding";
+    router.replace(nextUrl, { scroll: false });
+  }, [router, searchParams]);
 
   // Check if user has promo applied (from signup link)
   useEffect(() => {
@@ -84,7 +113,7 @@ function OnboardingContent() {
             setReferralMessage(t.onboarding.step1.referralError);
         }
       }
-    } catch (error) {
+    } catch {
       setReferralStatus("error");
       setReferralMessage(t.onboarding.step1.referralError);
     }
