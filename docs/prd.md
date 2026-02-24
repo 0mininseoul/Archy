@@ -1,787 +1,98 @@
-# 📋 **PRD (Product Requirements Document)**
-## **Archy - 자동 음성 문서화 서비스**
+# PRD - Archy (Current)
 
-**버전:** 1.0 (MVP)  
-**작성일:** 2025-11-03  
-**개발 목표 기간:** 3일  
-**배포:** Vercel  
+- 버전: 2.0
+- 기준일: 2026-02-24
+- 상태: 운영 중 제품 기준 문서
 
----
+## 1. 제품 목표
 
-## 🎯 **1. 제품 개요**
+### 1.1 비전
 
-### **1.1 제품 비전**
-"녹음 버튼 하나만 누르면, 자동으로 정리된 문서를 받아볼 수 있는 자동문서화 솔루션"
+모바일에서 녹음만 하면 문서가 자동으로 생성되고 공유까지 완료되는 워크플로우를 제공한다.
 
-### **1.2 핵심 가치**
-- **원클릭 자동화:** 녹음 → STT → AI 정리 → Notion 저장 → Slack 알림 전체 자동화
-- **즉시 사용 가능:** 복잡한 설정 없이 3단계 온보딩으로 바로 시작
-- **맞춤형 문서:** 회의록/인터뷰/강의 등 상황별 최적화된 문서 포맷
+### 1.2 핵심 성공 지표
 
-### **1.3 성공 지표**
-- **Primary KPI:** 사용자 수
-- **Secondary KPI:** 일일 활성 사용자(DAU), 처리된 총 녹음 시간
+- 월간 활성 녹음 사용자(MAU-Recorder)
+- 사용자당 월간 처리 시간(분)
+- 연동 활성률(Notion/Google/Slack)
+- 재방문율(Retention)
+- Free -> Pro 전환율
 
----
+## 2. 대상 사용자
 
-## 👥 **2. 타겟 사용자 & 페르소나**
+- 스타트업/IT 실무자: 회의 정리 자동화
+- 프리랜서/에디터: 인터뷰 기록 정리
+- 대학생/연구자: 강의/스터디 요약
 
-### **2.1 타겟 세그먼트**
-| 세그먼트 | 특징 | 주요 니즈 |
-|---------|------|----------|
-| 직장인 | 주 3-5회 미팅 | 회의록 자동 작성 |
-| 대학생 | 주 10-15시간 강의 | 강의 내용 요약 |
-| 사업자/프리랜서 | 클라이언트 미팅 | 인터뷰 기록 |
+## 3. 핵심 사용자 시나리오
 
-### **2.2 사용 시나리오**
-1. **회의 시나리오:** 팀 미팅 중 녹음 → 회의록 자동 생성 → Slack 공유
-2. **강의 시나리오:** 강의 녹음 → 핵심 요약본 생성 → 복습 자료로 활용
-3. **인터뷰 시나리오:** 인터뷰 진행 → Q&A 형식 정리 → Notion 아카이빙
+1. 녹음 시작 → 청크 전사 → 종료 → 요약 완료 → Notion/Google 저장 + Slack 알림
+2. 이동 중 앱 전환/오프라인 발생 → 세션 복구 후 이어녹음
+3. 사용자 맞춤 포맷을 기본값으로 설정해 일관된 문서 생성
 
----
+## 4. 기능 요구사항
 
-## 🏗️ **3. 시스템 아키텍처**
+### 4.1 녹음 파이프라인
 
-### **3.1 기술 스택**
-```
-Frontend:
-- Next.js 14 (App Router)
-- React 18
-- TypeScript
-- Tailwind CSS + shadcn/ui (리퀴드 글래스 효과)
-- PWA 지원 (홈 화면 추가)
+- 세션 기반 녹음 시작/재개
+- 20초 단위 청크 업로드
+- 네트워크 실패 시 재시도/큐잉
+- finalize 시 transcript 안정화 대기 후 처리
 
-Backend:
-- Next.js API Routes (서버리스)
-- Supabase (PostgreSQL + Auth + Storage)
+### 4.2 문서 생성
 
-External APIs:
-- WhisperAPI.com (STT, 30시간 무료)
-- OpenAI GPT-4o-mini (문서 정리)
-- Notion API (페이지 생성 + 파일 업로드)
-- Slack API (메시지 전송)
+- Groq STT
+- OpenAI 포맷팅
+- 제목 자동 생성
+- markdown 결과 저장
 
-Auth:
-- Google OAuth (Supabase Auth)
+### 4.3 저장/공유 연동
 
-Deployment:
-- Vercel (자동 배포 + Edge Functions)
-```
+- Notion 페이지/DB 저장
+- Google Docs 저장 + 폴더 선택
+- Slack 알림
+- Push 알림
 
-### **3.2 데이터 플로우**
-### 3.2 데이터 플로우
-```mermaid
-웹 녹음 (20초 청크) → /api/recordings/chunk (실시간 업로드)
-    ↓
-Groq Whisper V3 (실시간 전사)
-    ↓
-Supabase DB (전사본 실시간 병합)
-    ↓
-녹음 종료 → /api/recordings/finalize
-    ↓
-OpenAI GPT-4o-mini (문서 정리)
-    ↓
-Notion/Google Docs/Slack (외부 연동)
-```
+### 4.4 사용자 설정
 
----
+- 언어(ko/en)
+- Notion/Google/Slack 연결/해제
+- 포맷 생성/수정/삭제/기본값
+- 오디오 저장 토글
+- 데이터 삭제/회원 탈퇴
 
-## 🎨 **4. UI/UX 설계**
+### 4.5 과금/성장
 
-### **4.1 디자인 시스템**
-- **톤앤매너:** Notion 스타일 미니멀리즘
-- **컬러:** 화이트 베이스 + 서브틀 그라데이션
-- **효과:** 리퀴드 글래스 (Glassmorphism)
-  - `backdrop-blur-xl`
-  - 반투명 배경 (`bg-white/80`)
-  - 미묘한 그림자 + 보더
-- **모바일 퍼스트:** 320px부터 반응형
+- Free 월 350분 + 추천 보너스
+- Pro(프로모션/결제) 사용량 무제한
+- Polar checkout/webhook 기반 구독 상태 반영
 
-### **4.2 화면 구조 (6개 페이지)**
+## 5. 비기능 요구사항
 
-#### **4.2.1 랜딩 페이지 (`/`)**
-- 히어로 섹션: "녹음 한 번 하면 완성되는 자동 문서"
-- 3가지 사용 사례 (회의/인터뷰/강의)
-- CTA: "Google 아이디로 시작하기"
+- 모바일 우선 UX (PWA 포함)
+- 인증/권한 기반 데이터 격리(RLS)
+- 처리 실패 시 단계별 에러 추적
+- 외부 API 실패에 대한 복구/재시도
+- 페이지/기록 조회 성능(캐시 + pagination)
 
-#### **4.2.2 온보딩 (`/onboarding`)**
-**Step 1: Google 로그인**
-- Google OAuth 버튼
+## 6. 데이터/보안 요구사항
 
-**Step 2: 통합 연결**
-- Notion 연결 (OAuth)
-  - 기본 페이지 위치 선택 (Database Selector)
-- Slack 연결 (OAuth)
-  - 알림 받을 채널 선택
+- 기본 정책: 음성 파일 비저장
+- 저장되는 핵심 데이터: transcript/formatted_content/연동 결과 URL
+- OAuth 토큰은 서버 DB(users)에서 관리
+- 탈퇴 시 `withdrawn_users`에 아카이브 후 계정 삭제
 
-**Step 3: 문서 포맷 설정**
-- 기본 포맷 3가지 미리보기:
-  1. **회의록 형식**
-  2. **인터뷰 기록 형식**
-  3. **강의 요약본 형식**
-- "커스텀 포맷 만들기" 버튼
+## 7. 현재 스코프 vs 향후 스코프
 
-**튜토리얼 (이미지 3장)**
-- 슬라이드 1: "녹음 버튼을 누르세요"
-- 슬라이드 2: "AI가 자동으로 정리합니다"
-- 슬라이드 3: "Notion과 Slack에서 확인하세요"
+### 현재 스코프
 
-#### **4.2.3 대시보드 (`/dashboard`)**
+- 세션 녹음, 실시간 청크 전사, AI 요약
+- Notion/Google/Slack/Push
+- 추천/프로모션/결제 흐름
 
-**헤더:**
-- 로고
-- 남은 시간: "245분 / 350분"
-- 설정 아이콘 (클릭 시 `/dashboard/history` 페이지로 이동)
-- 프로필 메뉴
+### 향후 스코프(제안)
 
-**메인 영역 (단일 레이아웃 - 심플):**
-
-**중앙: 녹음 컨트롤 (리퀴드 글래스 카드)**
-```
-┌─────────────────────────┐
-│   🎙️ 새 녹음 시작       │
-│                         │
-│   ⏺️  [REC 버튼]         │
-│   00:00:00              │
-│   📝 포맷 선택:          │
-│   [회의록 ▼]             │
-│   [⏹️ 중지] [⏸️ 일시정지] │
-└─────────────────────────┘
-```
-
-#### **4.2.4 녹음 히스토리 (`/dashboard/history`)**
-
-**헤더:**
-- 뒤로 가기 버튼
-- "녹음 히스토리" 제목
-
-**메인 영역:**
-
-**최근 녹음 리스트**
-```
-┌─────────────────────────┐
-│ 📂 최근 녹음            │
-│                         │
-│ 🟢 팀 미팅 (2분 전)     │
-│    12분 · 처리 완료     │
-│    [Notion] [Slack]     │
-│                         │
-│ 🟡 인터뷰 기록 (15분 전) │
-│    25분 · 처리 중...    │
-│                         │
-│ ⚪ 강의 요약 (1시간 전)  │
-│    45분 · 처리 완료     │
-│    [Notion] [Slack]     │
-│                         │
-│ [더 보기]               │
-└─────────────────────────┘
-```
-
-**기능:**
-- 무한 스크롤 또는 페이지네이션
-- 각 항목 클릭 시 상세 내역 보기
-- 처리 상태별 필터 (전체/처리중/완료/실패)
-
-#### **4.2.5 설정 (`/dashboard/settings`)**
-- **계정 정보**
-  - 이메일
-  - 사용량: 105분 / 350분
-- **연결된 통합**
-  - Notion (재연결/변경)
-  - Slack (재연결/변경)
-- **데이터 관리**
-  - 30일 이상 녹음 자동 삭제 (ON/OFF)
-  - "모든 데이터 삭제" 버튼 (확인 모달)
-- **로그아웃**
-
-#### **4.2.6 포맷 설정 (`/dashboard/settings/formats`)**
-
-**기본 포맷 (수정 가능)**
-```
-┌─────────────────────────┐
-│ 회의록 형식             │
-│ [편집]  [미리보기]       │
-│                         │
-│ 프롬프트:               │
-│ "다음 회의 내용을...    │
-│  1. 참석자             │
-│  2. 주요 안건..."       │
-└─────────────────────────┘
-```
-
-**+ 커스텀 포맷 추가**
-- 포맷 이름
-- AI 프롬프트 (멀티라인 텍스트박스)
-- 저장 버튼
-
----
-
-## ⚙️ **5. 핵심 기능 명세**
-
-### **5.1 녹음 기능**
-
-**요구사항:**
-- 웹 브라우저에서 실시간 오디오 녹음
-- 최대 녹음 시간: 120분
-- 지원 브라우저: Chrome, Safari, Edge
-- 포맷: WebM (브라우저 기본) → MP3 변환
-
-**기술 구현:**
-```typescript
-// Web Audio API 사용
-const mediaRecorder = new MediaRecorder(stream, {
-  mimeType: 'audio/webm'
-});
-
-// 실시간 타이머 표시
-// 파일 크기 제한: 500MB
-```
-
-**UX 플로우:**
-1. "녹음 시작" 버튼 클릭
-2. 브라우저 마이크 권한 요청
-3. 녹음 중 표시: 빨간 점 + 타이머
-4. 일시정지/재개 가능
-5. "중지" 클릭 → 자동 업로드 + 처리 시작
-
-### **5.2 STT 변환**
-
-**API:** WhisperAPI.com
-- 모델: Whisper Large V3
-- 언어: 자동 감지 (한국어/영어 우선)
-- 타임스탬프: 활성화
-- 화자 분리(Diarization): 활성화
-
-**에러 처리:**
-- 무료 한도 초과 시: 사용자에게 대기 안내
-- API 실패 시: 3회 재시도 → 실패 알림
-
-### **5.3 AI 문서 정리**
-
-**API:** OpenAI gpt-4o-mini
-**모델:** `gpt-4o-mini`
-
-**기본 프롬프트 (3가지):**
-
-**1) 회의록 형식**
-```
-다음 회의 녹취록을 회의록 형식으로 정리해주세요:
-
-[트랜스크립트]
-
-## 회의 정보
-- 일시: [자동 입력]
-- 참석자: [추출]
-
-## 주요 안건
-1. 
-2. 
-
-## 결정 사항
-- 
-
-## 액션 아이템
-- [ ] 
-- [ ] 
-
-## 다음 회의
-- 
-```
-
-**2) 인터뷰 기록 형식**
-```
-다음 인터뷰 녹취록을 Q&A 형식으로 정리해주세요:
-
-[트랜스크립트]
-
-## 인터뷰 개요
-- 인터뷰이: 
-- 주제: 
-
-## 질문과 답변
-
-**Q1. [질문]**
-A. [답변 요약]
-
-**Q2. [질문]**
-A. [답변 요약]
-
-## 핵심 인사이트
-- 
-```
-
-**3) 강의 요약본 형식**
-```
-다음 강의 녹취록을 요약본 형식으로 정리해주세요:
-
-[트랜스크립트]
-
-## 강의 정보
-- 주제: 
-- 핵심 개념: 
-
-## 주요 내용
-### 1. [섹션명]
-- 
-
-### 2. [섹션명]
-- 
-
-## 핵심 요점 정리
-1. 
-2. 
-3. 
-
-## 추가 학습 추천
-- 
-```
-
-**커스텀 프롬프트:**
-- 사용자가 설정 페이지에서 자유롭게 작성
-- 템플릿 변수: `{{transcript}}`, `{{date}}`, `{{duration}}`
-
-### **5.4 Notion 통합**
-
-**요구사항:**
-- OAuth 2.0 인증
-- 사용자 선택 Database에 페이지 생성
-- 페이지에 포함될 내용:
-  - 제목: "Archy - YYYY-MM-DD HH:MM"
-  - 본문: AI 정리 문서 (Markdown)
-  - 첨부 파일: 원본 오디오 파일 (MP3)
-  - 속성:
-    - 포맷: Select (회의록/인터뷰/강의)
-    - 녹음 시간: Number (분)
-    - 생성일: Date
-
-**기술 구현:**
-```typescript
-// Notion API 호출
-await notion.pages.create({
-  parent: { database_id: userSettings.notionDatabaseId },
-  properties: {
-    title: { title: [{ text: { content: title } }] },
-    format: { select: { name: format } },
-    duration: { number: durationMinutes },
-  },
-  children: [
-    // Markdown 블록들
-    { type: 'paragraph', paragraph: {...} },
-    // 오디오 파일
-    { type: 'file', file: { external: { url: audioUrl } } }
-  ]
-});
-```
-
-### **5.5 Slack 통합**
-
-**요구사항:**
-- OAuth 2.0 인증
-- 사용자 선택 채널에 메시지 전송
-- 메시지 포맷:
-
-```
-✅ 녹음 처리 완료!
-
-📝 *팀 미팅*
-⏱️ 12분
-📅 2025-01-03 15:30
-
-🔗 [Notion에서 보기](https://notion.so/page-id)
-```
-
-**기술 구현:**
-```typescript
-await slack.chat.postMessage({
-  channel: userSettings.slackChannelId,
-  blocks: [
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: message }
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "Notion에서 보기" },
-          url: notionPageUrl
-        }
-      ]
-    }
-  ]
-});
-```
-
-### **5.6 사용량 관리**
-
-**제한:**
-- 계정당 월 350분
-- 매월 1일 00:00 UTC 리셋
-
-**DB 스키마:**
-```sql
-users (
-  id uuid primary key,
-  email text,
-  google_id text,
-  monthly_minutes_used integer default 0,
-  last_reset_at timestamp,
-  created_at timestamp
-)
-```
-
-**체크 로직:**
-```typescript
-// 녹음 시작 전
-if (user.monthly_minutes_used >= 350) {
-  throw new Error("월 사용량 초과");
-}
-
-// 녹음 후
-await updateUserMinutes(userId, recordingDuration);
-```
-
-### **5.7 데이터 관리**
-
-**30일 자동 삭제:**
-- 매일 00:00 UTC Cron Job (Vercel Cron)
-- 30일 이상 녹음 파일 삭제
-- 트랜스크립트는 유지 (텍스트만)
-
-**수동 삭제:**
-- 설정 > "모든 데이터 삭제"
-- 확인 모달: "정말 삭제하시겠습니까? (복구 불가)"
-- Supabase Storage + DB 모두 삭제
-
----
-
-## 🗄️ **6. 데이터베이스 스키마**
-
-### **6.1 Supabase Tables**
-
-```sql
--- 사용자
-CREATE TABLE users (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email text UNIQUE NOT NULL,
-  google_id text UNIQUE NOT NULL,
-  notion_access_token text,
-  notion_database_id text,
-  slack_access_token text,
-  slack_channel_id text,
-  monthly_minutes_used integer DEFAULT 0,
-  last_reset_at timestamp DEFAULT now(),
-  created_at timestamp DEFAULT now()
-);
-
--- 녹음 기록
-CREATE TABLE recordings (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  title text NOT NULL,
-  audio_file_path text NOT NULL, -- Supabase Storage path
-  duration_seconds integer NOT NULL,
-  format text NOT NULL, -- 'meeting', 'interview', 'lecture'
-  status text DEFAULT 'processing', -- 'processing', 'completed', 'failed'
-  transcript text,
-  formatted_content text,
-  notion_page_url text,
-  created_at timestamp DEFAULT now()
-);
-
--- 커스텀 포맷
-CREATE TABLE custom_formats (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  name text NOT NULL,
-  prompt text NOT NULL,
-  created_at timestamp DEFAULT now()
-);
-
--- Row Level Security 활성화
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recordings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE custom_formats ENABLE ROW LEVEL SECURITY;
-
--- RLS 정책
-CREATE POLICY "Users can view own data" ON users
-  FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "Users can view own recordings" ON recordings
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can view own formats" ON custom_formats
-  FOR ALL USING (auth.uid() = user_id);
-```
-
-### **6.2 Supabase Storage Buckets**
-
-```
-recordings/
-  └── {user_id}/
-      └── {recording_id}.mp3
-```
-
----
-
-## 🔄 **7. API 엔드포인트 설계**
-
-### **7.1 Next.js API Routes**
-
-```typescript
-// POST /api/recordings/start
-// 녹음 시작 (메타데이터 생성)
-{
-  format: 'meeting' | 'interview' | 'lecture',
-  customFormatId?: string
-}
-→ { recordingId: uuid }
-
-// POST /api/recordings/{id}/upload
-// 오디오 파일 업로드 (multipart/form-data)
-FormData: audioFile
-→ { success: true }
-
-// POST /api/recordings/{id}/process
-// STT + AI 정리 + Notion + Slack (백그라운드 작업)
-→ { status: 'processing' }
-
-// GET /api/recordings
-// 사용자의 녹음 목록
-→ { recordings: [...] }
-
-// GET /api/recordings/{id}
-// 특정 녹음 상세
-→ { recording: {...} }
-
-// DELETE /api/recordings/{id}
-// 녹음 삭제
-→ { success: true }
-
-// GET /api/user/usage
-// 사용량 조회
-→ { used: 105, limit: 350 }
-
-// DELETE /api/user/data
-// 모든 데이터 삭제
-→ { success: true }
-
-// GET /api/formats
-// 커스텀 포맷 목록
-→ { formats: [...] }
-
-// POST /api/formats
-// 커스텀 포맷 생성
-{ name: string, prompt: string }
-→ { format: {...} }
-
-// PUT /api/formats/{id}
-// 커스텀 포맷 수정
-{ name: string, prompt: string }
-→ { format: {...} }
-
-// DELETE /api/formats/{id}
-// 커스텀 포맷 삭제
-→ { success: true }
-```
-
----
-
-## 🎯 **8. MVP 개발 우선순위 (3일 계획)**
-
-### **Day 1: 인프라 + 인증**
-- [ ] Next.js 프로젝트 셋업 (Tailwind + shadcn/ui)
-- [ ] Supabase 프로젝트 생성 + DB 스키마
-- [ ] Google OAuth 로그인 구현
-- [ ] 랜딩 페이지 (간단한 버전)
-- [ ] 온보딩 Step 1 (로그인)
-
-### **Day 2: 핵심 플로우**
-- [ ] 웹 녹음 기능 구현
-- [ ] Supabase Storage 업로드
-- [ ] WhisperAPI.com 연동 (STT)
-- [ ] OpenAI GPT-4o-mini 연동 (문서 정리)
-- [ ] 기본 포맷 3가지 프롬프트 작성
-- [ ] 대시보드 UI (녹음 버튼)
-- [ ] 녹음 히스토리 페이지
-
-### **Day 3: 통합 + 배포**
-- [ ] Notion OAuth + 페이지 생성 (오디오 첨부 포함)
-- [ ] Slack OAuth + 메시지 전송
-- [ ] 온보딩 Step 2-3 완성
-- [ ] 포맷 설정 페이지
-- [ ] 설정 페이지 (데이터 삭제 포함)
-- [ ] PWA 설정 (manifest.json, service worker)
-- [ ] 리퀴드 글래스 디자인 적용
-- [ ] Vercel 배포
-- [ ] 베타 테스터 초대
-
-**연기 가능 (Post-MVP):**
-- 튜토리얼 이미지 제작
-- 고급 에러 핸들링
-- 성능 최적화
-- 분석 대시보드
-
----
-
-## 🚨 **9. 리스크 & 대응 방안**
-
-| 리스크 | 영향 | 대응 방안 |
-|-------|------|----------|
-| WhisperAPI 무료 한도 소진 | 높음 | Groq Whisper 백업 API 준비 |
-| Notion API 속도 제한 | 중간 | 큐잉 시스템 (SQS 또는 Supabase Queue) |
-| 대용량 파일 업로드 실패 | 중간 | Chunk 업로드 구현 |
-| OpenAI API 비용 급증 | 높음 | 토큰 제한 (max_tokens: 2000) |
-| 브라우저 마이크 권한 거부 | 낮음 | 친절한 안내 메시지 |
-
----
-
-## 📊 **10. 성공 지표 & 모니터링**
-
-### **10.1 추적 지표**
-- 신규 가입자 수
-- 일일 활성 사용자(DAU)
-- 녹음 완료율 (시작/완료 비율)
-- 평균 녹음 시간
-- Notion/Slack 연결률
-- 에러율
-
-### **10.2 모니터링 도구**
-- Vercel Analytics (트래픽)
-- Supabase Dashboard (DB 쿼리)
-- Sentry (에러 트래킹) - Post-MVP
-
----
-
-## 🎨 **11. 디자인 가이드**
-
-### **11.1 리퀴드 글래스 컴포넌트 예시**
-
-```tsx
-// 녹음 카드
-<div className="
-  relative
-  bg-white/80 dark:bg-gray-900/80
-  backdrop-blur-xl
-  border border-white/20
-  rounded-3xl
-  p-8
-  shadow-xl shadow-purple-500/10
-  hover:shadow-2xl hover:shadow-purple-500/20
-  transition-all duration-300
-">
-  {/* 내용 */}
-</div>
-```
-
-### **11.2 컬러 팔레트**
-```css
-/* Primary */
---primary: #6366f1; /* Indigo */
---primary-light: #818cf8;
---primary-dark: #4f46e5;
-
-/* Background */
---bg-base: #ffffff;
---bg-glass: rgba(255, 255, 255, 0.8);
-
-/* Border */
---border-glass: rgba(255, 255, 255, 0.2);
-
-/* Shadow */
---shadow-glass: 0 8px 32px rgba(99, 102, 241, 0.1);
-```
-
----
-
-## 📝 **12. 추가 요구사항**
-
-### **12.1 PWA 설정**
-```json
-// public/manifest.json
-{
-  "name": "Archy",
-  "short_name": "Archy",
-  "description": "자동 음성 문서화 서비스",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#6366f1",
-  "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
-}
-```
-
-**"홈 화면에 추가" 유도:**
-- iOS: Safari 공유 버튼 안내
-- Android: 자동 프롬프트
-
----
-
-## ✅ **13. MVP 체크리스트**
-
-### **필수 기능 (Must Have)**
-- [x] Google 로그인
-- [x] 웹 녹음 (최대 120분, 청크 분할 전송)
-- [x] STT 변환 (Groq Whisper V3)
-- [x] AI 문서 정리 (GPT-4o-mini, 3가지 기본 포맷)
-- [x] Notion 페이지 생성 (원본 오디오 첨부 포함)
-- [x] Slack 알림
-- [x] 대시보드 (녹음 + 히스토리)
-- [x] 포맷 설정 (커스텀 가능)
-- [x] 사용량 제한 (350분/월)
-- [x] 데이터 삭제 기능
-- [x] 30일 자동 삭제
-- [x] PWA 지원
-- [x] 리퀴드 글래스 디자인
-- [x] 모바일 반응형
-- [x] Google Docs 연동
-
-### **연기 가능 (Nice to Have)**
-- [ ] 튜토리얼 이미지 3장
-- [x] 다국어 지원 (한국어/영어)
-- [x] 실시간 진행 상황 표시 (전사 중 표시)
-- [ ] 녹음 편집 기능
-- [ ] 팀 공유 기능
-
----
-
-## 🚀 **14. 출시 계획**
-
-### **14.1 베타 출시 (Day 3)**
-- 지인 10명 초대
-- 피드백 수집 채널 (Slack/Discord)
-- 버그 트래킹 (Notion Database)
-
-### **14.2 피드백 우선순위**
-1. 크리티컬 버그 (즉시 수정)
-2. UX 개선 (1주 이내)
-3. 기능 추가 요청 (백로그)
-
-### **14.3 Post-MVP 로드맵 (1-2주)**
-- 튜토리얼 완성
-- 에러 핸들링 강화
-- 성능 최적화
-- 유료 플랜 설계
-
----
-
-## 📞 **15. 개발 중 의사결정 필요 사항**
-
-다음 상황 발생 시 추가 논의 필요:
-
-1. **WhisperAPI 무료 한도 조기 소진** → Groq로 전환?
-2. **OpenAI 비용 $10 초과** → 토큰 제한 강화?
-3. **Notion API Rate Limit 도달** → 큐잉 시스템 도입?
-4. **사용자 피드백: 실시간 진행 상황 필수** → WebSocket 추가?
+- 실시간 진행률 WebSocket
+- 팀 워크스페이스 공유
+- 오디오 편집 기능
+- 테스트 커버리지 확장(unit/e2e)

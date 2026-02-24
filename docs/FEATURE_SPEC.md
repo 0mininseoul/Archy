@@ -1,316 +1,186 @@
 # Archy 기능 명세서
 
-**버전:** 3.0
-**최종 업데이트:** 2026-01-10
+- 버전: 2026.02
+- 최종 업데이트: 2026-02-24
 
----
+## 1. 서비스 요약
 
-## 1. 서비스 개요
+Archy는 모바일 웹/PWA 중심의 음성 자동 문서화 서비스입니다.
 
-**Archy**는 음성을 자동으로 문서화하는 AI 기반 서비스입니다.
+기본 흐름:
+1. 녹음 세션 시작 (`/api/recordings/start`)
+2. 20초 단위 청크 전송/전사 (`/api/recordings/chunk`)
+3. 종료 후 문서 정리/저장 (`/api/recordings/finalize`)
 
-| 항목 | 설명 |
-|------|------|
-| **서비스명** | Archy |
-| **핵심 가치** | 녹음 한 번으로 완성되는 자동 문서 |
-| **타겟 사용자** | 직장인, 대학생, 프리랜서 |
-| **플랫폼** | 웹 (PWA 지원) |
+## 2. 핵심 사용자 가치
 
----
+- 회의/강의/인터뷰의 기록 자동화
+- Notion/Google Docs/Slack으로 후처리 자동화
+- 모바일 환경에서 끊김 대비(청크 재시도/세션 복구)
+- 텍스트 중심 저장(오디오 저장은 선택 기능)
 
-## 2. 핵심 기능
+## 3. 기능 명세
 
-### 2.1 음성 녹음
-| 기능 | 상세 |
-|------|------|
-| 웹 녹음 | 브라우저 전용 녹음 (MediaRecorder API) |
-| 안정성 | 20초 단위 청크 분할 전송 (네트워크 불안정 대비) |
-| 이어하기 | 녹음 중단 시 세션 자동 저장 및 복구 (LocalStorage) |
-| 백그라운드 | PWA 백그라운드 녹음 지원 (Silent Audio Keep-Alive) |
-| 최대 시간 | 120분 |
-| 화면 유지 | Wake Lock API로 녹음 중 화면 꺼짐 방지 |
+### 3.1 녹음/전사
 
-### 2.2 실시간 음성 전사 (Real-time STT)
-| 기능 | 상세 |
-|------|------|
-| API | Groq Whisper Large V3 |
-| 처리 방식 | 20초 주기 청크 단위 실시간 전사 및 병합 |
-| 언어 | 다국어 자동 감지 (한국어/영어 우선) |
-| 정확도 | 99% (Whisper Large V3 기준) |
+- 청크 길이: 20초 (`useChunkedRecorder`)
+- 업로드 재시도: 지수 백오프, 최대 5회 (`ChunkUploadManager`)
+- 파일 제한: 청크 4MB 초과 시 거부
+- 중복 청크 방지: `last_chunk_index` 기반
+- 세션 복구: `session_paused_at` + localStorage/sessionStorage 기반
+- 상태값:
+  - `recording`
+  - `processing`
+  - `completed`
+  - `failed`
 
-### 2.3 AI 문서 정리
-| 기능 | 상세 |
-|------|------|
-| API | OpenAI GPT-4o-mini |
-| 기본 포맷 | 회의록 형식 (참석자, 주요 안건, 결정 사항, 액션 아이템) |
-| 커스텀 포맷 | 사용자 정의 프롬프트 지원 (최대 3개) |
-| 출력 형식 | Markdown |
+### 3.2 AI 문서 정리
 
-### 2.4 Notion 연동
-| 기능 | 상세 |
-|------|------|
-| 인증 | OAuth 2.0 |
-| 저장 위치 | 사용자 선택 데이터베이스 |
-| 자동 생성 | 페이지 자동 생성 (제목, 본문, 속성) |
-| 속성 | 포맷, 녹음 시간, 생성일 |
+- 모델: OpenAI `gpt-4o-mini`
+- 기본 정책: Universal Prompt(맥락 기반 제목 + 구조화 문서)
+- 커스텀 포맷: 사용자가 생성한 프롬프트 중 기본값(`is_default`) 우선
+- 결과 저장:
+  - `formatted_content`
+  - AI 제목(`title`)
 
-### 2.5 Slack 연동
-| 기능 | 상세 |
-|------|------|
-| 인증 | OAuth 2.0 |
-| 알림 채널 | 사용자 선택 채널 |
-| 알림 내용 | 완료 알림 + Notion 페이지 링크 |
+### 3.3 외부 연동
 
-### 2.6 실시간 처리 상태
-| 단계 | 표시 텍스트 |
-|------|------------|
-| transcription | 전사 중... / Transcribing... |
-| formatting | 요약 중... / Summarizing... |
-| saving | 저장 중... / Saving... |
+- Notion
+  - OAuth 연동 + 수동 토큰/URL 연동(`user/notion-manual`)
+  - 저장 대상: page/database
+  - 저장 대상 탐색 API: fast/deep + 검색
+- Google Docs/Drive
+  - OAuth 토큰 저장 및 refresh
+  - 폴더 선택 저장
+- Slack
+  - OAuth 후 DM 채널 자동 오픈 시도
+  - 처리 완료 메시지 + 문서 링크 버튼
+- Push
+  - Web Push(VAPID)
+  - 처리 완료/일시정지 알림
 
-- 3초 간격 폴링으로 실시간 업데이트
-- 처리 중인 녹음이 있을 때 안내 문구 표시
+### 3.4 설정/운영 기능
 
-### 2.7 Push 알림
-| 기능 | 상세 |
-|------|------|
-| 기술 | Web Push API + web-push 라이브러리 |
-| 트리거 | 녹음 처리 완료 시 자동 발송 |
-| 설정 | 설정 페이지에서 ON/OFF 가능 |
+- 언어 설정: `ko`, `en`
+- 오디오 저장 토글: `save_audio_enabled`
+- 데이터 전체 삭제: recordings/custom_formats/연동정보 초기화
+- 회원 탈퇴: `withdrawn_users` 아카이브 후 계정 삭제
 
-### 2.8 리퍼럴 시스템
-| 기능 | 상세 |
-|------|------|
-| 추천 코드 | 사용자별 고유 8자리 코드 |
-| 보너스 | 추천인/피추천인 모두 보너스 분 적립 |
-| 적용 시점 | 온보딩 Step 1에서 입력 |
+### 3.5 사용량/플랜
 
-### 2.9 Google Docs 연동
-| 기능 | 상세 |
-|------|------|
-| 인증 | Google OAuth 2.0 |
-| 저장 위치 | 사용자 Google Drive |
-| 자동 생성 | 문서 자동 생성 |
+- Free 기본 한도: 월 350분
+- 추천 보너스: 추천인/피추천인 각 +350분
+- Pro 상태:
+  - 프로모션 코드 또는 Polar 구독 이벤트로 부여
+  - 활성 기간 동안 사용량 무제한
+- 커스텀 포맷 제한:
+  - Free: 1개
+  - Pro: 사실상 무제한(999)
 
-### 2.10 사용자 탈퇴
-| 기능 | 상세 |
-|------|------|
-| 탈퇴 처리 | 사용자 데이터 삭제 + withdrawn_users 테이블 이동 |
-| 데이터 보관 | 탈퇴 사용자 데이터 별도 보관 |
+## 4. 주요 화면
 
----
+- `/`: 랜딩 (기능 소개, 연동 소개, Google 로그인)
+- `/onboarding`: 2단계 온보딩
+- `/dashboard`: 녹음 시작/중지, 파형, 스텔스 모드
+- `/dashboard/history`: 상태별 기록, 고정/숨김, 무한 스크롤
+- `/dashboard/recordings/[id]`: 전사본/정리본/오디오 플레이어(선택)
+- `/dashboard/settings`: 계정/연동/포맷/알림/데이터/언어/플랜
 
-## 3. 페이지별 기능
+## 5. API 요약
 
-### 3.1 랜딩 페이지 (`/`)
+### 5.1 인증
 
-| 섹션 | 기능 |
-|------|------|
-| Navigation | 로고, Features/How it works 링크, "시작하기" 버튼 |
-| Hero | 핵심 메시지, "무료로 시작하기" 버튼 |
-| Features | 3가지 핵심 기능 소개 (녹음, 전사, 요약) |
-| How It Works | 4단계 프로세스 (녹음→전사→정리→공유) |
-| Integrations | Notion, Slack, Google 로고 및 설명 |
-| CTA | 하단 행동 유도 섹션, "무료로 시작하기" 버튼 |
-| Footer | 사업자 정보, 개인정보처리방침, 이용약관 링크 |
+- `GET /api/auth/callback`
+- `POST /api/auth/signout`
+- `GET /api/auth/notion`
+- `GET /api/auth/notion/callback`
+- `GET /api/auth/google`
+- `GET /api/auth/google/callback`
+- `GET /api/auth/slack`
+- `GET /api/auth/slack/callback`
 
-**버튼 텍스트:**
-- Navigation 버튼: "시작하기" (Google 심볼 없음)
-- Hero/CTA 버튼: "무료로 시작하기" (Google 심볼 없음)
+### 5.2 녹음 파이프라인
 
-### 3.2 온보딩 페이지 (`/onboarding`)
+- `POST /api/recordings/start`
+- `GET /api/recordings/start`
+- `POST /api/recordings/chunk`
+- `POST /api/recordings/finalize`
+- `POST /api/recordings/pause-notify`
 
-| 단계 | 기능 |
-|------|------|
-| Step 1 | 환영 메시지, "시작하기" 버튼 |
-| Step 2 | Notion/Slack 연결, "뒤로", "건너뛰기", "다음" 버튼 |
-| Step 3 | 포맷 선택 (기본/커스텀), "뒤로", "설정 완료" 버튼 |
-| Step 4 | PWA 설치 안내, 완료 버튼 |
+### 5.3 녹음 조회/관리
 
-### 3.3 대시보드 페이지 (`/dashboard`)
+- `GET /api/recordings`
+- `POST /api/recordings` (레거시 업로드 경로)
+- `GET /api/recordings/[id]`
+- `PATCH /api/recordings/[id]` (title/is_hidden/is_pinned)
+- `DELETE /api/recordings/[id]`
+- `GET /api/recordings/[id]/audio`
 
-| 기능 | 상세 |
-|------|------|
-| 헤더 | Archy 로고 |
-| 녹음 카드 | 녹음 버튼, 타이머, 일시정지/중지 |
-| 연동 경고 | Notion/Slack 미연동 시 주의 문구 표시 |
-| 개인정보 안내 | "음성 녹음해도 어차피 안 들으시죠? 음성은 텍스트로 변환된 후 즉시 폐기해 드립니다." |
-| 하단 탭 | 녹음, 기록, 설정 네비게이션 |
+### 5.4 사용자/설정
 
-**연동 경고 문구:**
-- Notion 미연동: "Notion이 연결되지 않았습니다. 녹음 내용이 Notion에 저장되지 않습니다."
-- Slack 미연동: "Slack이 연결되지 않았습니다. 완료 알림이 발송되지 않습니다."
+- `GET /api/user`
+- `GET /api/user/usage`
+- `GET|PUT /api/user/language`
+- `POST /api/user/onboarding`
+- `GET|DELETE /api/user/data`
+- `GET /api/user/profile`
+- `GET|POST /api/user/referral`
+- `GET|PATCH /api/user/audio-storage`
+- `GET|POST|DELETE /api/user/push-subscription`
+- `PATCH /api/user/push-enabled`
+- `PUT|DELETE /api/user/google`
+- `PUT|DELETE /api/user/notion-database`
+- `POST /api/user/notion-manual`
+- `DELETE /api/user/slack`
+- `POST /api/user/pwa-install`
+- `DELETE /api/user/withdraw`
 
-### 3.4 기록 페이지 (`/dashboard/history`)
+### 5.5 Notion 도구 API
 
-| 기능 | 상세 |
-|------|------|
-| 필터 | 전체, 처리 중, 완료, 실패 |
-| 처리 중 안내 | "이 페이지에서 나가셔도 자동으로 처리 후 슬랙으로 알려드립니다." |
-| 녹음 카드 | 제목(편집 가능), 상태, 시간, Notion 링크, 삭제 버튼 |
-| 실시간 상태 | 전사 중.../요약 중.../저장 중... 표시 |
-| 에러 표시 | 실패 시 에러 단계 및 메시지 표시 |
-| 폴링 | 처리 중 녹음 있을 시 3초 간격 자동 새로고침 |
+- `GET /api/notion/pages`
+- `GET /api/notion/databases`
+- `POST /api/notion/page`
+- `POST /api/notion/database`
+- `GET /api/notion/save-targets`
+- `GET /api/notion/save-targets/search`
 
-### 3.5 녹음 상세 페이지 (`/dashboard/recordings/[id]`)
+### 5.6 포맷/프로모션/결제
 
-| 기능 | 상세 |
-|------|------|
-| 전사본 | 원본 텍스트 표시 |
-| 정리된 내용 | AI 요약 결과 표시 |
-| 토글 | 전사본/정리된 내용 전환 |
-| 메타데이터 | 녹음 시간, 생성일 |
+- `GET|POST|PUT|DELETE /api/formats`
+- `GET /api/promo/status`
+- `POST /api/promo/apply`
+- `GET /api/admin/promo/stats`
+- `GET /api/checkout`
+- `POST /api/webhook/polar`
 
-### 3.6 설정 페이지 (`/dashboard/settings`)
+## 6. 데이터 모델 핵심
 
-| 섹션 | 기능 |
-|------|------|
-| 계정 정보 | 이메일, 사용량 (X분/350분) |
-| Notion 연동 | 연결 상태, 저장 위치 설정, 재연결 |
-| Slack 연동 | 연결 상태, 재연결 |
-| 요약 포맷 | 기본/커스텀 포맷 관리 |
-| 언어 설정 | 한국어/English 선택 |
-| 푸시 알림 | ON/OFF 설정 |
-| 리퍼럴 코드 | 내 추천 코드 확인 및 복사 |
-| 데이터 관리 | 30일 자동 삭제 안내, 모든 데이터 삭제 |
-| 탈퇴 | 사용자 탈퇴 버튼 |
-| 로그아웃 | 로그아웃 버튼 |
+### users
 
----
+주요 필드:
+- 기본: `id`, `email`, `google_id`, `name`, `language`, `is_onboarded`
+- 연동: Notion/Slack/Google 토큰 및 대상 정보
+- 알림: `push_subscription`, `push_enabled`
+- 저장옵션: `save_audio_enabled`
+- 사용량: `monthly_minutes_used`, `bonus_minutes`, `last_reset_at`
+- 성장/플랜: `referral_code`, `referred_by`, `promo_*`
 
-## 4. 데이터 타입
+### recordings
 
-### 4.1 Recording
-```typescript
-interface Recording {
-  id: string;
-  user_id: string;
-  title: string;
-  audio_file_path: string | null;
-  duration_seconds: number;
-  format: "meeting" | "interview" | "lecture" | "custom";
-  status: "processing" | "completed" | "failed";
-  processing_step?: "transcription" | "formatting" | "saving";
-  transcript?: string;
-  formatted_content?: string;
-  notion_page_url?: string;
-  error_message?: string;
-  error_step?: "upload" | "transcription" | "formatting" | "notion" | "slack";
-  created_at: string;
-}
-```
+주요 필드:
+- 상태: `status`, `processing_step`, `error_step`, `error_message`
+- 결과: `transcript`, `formatted_content`, `notion_page_url`, `google_doc_url`
+- 세션: `last_chunk_index`, `session_paused_at`
+- UX: `is_hidden`, `is_pinned`
 
-### 4.2 User
-```typescript
-interface User {
-  id: string;
-  email: string;
-  google_id: string;
-  name?: string;
-  notion_access_token?: string;
-  notion_database_id?: string;
-  notion_save_target_type?: "database" | "page";
-  notion_save_target_id?: string;
-  slack_access_token?: string;
-  slack_channel_id?: string;
-  google_access_token?: string;
-  google_refresh_token?: string;
-  google_docs_enabled?: boolean;
-  monthly_minutes_used: number;
-  bonus_minutes: number;
-  last_reset_at: string;
-  language: "ko" | "en";
-  is_onboarded: boolean;
-  push_enabled: boolean;
-  push_subscription?: object;
-  referral_code: string;
-  referred_by?: string;
-  created_at: string;
-}
-```
+### 기타
 
-### 4.3 CustomFormat
-```typescript
-interface CustomFormat {
-  id: string;
-  user_id: string;
-  name: string;
-  prompt: string;
-  created_at: string;
-}
-```
+- `custom_formats` (사용자 포맷)
+- `promo_codes` (프로모션)
+- `withdrawn_users` (탈퇴 사용자 아카이브)
 
----
+## 7. 알려진 운영 제약
 
-## 5. 제한 사항
-
-| 항목 | 제한 |
-|------|------|
-| 월 사용량 | 350분/계정 |
-| 최대 녹음 시간 | 120분 |
-| 커스텀 포맷 | 최대 3개 |
-| 데이터 보관 | 30일 후 자동 삭제 |
-| 오디오 저장 | 저장 안 함 (텍스트만 보관) |
-
----
-
-## 6. 에러 처리
-
-| 에러 단계 | 설명 | 사용자 표시 |
-|----------|------|------------|
-| upload | 파일 업로드 실패 | 파일 업로드 단계 |
-| transcription | 음성 전사 실패 | 음성 전사 단계 |
-| formatting | AI 정리 실패 | AI 포맷팅 단계 |
-| notion | Notion 저장 실패 | Notion 연동 단계 |
-| slack | Slack 알림 실패 | Slack 알림 단계 |
-
-- transcription 실패: 처리 중단
-- formatting 실패: 원본 전사본으로 대체, 처리 계속
-- notion/slack 실패: 에러 기록 후 처리 완료
-
----
-
-## 7. 다국어 지원
-
-### 7.1 지원 언어
-- 한국어 (ko)
-- 영어 (en)
-
-### 7.2 언어 감지 순서
-1. 사용자 설정 (DB)
-2. Cookie (`archy_locale`)
-3. Vercel GeoIP 헤더 (한국이면 ko, 그 외 en)
-
----
-
-## 8. PWA 기능
-
-| 기능 | 상세 |
-|------|------|
-| 백그라운드 녹음 | 화면이 꺼지거나 앱이 백그라운드로 가도 녹음 유지 (iOS/Android) |
-| 스마트 일시정지 | 백그라운드 전환 시 자동 저장 및 푸시 알림 발송 |
-| 오프라인 지원 | Service Worker 캐싱 |
-| 설치 가능 | manifest.json 제공 (A2HS) |
-| 아이콘 | 192x192, 512x512, Maskable 지원 |
-| 테마 색상 | #0f172a (Slate 900) |
-
----
-
-## 9. 보안
-
-| 항목 | 상세 |
-|------|------|
-| 인증 | Google OAuth 2.0 (Supabase Auth) |
-| 데이터 격리 | Row Level Security (RLS) |
-| 오디오 보안 | 서버 메모리에서만 처리, 저장 안 함 |
-| API 보호 | 서버 사이드 토큰 관리 |
-
----
-
-## 10. 향후 계획
-
-- [ ] WebSocket 기반 실시간 진행 상황 표시
-- [ ] 녹음 편집 기능
-- [ ] 팀 공유 기능
-- [ ] 추가 언어 지원
-- [ ] 유료 플랜
+- 녹음 UI는 120분 가이드를 표시하지만, 실제 강제 종료는 클라이언트 로직에서 자동 stop 처리하지 않습니다.
+- 오디오 저장이 꺼져 있으면 오디오 파일 재생 URL이 제공되지 않습니다.
+- Notion deep 탐색은 sync token 기반 점진 동기화이며 partial 결과가 반환될 수 있습니다.

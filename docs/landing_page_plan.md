@@ -1,119 +1,76 @@
-# Archy 랜딩 페이지 리디자인 기획서 (Final)
+# Archy 랜딩/초기 진입 UX 계획 (Current Snapshot)
 
-## 1. 서비스 개요
+최종 업데이트: 2026-02-24
 
-**Archy**는 "녹음 한 번 하면 완성되는 자동 문서" 서비스입니다.
+## 1. 목적
 
-| 핵심 가치 | 설명 |
-|-----------|------|
-| **간편함** | 원클릭 녹음, 자동 문서화 |
-| **정확성** | WhisperAPI 기반 99% 정확도 STT |
-| **생산성** | AI가 회의록/인터뷰/강의 형식으로 자동 정리 |
-| **통합성** | Notion 저장 + Slack 알림 자동화 |
+랜딩 페이지의 목적은 `Google OAuth 가입 시작`이며,
+추가로 다음을 명확하게 전달한다.
 
----
+- 녹음 → 전사 → 정리 → 공유 자동화
+- Notion/Google Docs/Slack 연동
+- 모바일/PWA 중심 경험
 
-## 2. 랜딩 페이지 구조 (확정)
+## 2. 현재 정보 구조
 
-### 2.1 페이지 섹션 구성
+1. Navigation
+- 로고(Archy)
+- 섹션 이동: Features / How it works
+- CTA 버튼: 시작하기
 
-```
-┌─────────────────────────────────────────────────┐
-│  Navigation (로고 + 메뉴 + Sign In 버튼)         │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  HERO SECTION                                   │
-│  - 핵심 메시지: "Turn your voice into           │
-│    perfect documents"                           │
-│  - 서브 카피                                    │
-│  - CTA 버튼: Sign in with Google (Primary)      │
-│  (View Demo 버튼 및 대시보드 미리보기 제거됨)     │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  FEATURES SECTION (주요 기능 3가지)             │
-│  - 🎙️ Crystal Clear Recording                 │
-│  - ⚡ Instant Transcription                    │
-│  - ✨ AI Summarization                         │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  HOW IT WORKS (작동 방식)                       │
-│  - Step 1: Record                             │
-│  - Step 2: Transcribe                         │
-│  - Step 3: Organize                           │
-│  - Step 4: Share                              │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  INTEGRATIONS (연동 서비스)                     │
-│  - Notion                                     │
-│  - Slack                                      │
-│  - Google                                     │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  CTA SECTION (최종 행동 유도)                   │
-│  - "Start capturing your ideas today"         │
-│  - Sign in with Google 버튼 (Primary)          │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│  Footer                                       │
-│  - Company Info (CEO, BNN, Email)             │
-│  - Links (Privacy, Terms)                     │
-└─────────────────────────────────────────────────┘
-```
+2. Hero
+- 핵심 메시지 + 서브카피
+- CTA 버튼: 무료로 시작하기 (Beta)
 
----
+3. Features
+- 고품질 녹음
+- 즉시 전사
+- AI 자동 요약
+- 스마트 알림
 
-## 3. 디자인 시스템 (확정)
+4. How it works
+- Record
+- Transcribe
+- Organize
+- Share
 
-### 3.1 컬러 팔레트 (Black + Deep Blue)
+5. Integrations
+- Notion
+- Google Docs
+- Slack
 
-> [!NOTE]
-> 기존 보라색(Indigo/Violet) 제거 및 네이비/블루 계열 교체 완료
+6. CTA (하단)
+- 반복 CTA 버튼
 
-| 컬러명 | 색상값 | 스타일 클래스/용도 |
-|--------|-------|------------------|
-| **Primary** | `#0f172a` (Slate 900) | `bg-slate-900`, `text-slate-900` / 주요 버튼, 제목 |
-| **Deep Blue** | `#1e3a5f` | 그라데이션 끝 색상, 포인트 배경 |
-| **Accent** | `#3b82f6` (Blue 500) | `bg-blue-500`, `text-blue-600` / 아이콘, 강조 텍스트 |
-| **Background** | `#f8fafc` (Slate 50) | `bg-slate-50` / 섹션 배경 |
+7. Footer
+- 사업자 정보
+- Privacy / Terms 링크
 
-### 3.2 그라데이션
+## 3. 현재 구현 규칙
 
-- **Primary Gradient**: `linear-gradient(to right, #0f172a, #1e3a5f)`
-- **용도**: 로고 배경, CTA 섹션 배경, 주요 텍스트 강조(bg-clip-text)
+- 모바일 퍼스트 spacing/typography
+- 랜딩은 `I18n` 기반 ko/en 카피
+- 로그인 버튼은 `GoogleLoginButton` 컴포넌트 재사용
+- 인앱 브라우저 감지 시 Android는 외부 브라우저 유도, iOS는 안내 모달 노출
+- promo 쿼리 파라미터(`?promo=...`)를 OAuth redirect로 전달
 
----
+## 4. 디자인 가이드
 
-## 4. 컴포넌트 명세
+- 톤: 밝은 배경 + 슬레이트 계열 + 블루 포인트
+- 주요 버튼: gradient primary
+- 카드: 얕은 border/shadow
+- 섹션 전환: 슬라이드/페이드 기반 최소 애니메이션
 
-### 4.1 Google Login Button
+## 5. 연관 파일
 
-두 가지 변형(Variant)을 제공하여 상황에 맞게 사용합니다.
+- `components/landing/LandingClient.tsx`
+- `components/google-login-button.tsx`
+- `components/in-app-browser-modal.tsx`
+- `lib/i18n/translations.ts`
+- `app/globals.css`
 
-| Variant | 스타일 | 용도 |
-|---------|--------|------|
-| `nav` | Small size, Slate 900 Background, Rounded Full | 네비게이션 바 우측 |
-| `primary` | Large size, Primary Gradient Background, Shadow | Hero 섹션, 하단 CTA |
+## 6. 개선 후보
 
-### 4.2 Footer 정보
-
-좌측 하단에 다음 사업자 정보를 명시합니다.
-
-```
-©2025 ARCHY · All rights reserved.
-ARCHY | CEO: Youngmin Park
-BNN : 478-59-01063
-tnsb5373@gmail.com
-```
-
----
-
-## 5. 구현 파일 목록
-
-- `app/page.tsx`: 랜딩 페이지 메인 구조
-- `app/globals.css`: 전역 스타일 및 유틸리티 클래스 (`.btn-nav`, `.btn-primary`)
-- `tailwind.config.ts`: 커스텀 컬러 팔레트 정의
-- `components/google-login-button.tsx`: 로그인 버튼 컴포넌트
+- 퍼널 이벤트(랜딩 스크롤/CTA 클릭) 세분화
+- A/B 테스트용 헤드라인/CTA 실험
+- 데스크탑 환경 안내(모바일 권장) 노출 시점 미세조정

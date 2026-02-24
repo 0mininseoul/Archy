@@ -1,391 +1,106 @@
-# Archy - LLM Context 기획서
+# Archy LLM Context
 
-> 이 문서는 Archy 서비스의 전체 구조를 LLM(Large Language Model)이 컨텍스트로 이해할 수 있도록 정리한 문서입니다.
+최종 업데이트: 2026-02-24
 
----
+이 문서는 LLM이 Archy 코드베이스를 빠르게 이해하도록 핵심 컨텍스트만 정리한 문서입니다.
 
-## 1. 서비스 개요
+## 1. 제품 정의
 
-### 1.1 핵심 컨셉
-**Archy**는 "녹음 한 번 하면 완성되는 자동 문서" 서비스입니다.
+Archy는 음성 녹음을 자동 문서화하는 서비스입니다.
 
-- **목적**: 음성 녹음 → 자동 텍스트 변환(STT) → AI 문서 정리 → Notion 저장 + Slack 알림
-- **타겟 사용자**: 직장인(회의록), 대학생(강의 요약), 프리랜서(인터뷰 기록)
+핵심 파이프라인:
+- 녹음 세션 시작
+- 20초 청크 전사
+- 종료 후 AI 정리
+- Notion/Google 저장 + Slack/Push 알림
 
-### 1.2 핵심 기능
-| 기능 | 설명 |
-|------|------|
-| **원클릭 녹음** | 웹 브라우저에서 최대 120분 녹음 |
-| **자동 STT** | Groq Whisper Large V3를 통한 음성→텍스트 변환 |
-| **AI 문서 정리** | GPT-4o-mini로 문서 자동 정리 (기본 포맷: meeting) |
-| **Notion 연동** | 정리된 문서를 Notion 페이지로 자동 생성 |
-| **Google Docs 연동** | Google Docs에 문서 저장 지원 |
-| **Slack 알림** | 처리 완료 시 Slack 메시지 전송 |
-| **Push 알림** | 웹 푸시 알림으로 처리 완료 알림 |
-| **리퍼럴 시스템** | 추천인 코드로 보너스 분 적립 |
-| **실시간 처리 상태** | 전사 중/요약 중/저장 중 단계별 상태 표시 |
-| **PWA 지원** | 모바일 홈 화면 추가 가능 |
-| **다국어 지원** | 한국어/영어 자동 감지 및 설정 (i18n) |
-| **Amplitude Analytics** | 사용자 행동 분석 |
+## 2. 핵심 규칙
 
----
+- 인증: Supabase Auth 기반 (`withAuth` 래퍼)
+- 녹음 상태: `recording -> processing -> completed/failed`
+- 처리 단계: `transcription`, `formatting`, `saving`
+- 기본 저장 정책: 오디오 저장 안 함 (`audio_file_path` nullable)
+- 오디오 저장은 사용자 토글(`save_audio_enabled`)일 때만 시도
 
-## 2. 기술 스택
+## 3. 주요 디렉토리
 
-### 2.1 Frontend
-```
-- Next.js 16 (App Router)
-- React 19
-- TypeScript 5.9
-- Tailwind CSS (Glassmorphism 디자인)
-```
-
-### 2.2 Backend
-```
-- Next.js API Routes (서버리스)
-- Supabase (PostgreSQL + Auth + Storage)
-```
-
-### 2.3 외부 API
-```
-- Groq API (Whisper Large V3 STT 변환)
-- OpenAI GPT-4o-mini (문서 정리)
-- Notion API (페이지 생성)
-- Google Docs API (문서 생성)
-- Slack API (메시지 전송)
-- Web Push (푸시 알림)
-- Google OAuth (인증)
-- Amplitude (분석)
+```text
+app/
+  api/
+    recordings/           # start/chunk/finalize + CRUD
+    auth/                 # google/notion/slack OAuth
+    user/                 # 설정, 사용량, 연동, 탈퇴
+    notion/               # Notion 도구 API
+    promo/, checkout/, webhook/polar/
+components/
+  recorder/               # ChunkedAudioRecorder UI
+  settings/               # integrations/formats/account/plan
+lib/
+  services/
+    whisper.ts            # Groq STT
+    openai.ts             # gpt-4o-mini formatting
+    recording-processor.ts
+    notion.ts             # page/db 생성 + markdown 변환
+    notion-save-targets.ts# fast/deep 탐색/검색
+    google.ts             # Docs 생성/폴더 조회
+    slack.ts              # 메시지 전송
+    push.ts               # web-push
+  stores/                 # Zustand user/recordings 캐시
+  i18n/                   # ko/en 번역
 ```
 
----
+## 4. 데이터 모델 핵심
 
-## 3. 프로젝트 구조
+### users
 
-```
-archy/
-├── app/                          # Next.js App Router
-│   ├── api/                      # API Routes
-│   │   ├── auth/                 # 인증 관련 (Google OAuth, Notion/Slack OAuth callback)
-│   │   ├── recordings/           # 녹음 CRUD
-│   │   ├── formats/              # 커스텀 포맷 관리
-│   │   ├── user/                 # 사용자 정보 및 사용량
-│   │   └── notion/               # Notion 연동
-│   ├── dashboard/                # 메인 대시보드 (녹음 UI)
-│   ├── onboarding/               # 온보딩 플로우
-│   ├── history/                  # 녹음 히스토리
-│   ├── settings/                 # 설정 및 포맷 관리
-│   ├── privacy/                  # 개인정보처리방침
-│   ├── terms/                    # 이용약관
-│   ├── layout.tsx                # 루트 레이아웃
-│   └── page.tsx                  # 랜딩 페이지
-│
-├── components/                   # React 컴포넌트
-│   ├── recorder/                 # 녹음 관련 컴포넌트
-│   ├── navigation/               # 네비게이션 컴포넌트 (bottom-tab)
-│   ├── pwa/                      # PWA 관련 컴포넌트
-│   └── google-login-button.tsx   # Google 로그인 버튼
-│
-├── lib/                          # 유틸리티 및 서비스
-│   ├── supabase/                 # Supabase 클라이언트 (client, server, middleware)
-│   ├── i18n/                     # 다국어 지원 (한국어/영어)
-│   │   ├── context.tsx           # i18n 컨텍스트 및 Provider
-│   │   ├── translations.ts       # 번역 텍스트 정의
-│   │   └── index.ts              # export
-│   ├── services/                 # 외부 API 서비스
-│   │   ├── whisper.ts            # Groq Whisper STT 서비스
-│   │   ├── openai.ts             # OpenAI 문서 정리 서비스
-│   │   ├── notion.ts             # Notion API 서비스
-│   │   ├── slack.ts              # Slack API 서비스
-│   │   ├── google.ts             # Google Docs API 서비스
-│   │   ├── push.ts               # Push 알림 서비스
-│   │   └── recording-processor.ts # 녹음 처리 파이프라인
-│   ├── prompts.ts                # AI 프롬프트 템플릿
-│   ├── auth.ts                   # 인증 헬퍼
-│   └── utils.ts                  # 공통 유틸리티
-│
-├── database/                     # 데이터베이스
-│   ├── schema.sql                # Supabase PostgreSQL 기본 스키마
-│   └── migrations/               # 데이터베이스 마이그레이션 (13개)
-│       ├── add_language.sql
-│       ├── add_is_onboarded.sql
-│       ├── make_audio_file_path_nullable.sql
-│       ├── add_notion_save_target_fields.sql
-│       ├── add_processing_step.sql
-│       ├── add_error_tracking.sql
-│       ├── add_push_notification.sql
-│       ├── add_referral_system.sql
-│       ├── add_google_integration.sql
-│       ├── add_user_name.sql
-│       └── add_withdrawn_users_table.sql
-│
-├── types/                        # TypeScript 타입 정의
-│
-├── public/                       # 정적 파일
-│   ├── logos/                    # 연동 서비스 로고 (notion.svg, slack.svg, google.svg)
-│   ├── icons/                    # PWA 아이콘
-│   └── manifest.json             # PWA 매니페스트
-│
-└── docs/                         # 문서
-    ├── LLMS.md                   # LLM 컨텍스트 문서 (본 문서)
-    ├── prd.md                    # 제품 요구사항 문서
-    ├── landing_page_plan.md      # 랜딩 페이지 기획
-    └── FEATURE_SPEC.md           # 기능 명세서
-```
+- 연동 토큰: notion/slack/google
+- 저장 대상: notion save target, google folder
+- 사용량/플랜: monthly/bonus/promo
+- 알림/저장: push, save_audio_enabled
 
----
+### recordings
 
-## 4. 데이터베이스 스키마
+- 세션 필드: `last_chunk_index`, `session_paused_at`
+- 결과 필드: `transcript`, `formatted_content`, `notion_page_url`, `google_doc_url`
+- UX 필드: `is_hidden`, `is_pinned`
 
-### 4.1 users 테이블
-```sql
-id                    UUID PRIMARY KEY
-email                 TEXT UNIQUE NOT NULL
-google_id             TEXT UNIQUE NOT NULL
-name                  TEXT                       -- 사용자 이름
-notion_access_token   TEXT
-notion_database_id    TEXT
-notion_save_target_type TEXT                    -- 'database' | 'page'
-notion_save_target_id TEXT
-slack_access_token    TEXT
-slack_channel_id      TEXT
-google_access_token   TEXT                      -- Google Docs 연동
-google_refresh_token  TEXT
-google_docs_enabled   BOOLEAN DEFAULT false
-monthly_minutes_used  INTEGER DEFAULT 0         -- 월 사용량 (분)
-bonus_minutes         INTEGER DEFAULT 0         -- 리퍼럴 보너스 분
-last_reset_at         TIMESTAMP                 -- 마지막 리셋 시간
-language              VARCHAR(2) DEFAULT 'ko'   -- 언어 설정 (ko|en)
-is_onboarded          BOOLEAN DEFAULT false     -- 온보딩 완료 여부
-push_enabled          BOOLEAN DEFAULT false     -- 푸시 알림 활성화
-push_subscription     JSONB                     -- 푸시 구독 정보
-referral_code         VARCHAR(8)                -- 리퍼럴 코드
-referred_by           UUID                      -- 추천인 ID
-created_at            TIMESTAMP
-```
+### 기타
 
-### 4.2 recordings 테이블
-```sql
-id                UUID PRIMARY KEY
-user_id           UUID REFERENCES users(id)
-title             TEXT NOT NULL
-audio_file_path   TEXT                     -- NULL (오디오 파일은 저장하지 않음)
-duration_seconds  INTEGER NOT NULL
-format            TEXT CHECK (meeting|interview|lecture|custom)
-status            TEXT CHECK (processing|completed|failed)
-processing_step   TEXT CHECK (transcription|formatting|saving) -- 현재 처리 단계
-transcript        TEXT                     -- STT 결과 (Groq API에서 받은 텍스트)
-formatted_content TEXT                     -- AI 정리 결과
-notion_page_url   TEXT
-error_message     TEXT
-error_step        TEXT CHECK (upload|transcription|formatting|notion|slack)
-created_at        TIMESTAMP
-```
+- `custom_formats`: 사용자 포맷
+- `promo_codes`: 프로모션
+- `withdrawn_users`: 탈퇴 아카이브
 
-**참고:**
-- 오디오 파일은 Groq API로 전송 후 즉시 폐기되며, 텍스트(전사 결과)만 데이터베이스에 저장됩니다.
-- `processing_step` 컬럼은 실시간 처리 상태 표시를 위해 사용됩니다 (전사 중/요약 중/저장 중).
+## 5. API 계약 요약
 
-### 4.3 custom_formats 테이블
-```sql
-id        UUID PRIMARY KEY
-user_id   UUID REFERENCES users(id)
-name      TEXT NOT NULL
-prompt    TEXT NOT NULL                    -- 사용자 정의 프롬프트
-created_at TIMESTAMP
-```
+### 녹음
 
-### 4.4 Row Level Security (RLS)
-- 모든 테이블에 RLS 적용
-- 사용자는 자신의 데이터만 조회/수정/삭제 가능
+- `POST /api/recordings/start`: 활성 세션 생성/재사용
+- `POST /api/recordings/chunk`: 청크 전사 + transcript append
+- `POST /api/recordings/finalize`: 세션 종료 후 동기 처리
 
----
+### 사용자
 
-## 5. API 엔드포인트
+- `GET /api/user`: UI 캐시용 통합 응답
+- `GET /api/user/usage`: 분 사용량 + Pro 상태
+- `PATCH /api/user/audio-storage`, `PATCH /api/user/push-enabled`
+- `DELETE /api/user/withdraw`: 아카이브 후 hard delete
 
-### 5.1 인증 API
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/auth/callback` | Google OAuth 콜백 (locale 유지 지원) |
-| POST | `/api/auth/signout` | 로그아웃 |
-| GET | `/api/auth/notion` | Notion OAuth 시작 |
-| GET | `/api/auth/notion/callback` | Notion OAuth 콜백 |
-| GET | `/api/auth/slack` | Slack OAuth 시작 |
-| GET | `/api/auth/slack/callback` | Slack OAuth 콜백 |
+### Notion 저장 대상
 
-### 5.2 녹음 API
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | `/api/recordings` | 녹음 생성 및 업로드 |
-| GET | `/api/recordings` | 녹음 목록 조회 (processing_step 포함) |
-| GET | `/api/recordings/[id]` | 녹음 상세 조회 |
-| PATCH | `/api/recordings/[id]` | 녹음 정보 수정 (제목 등) |
-| DELETE | `/api/recordings/[id]` | 녹음 삭제 |
+- `GET /api/notion/save-targets?mode=fast|deep`
+- `GET /api/notion/save-targets/search?q=...`
 
-### 5.3 사용자 API
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/user/data` | 사용자 연동 상태 조회 |
-| GET | `/api/user/usage` | 사용량 조회 (분) |
-| POST | `/api/user/language` | 언어 설정 업데이트 (ko|en) |
-| POST | `/api/user/onboarding` | 온보딩 완료 표시 |
-| DELETE | `/api/user/data` | 모든 데이터 삭제 |
-| GET | `/api/user/notion-database` | Notion 데이터베이스 목록 조회 |
-| GET | `/api/user/profile` | 사용자 프로필 조회 |
-| GET | `/api/user/referral` | 리퍼럴 코드 조회 |
-| POST | `/api/user/referral` | 리퍼럴 코드 적용 |
-| POST | `/api/user/push-subscription` | 푸시 구독 등록 |
-| DELETE | `/api/user/push-subscription` | 푸시 구독 해제 |
-| GET | `/api/user/push-enabled` | 푸시 알림 상태 조회 |
-| POST | `/api/user/push-enabled` | 푸시 알림 상태 변경 |
-| POST | `/api/user/withdraw` | 사용자 탈퇴 |
-| GET | `/api/user/google` | Google 연동 상태 조회 |
-| POST | `/api/user/google` | Google Docs 연동 |
+## 6. LLM 작업 시 주의사항
 
-### 5.4 포맷 API
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/formats` | 커스텀 포맷 목록 |
-| POST | `/api/formats` | 커스텀 포맷 생성 |
-| PUT | `/api/formats` | 커스텀 포맷 수정 / 기본값 설정 |
-| DELETE | `/api/formats` | 커스텀 포맷 삭제 |
+- `types/index.ts`는 일부 타입이 오래되어 `lib/types/database.ts`를 우선 기준으로 사용
+- 일부 UI 문구(예: 120분 제한)는 안내용이며 강제 종료 로직과 일치하지 않을 수 있음
+- finalize는 Vercel 특성상 동기 처리(`await processFromTranscripts`)를 사용
+- Notion 목록은 partial/sync_token 흐름이 있으므로 단일 호출 완전성을 가정하면 안 됨
 
-### 5.5 Notion API
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | `/api/notion/databases` | 사용자 Notion 데이터베이스 목록 |
-| POST | `/api/notion/pages` | Notion 페이지 생성 |
-| POST | `/api/notion/database` | 특정 데이터베이스 정보 조회 |
+## 7. 문서-코드 정합 기준
 
----
-
-## 6. 핵심 처리 플로우
-
-### 6.1 녹음 → 문서화 파이프라인
-```
-1. 브라우저: 녹음 완료 (Blob 생성)
-       ↓
-2. Next.js 서버: FormData로 오디오 파일 수신 (메모리에 잠시 보관)
-       ↓
-3. DB 업데이트: processing_step = 'transcription' (전사 중)
-       ↓
-4. Groq API: 서버가 받은 파일을 즉시 Groq로 전송 (POST) - 오디오 파일 폐기
-       ↓
-5. Supabase DB: 텍스트(전사 결과)만 저장
-       ↓
-6. DB 업데이트: processing_step = 'formatting' (요약 중)
-       ↓
-7. OpenAI GPT-4o-mini: 텍스트 요약 및 정리 (기본 포맷: meeting)
-       ↓
-8. DB 업데이트: processing_step = 'saving' (저장 중)
-       ↓
-9. Notion API: 텍스트만 저장 (오디오 파일 없음, 선택사항)
-       ↓
-10. Slack API: 완료 알림 + Notion 링크 (선택사항)
-       ↓
-11. DB 업데이트: status = 'completed', processing_step = null
-```
-
-**주요 특징:**
-- ⚡ 속도 최적화: 스토리지 업로드 시간 절약
-- 💰 비용 절감: Supabase Storage 용량 사용 안 함
-- 🔒 개인정보 보호: 음성 원본을 저장하지 않음
-- 📊 실시간 상태: 3초 간격 폴링으로 처리 단계 실시간 표시
-
-### 6.2 문서 포맷 종류
-
-**기본 포맷:**
-- **meeting (회의록)**: 참석자, 주요 안건, 결정 사항, 액션 아이템 (기본값, UI에서 고정)
-- **참고**: meeting/interview/lecture 포맷은 코드 레벨에서 지원하지만, 현재 UI에서는 meeting만 사용됨
-
-**커스텀 포맷:** 사용자가 설정 페이지에서 직접 프롬프트를 정의하여 사용 가능
-
----
-
-## 7. 페이지 구성
-
-| 경로 | 설명 | 주요 기능 |
-|------|------|----------|
-| `/` | 랜딩 페이지 | 서비스 소개, "시작하기"/"무료로 시작하기" 버튼, 다국어 지원 |
-| `/onboarding` | 온보딩 | Notion/Slack 연동 (건너뛰기 가능), 기본 포맷 선택 |
-| `/dashboard` | 대시보드 | 녹음 버튼, 타이머, 노션/슬랙 미연동 경고 표시 |
-| `/history` | 히스토리 | 녹음 목록, 실시간 처리 상태 (전사/요약/저장), 처리 중 안내 문구 |
-| `/recordings/[id]` | 녹음 상세 | 전사본 및 정리된 내용 확인 |
-| `/settings` | 설정 | 계정 정보, 통합 관리, 언어 설정, Notion 저장 위치 설정 |
-
----
-
-## 8. 제한 사항
-
-- **월 사용량**: 계정당 350분/월 (매월 1일 리셋)
-- **최대 녹음 시간**: 120분
-- **자동 삭제**: 30일 이상 녹음 파일 자동 삭제
-- **커스텀 포맷**: 최대 3개까지 생성 가능
-
----
-
-## 9. 환경 변수
-
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# OpenAI
-OPENAI_API_KEY=
-
-# Groq API (Whisper Large V3 STT)
-GROQ_API_KEY=
-
-# Notion OAuth
-NOTION_CLIENT_ID=
-NOTION_CLIENT_SECRET=
-NOTION_REDIRECT_URI=
-
-# Slack OAuth
-SLACK_CLIENT_ID=
-SLACK_CLIENT_SECRET=
-SLACK_REDIRECT_URI=
-
-# App
-NEXT_PUBLIC_APP_URL=
-```
-
----
-
-## 10. 디자인 시스템
-
-- **스타일**: Glassmorphism (반투명 배경, backdrop-blur)
-- **색상**: Slate 900 (#0f172a) + Deep Blue (#1e3a5f) 그라데이션
-- **반응형**: 모바일 퍼스트 (320px~)
-- **PWA**: manifest.json, service worker 지원
-
-### 10.1 다국어 지원 (i18n)
-
-- **지원 언어**: 한국어(ko), 영어(en)
-- **자동 감지**:
-  - Vercel GeoIP 헤더 기반 국가 감지 (KR → 한국어)
-  - Cookie 기반 언어 설정 저장 (`archy_locale`)
-- **OAuth 콜백**: 로그인 시 locale을 query parameter로 전달하여 언어 설정 유지
-- **Middleware**: 요청마다 locale cookie 설정 및 유지
-
----
-
-## 11. 개발 명령어
-
-```bash
-npm run dev      # 개발 서버 실행
-npm run build    # 프로덕션 빌드
-npm run start    # 프로덕션 서버 실행
-npm run lint     # 린트 검사
-```
-
----
-
-## 12. 관련 문서
-
-- [README.md](../README.md) - 프로젝트 개요 및 빠른 시작
-- [prd.md](./prd.md) - 제품 요구사항 문서 (상세)
-- [FEATURE_SPEC.md](./FEATURE_SPEC.md) - 기능 명세서
-- [landing_page_plan.md](./landing_page_plan.md) - 랜딩 페이지 기획서
+문서 업데이트 시 우선순위:
+1. `lib/types/database.ts`
+2. `app/api/**/route.ts`
+3. `lib/services/**`
+4. `components/**` (UI/UX 표기)
