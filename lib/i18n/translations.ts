@@ -465,6 +465,8 @@ export const translations = {
     desktopLoginNotice: {
       title: "모바일 이용을 권장드려요",
       description: "Archy는 모바일 환경에 최적화된 서비스입니다.\nPC에서도 사용할 수 있지만 일부 기능은 제한될 수 있어요.\n모바일 브라우저에서 이용하시면 더 편리합니다.",
+      qrHint: "휴대폰 카메라로 QR을 스캔해 바로 접속하세요.",
+      qrAlt: "모바일 접속용 QR 코드",
       copy: "링크 복사",
       copySuccess: "복사됨!",
       copyFailed: "복사에 실패했어요. 아래 링크를 직접 복사해 주세요.",
@@ -1038,6 +1040,8 @@ export const translations = {
     desktopLoginNotice: {
       title: "Mobile Is Recommended",
       description: "Archy is optimized for mobile use.\nYou can still use it on desktop, but some features may be limited.\nFor the best experience, please continue on mobile.",
+      qrHint: "Scan this QR code with your phone camera to open quickly.",
+      qrAlt: "QR code for opening on mobile",
       copy: "Copy Link",
       copySuccess: "Copied!",
       copyFailed: "Copy failed. Please copy the link manually.",

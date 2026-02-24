@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useI18n } from "@/lib/i18n";
 
 interface DesktopLoginNoticeModalProps {
@@ -9,6 +10,7 @@ interface DesktopLoginNoticeModalProps {
 }
 
 const MOBILE_SERVICE_URL = "https://www.archynotes.com";
+const QR_IMAGE_SRC = "/desktop-mobile-link-qr.jpg";
 
 export function DesktopLoginNoticeModal({ isOpen, onClose }: DesktopLoginNoticeModalProps) {
   const { t } = useI18n();
@@ -52,6 +54,21 @@ export function DesktopLoginNoticeModal({ isOpen, onClose }: DesktopLoginNoticeM
         <p className="text-slate-600 text-sm text-center whitespace-pre-line mb-4">
           {t.desktopLoginNotice.description}
         </p>
+
+        <div className="mb-4">
+          <div className="mx-auto w-40 rounded-xl border border-slate-200 overflow-hidden bg-white">
+            <Image
+              src={QR_IMAGE_SRC}
+              alt={t.desktopLoginNotice.qrAlt}
+              width={320}
+              height={320}
+              className="w-full h-auto"
+            />
+          </div>
+          <p className="text-xs text-slate-500 text-center mt-2">
+            {t.desktopLoginNotice.qrHint}
+          </p>
+        </div>
 
         <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-center mb-4">
           <span className="text-sm font-medium text-slate-700 break-all">
