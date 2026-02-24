@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import {
   ChunkUploadManager,
   ChunkTranscriptResult,
+  ChunkSignalMetrics,
 } from "@/lib/services/chunk-upload-manager";
 import {
   safeLocalStorageGetItem,
@@ -129,6 +130,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // 청킹 관련 Refs
   const chunkManagerRef = useRef<ChunkUploadManager | null>(null);
   const currentChunkDataRef = useRef<Blob[]>([]);
+  const currentChunkRmsSamplesRef = useRef<number[]>([]);
+  const currentChunkPeakRmsRef = useRef<number>(0);
   const currentChunkIndexRef = useRef<number>(0);
   const chunkStartTimeRef = useRef<number>(0);
   const lastChunkTimeRef = useRef<number>(0);
@@ -285,9 +288,57 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   }, [releaseWakeLock, stopKeepAliveAudio]);
 
   /**
+   * 현재 오디오 프레임 RMS 샘플링
+   */
+  const sampleCurrentChunkRms = useCallback(() => {
+    const analyser = analyserNodeRef.current;
+    if (!analyser) return;
+
+    const timeDomainData = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(timeDomainData);
+
+    let squareSum = 0;
+    for (const sample of timeDomainData) {
+      const normalized = (sample - 128) / 128;
+      squareSum += normalized * normalized;
+    }
+
+    const rms = Math.sqrt(squareSum / timeDomainData.length);
+    if (Number.isFinite(rms)) {
+      currentChunkRmsSamplesRef.current.push(rms);
+      if (rms > currentChunkPeakRmsRef.current) {
+        currentChunkPeakRmsRef.current = rms;
+      }
+    }
+  }, []);
+
+  /**
+   * 현재 청크의 RMS 통계 반환 후 리셋
+   */
+  const consumeCurrentChunkSignalMetrics = useCallback((): ChunkSignalMetrics => {
+    const samples = currentChunkRmsSamplesRef.current;
+    const avgRms = samples.length > 0
+      ? samples.reduce((sum, value) => sum + value, 0) / samples.length
+      : undefined;
+    const peakRms = currentChunkPeakRmsRef.current > 0
+      ? currentChunkPeakRmsRef.current
+      : undefined;
+
+    currentChunkRmsSamplesRef.current = [];
+    currentChunkPeakRmsRef.current = 0;
+
+    return { avgRms, peakRms };
+  }, []);
+
+  /**
    * 청크 Blob 업로드 (공통 로직)
    */
-  const uploadChunkBlob = useCallback(async (chunkBlob: Blob, chunkIndex: number, durationSeconds: number) => {
+  const uploadChunkBlob = useCallback(async (
+    chunkBlob: Blob,
+    chunkIndex: number,
+    durationSeconds: number,
+    signalMetrics?: ChunkSignalMetrics
+  ) => {
     // 현재까지 총 녹음 시간 계산
     const currentTotalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
 
@@ -305,7 +356,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       await chunkManagerRef.current.uploadChunk(
         chunkIndex,
         chunkBlob,
-        durationSeconds
+        durationSeconds,
+        signalMetrics
       );
     }
 
@@ -346,6 +398,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
     // Blob 획득
     const chunkBlob = await chunkBlobPromise;
+    const signalMetrics = consumeCurrentChunkSignalMetrics();
 
     // 청크 인덱스 증가
     currentChunkIndexRef.current++;
@@ -380,8 +433,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
 
     // 백그라운드에서 업로드
-    uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
-  }, [uploadChunkBlob]);
+    uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
+  }, [consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
 
   /**
    * WebM용: 현재 청크 추출 및 업로드 (기존 방식)
@@ -400,6 +453,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
     const chunkDuration = Date.now() - chunkStartTimeRef.current;
     const durationSeconds = Math.floor(chunkDuration / 1000);
+    const signalMetrics = consumeCurrentChunkSignalMetrics();
 
     // 1KB 미만 청크는 무시 (유효한 오디오 데이터가 없을 가능성 높음)
     if (chunkBlob.size < 1024) {
@@ -416,8 +470,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     chunkStartTimeRef.current = Date.now();
 
     // 업로드
-    await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
-  }, [restartMediaRecorderForChunk, uploadChunkBlob]);
+    await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
+  }, [consumeCurrentChunkSignalMetrics, restartMediaRecorderForChunk, uploadChunkBlob]);
 
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
   const handleBackgroundTransition = useCallback(async () => {
@@ -595,6 +649,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       // 청킹 상태 초기화
       currentChunkDataRef.current = [];
+      currentChunkRmsSamplesRef.current = [];
+      currentChunkPeakRmsRef.current = 0;
       currentChunkIndexRef.current = 0;
       chunkStartTimeRef.current = Date.now();
       lastChunkTimeRef.current = 0;
@@ -656,6 +712,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       chunkStartTimeRef.current = Date.now();
 
       timerRef.current = setInterval(() => {
+        sampleCurrentChunkRms();
+
         const elapsed = Math.floor(
           (Date.now() - startTimeRef.current) / 1000
         );
@@ -685,7 +743,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         setError("녹음을 시작할 수 없습니다.");
       }
     }
-  }, [requestWakeLock, startKeepAliveAudio, extractAndUploadChunk, clearSessionFromStorage]);
+  }, [requestWakeLock, startKeepAliveAudio, extractAndUploadChunk, clearSessionFromStorage, sampleCurrentChunkRms]);
 
   /**
    * 녹음 일시정지
@@ -727,6 +785,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       startTimeRef.current = Date.now() - pausedTimeRef.current;
       chunkStartTimeRef.current = Date.now(); // 청크 타이머 리셋
       timerRef.current = setInterval(() => {
+        sampleCurrentChunkRms();
+
         const elapsed = Math.floor(
           (Date.now() - startTimeRef.current) / 1000
         );
@@ -743,7 +803,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       console.log("[ChunkedRecorder] Recording resumed");
     }
-  }, [isRecording, isPaused, requestWakeLock, extractAndUploadChunk]);
+  }, [isRecording, isPaused, requestWakeLock, extractAndUploadChunk, sampleCurrentChunkRms]);
 
   /**
    * 녹음 중지 및 결과 반환
@@ -778,9 +838,10 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
           const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
           const chunkDuration = Date.now() - chunkStartTimeRef.current;
           const durationSeconds = Math.floor(chunkDuration / 1000);
+          const signalMetrics = consumeCurrentChunkSignalMetrics();
 
           if (chunkBlob.size >= 1024) {
-            await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds);
+            await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
           }
           currentChunkDataRef.current = [];
         }
@@ -850,7 +911,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         }
       }, 100);
     });
-  }, [isRecording, releaseWakeLock, stopKeepAliveAudio, extractAndUploadChunk, duration, clearSessionFromStorage]);
+  }, [isRecording, releaseWakeLock, stopKeepAliveAudio, duration, clearSessionFromStorage, consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
 
   /**
    * 저장된 세션 재개 (백그라운드에서 복귀 시)

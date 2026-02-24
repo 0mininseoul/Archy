@@ -14,6 +14,7 @@ export interface PendingChunk {
   chunkIndex: number;
   blob: Blob;
   durationSeconds: number;
+  signalMetrics?: ChunkSignalMetrics;
   retryCount: number;
   createdAt: number;
 }
@@ -21,6 +22,11 @@ export interface PendingChunk {
 export interface ChunkTranscriptResult {
   chunkIndex: number;
   transcript: string;
+}
+
+export interface ChunkSignalMetrics {
+  avgRms?: number;
+  peakRms?: number;
 }
 
 export interface ChunkUploadCallbacks {
@@ -111,7 +117,8 @@ export class ChunkUploadManager {
   async uploadChunk(
     chunkIndex: number,
     blob: Blob,
-    durationSeconds: number
+    durationSeconds: number,
+    signalMetrics?: ChunkSignalMetrics
   ): Promise<ChunkTranscriptResult | null> {
     const chunkId = `chunk-${chunkIndex}-${Date.now()}`;
 
@@ -121,6 +128,7 @@ export class ChunkUploadManager {
       chunkIndex,
       blob,
       durationSeconds,
+      signalMetrics,
       retryCount: 0,
       createdAt: Date.now(),
     };
@@ -151,6 +159,14 @@ export class ChunkUploadManager {
         formData.append("sessionId", this.sessionId);
       }
       formData.append("totalDuration", this.totalDuration.toString());
+      if (chunk.signalMetrics) {
+        if (typeof chunk.signalMetrics.avgRms === "number") {
+          formData.append("avgRms", chunk.signalMetrics.avgRms.toString());
+        }
+        if (typeof chunk.signalMetrics.peakRms === "number") {
+          formData.append("peakRms", chunk.signalMetrics.peakRms.toString());
+        }
+      }
 
       const response = await fetch("/api/recordings/chunk", {
         method: "POST",

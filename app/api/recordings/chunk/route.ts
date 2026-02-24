@@ -1,15 +1,27 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { transcribeAudio } from "@/lib/services/whisper";
+import { logSttDecision } from "@/lib/services/stt-observability";
 
 // Vercel Free tier: 4.5MB limit
 // 20초 청크 (64kbps): ~160KB
 // Route segment config for body size limit
 export const maxDuration = 60; // 60 seconds timeout
+const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
+const PRE_TRANSCRIPTION_RMS_GATE = 0.002;
 
 interface ChunkTranscriptResponse {
   transcript: string;
   chunkIndex: number;
   totalDuration: number;
+}
+
+function parseOptionalNumber(value: FormDataEntryValue | null): number | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 // POST /api/recordings/chunk - 청크 단위 전사 및 실시간 병합
@@ -21,6 +33,8 @@ export const POST = withAuth<ChunkTranscriptResponse>(
     const durationSeconds = parseInt(formData.get("durationSeconds") as string);
     const sessionId = formData.get("sessionId") as string;
     const totalDuration = parseInt(formData.get("totalDuration") as string) || 0;
+    const avgRms = parseOptionalNumber(formData.get("avgRms"));
+    const peakRms = parseOptionalNumber(formData.get("peakRms"));
 
     // Validation
     if (!audioChunk) {
@@ -38,6 +52,21 @@ export const POST = withAuth<ChunkTranscriptResponse>(
     // File size check (Minimum 1KB) - 빈 오디오나 무음 파일 방지
     if (audioChunk.size < 1024) {
       console.log(`[Chunk] Chunk ${chunkIndex} too small (${audioChunk.size} bytes), skipping transcription`);
+      logSttDecision({
+        pipeline: "chunk",
+        decision: "pre_gated",
+        reason: "size_too_small",
+        sessionId: sessionId || undefined,
+        chunkIndex,
+        durationSeconds,
+        audioSizeBytes: audioChunk.size,
+        textLength: 0,
+        metrics: {
+          avgRms,
+          peakRms,
+          segmentCount: 0,
+        },
+      });
       return successResponse({
         transcript: "",
         chunkIndex,
@@ -45,8 +74,6 @@ export const POST = withAuth<ChunkTranscriptResponse>(
       });
     }
 
-    // File size check (4MB limit for Vercel)
-    const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
     if (audioChunk.size > MAX_CHUNK_SIZE) {
       return errorResponse("Chunk size exceeds 4MB limit", 413);
     }
@@ -56,12 +83,65 @@ export const POST = withAuth<ChunkTranscriptResponse>(
     );
 
     try {
-      // Groq Whisper API로 전사
-      const transcript = await transcribeAudio(audioChunk);
+      let transcript = "";
+      let silenceReason: string | undefined;
 
-      console.log(
-        `[Chunk] Chunk ${chunkIndex} transcribed, length: ${transcript.length}`
-      );
+      // Extremely low signal chunks are skipped before STT call.
+      if (typeof avgRms === "number" && avgRms < PRE_TRANSCRIPTION_RMS_GATE) {
+        silenceReason = "pre_gate_low_signal";
+        console.log(
+          `[Chunk] Chunk ${chunkIndex} skipped before transcription (avgRms=${avgRms}, peakRms=${peakRms ?? "n/a"})`
+        );
+        logSttDecision({
+          pipeline: "chunk",
+          decision: "pre_gated",
+          reason: silenceReason,
+          sessionId: sessionId || undefined,
+          chunkIndex,
+          durationSeconds,
+          audioSizeBytes: audioChunk.size,
+          textLength: 0,
+          preTranscriptionRmsGate: PRE_TRANSCRIPTION_RMS_GATE,
+          metrics: {
+            avgRms,
+            peakRms,
+            segmentCount: 0,
+          },
+        });
+      } else {
+        const transcription = await transcribeAudio(audioChunk, {
+          avgRms,
+          peakRms,
+          chunkIndex,
+        });
+        transcript = transcription.text;
+        silenceReason = transcription.isLikelySilence
+          ? transcription.reason
+          : undefined;
+
+        console.log(
+          `[Chunk] Chunk ${chunkIndex} transcribed, length=${transcript.length}, avgNoSpeechProb=${transcription.metrics.avgNoSpeechProb ?? "n/a"}, avgLogprob=${transcription.metrics.avgLogprob ?? "n/a"}`
+        );
+
+        if (transcription.isLikelySilence) {
+          console.log(
+            `[Chunk] Chunk ${chunkIndex} filtered as likely silence (reason=${silenceReason}, avgRms=${avgRms ?? "n/a"})`
+          );
+        }
+
+        logSttDecision({
+          pipeline: "chunk",
+          decision: transcription.isLikelySilence ? "filtered" : "accepted",
+          reason: silenceReason,
+          sessionId: sessionId || undefined,
+          chunkIndex,
+          durationSeconds,
+          audioSizeBytes: audioChunk.size,
+          textLength: transcription.rawTextLength,
+          preTranscriptionRmsGate: PRE_TRANSCRIPTION_RMS_GATE,
+          metrics: transcription.metrics,
+        });
+      }
 
       // sessionId가 있으면 실시간으로 DB에 병합
       if (sessionId) {
@@ -76,24 +156,39 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         if (session && session.status === "recording") {
           // 이미 처리된 청크인지 확인 (중복 방지)
           if (chunkIndex > session.last_chunk_index) {
-            // 기존 전사본에 새 전사본 append (줄글로 이어서 작성)
-            const existingTranscript = session.transcript || "";
-            const newTranscript = existingTranscript
-              ? `${existingTranscript} ${transcript}`
-              : transcript;
+            const updatePayload: {
+              transcript?: string;
+              last_chunk_index: number;
+              duration_seconds: number;
+            } = {
+              last_chunk_index: chunkIndex,
+              duration_seconds: totalDuration,
+            };
+
+            if (transcript.trim().length > 0) {
+              // 기존 전사본에 새 전사본 append (줄글로 이어서 작성)
+              const existingTranscript = session.transcript || "";
+              updatePayload.transcript = existingTranscript
+                ? `${existingTranscript} ${transcript}`
+                : transcript;
+            }
 
             // DB 업데이트
             await supabase
               .from("recordings")
-              .update({
-                transcript: newTranscript,
-                last_chunk_index: chunkIndex,
-                duration_seconds: totalDuration,
-              })
+              .update(updatePayload)
               .eq("id", sessionId)
               .eq("user_id", user.id);
 
-            console.log(`[Chunk] Session ${sessionId} updated, chunk ${chunkIndex}, total duration: ${totalDuration}s`);
+            if (transcript.trim().length > 0) {
+              console.log(
+                `[Chunk] Session ${sessionId} updated with transcript, chunk ${chunkIndex}, total duration: ${totalDuration}s`
+              );
+            } else {
+              console.log(
+                `[Chunk] Session ${sessionId} updated without transcript append, chunk ${chunkIndex}, total duration: ${totalDuration}s, reason=${silenceReason ?? "empty_transcript"}`
+              );
+            }
           } else {
             console.log(`[Chunk] Chunk ${chunkIndex} already processed for session ${sessionId}`);
           }

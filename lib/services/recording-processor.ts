@@ -13,6 +13,7 @@ import { createNotionPage, getNotionDatabases, getNotionPages } from "@/lib/serv
 import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
+import { logSttDecision } from "@/lib/services/stt-observability";
 import {
   Recording,
   User,
@@ -126,10 +127,24 @@ async function stepTranscribe(
   await updateProcessingStep(supabase, recordingId, "transcription");
 
   try {
-    const transcript = await transcribeAudio(audioFile);
+    const transcription = await transcribeAudio(audioFile);
+    const transcript = transcription.text.trim();
 
-    if (!transcript || transcript.trim().length === 0) {
-      throw new Error("Transcription returned empty result");
+    logSttDecision({
+      pipeline: "single",
+      decision: transcription.isLikelySilence ? "filtered" : "accepted",
+      reason: transcription.reason,
+      recordingId,
+      audioSizeBytes: audioFile.size,
+      textLength: transcription.rawTextLength,
+      metrics: transcription.metrics,
+    });
+
+    if (transcription.isLikelySilence) {
+      log(
+        recordingId,
+        `Likely silence detected (reason=${transcription.reason ?? "unknown"}, avgNoSpeechProb=${transcription.metrics.avgNoSpeechProb ?? "n/a"}, avgLogprob=${transcription.metrics.avgLogprob ?? "n/a"})`
+      );
     }
 
     await supabase
@@ -137,7 +152,11 @@ async function stepTranscribe(
       .update({ transcript })
       .eq("id", recordingId);
 
-    log(recordingId, `Transcription completed, length: ${transcript.length}`);
+    if (transcript.length > 0) {
+      log(recordingId, `Transcription completed, length: ${transcript.length}`);
+    } else {
+      log(recordingId, "Transcription completed with empty transcript");
+    }
     return { success: true, data: transcript };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown transcription error";
