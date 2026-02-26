@@ -155,10 +155,18 @@ export function ChunkedAudioRecorder({
   } = useChunkedRecorder();
 
   // 푸시 권한 상태 확인
-  const checkPushPermission = useCallback(async (): Promise<"granted" | "denied" | "default"> => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return "denied";
-    }
+  const checkPushPermission = useCallback(async (): Promise<"granted" | "denied" | "default" | "unsupported"> => {
+    if (typeof window === "undefined") return "unsupported";
+
+    // Notification API 또는 PushManager가 없으면 지원 불가
+    if (!("Notification" in window) || !("PushManager" in window)) return "unsupported";
+
+    // iOS 비 PWA 환경 체크 (iOS Chrome/Safari 브라우저에서는 Push 불가)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (isIOS && !isStandalone) return "unsupported";
+
     return Notification.permission;
   }, []);
 
@@ -177,18 +185,22 @@ export function ChunkedAudioRecorder({
 
   // 녹음 버튼 클릭 핸들러
   const handleRecordButtonClick = useCallback(async () => {
-    // 푸시 권한 확인
     const permission = await checkPushPermission();
 
+    // Push 미지원 환경에서는 경고 숨기고 바로 모달 표시
+    if (permission === "unsupported") {
+      setPushPermissionDenied(false);
+      setShowGuideModal(true);
+      return;
+    }
+
     if (permission === "default") {
-      // 권한 요청
       await requestPushPermission();
     }
 
     const finalPermission = await checkPushPermission();
     setPushPermissionDenied(finalPermission === "denied");
 
-    // 안내 모달 표시
     setShowGuideModal(true);
   }, [checkPushPermission, requestPushPermission]);
 

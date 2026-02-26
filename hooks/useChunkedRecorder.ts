@@ -123,9 +123,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const sessionIdRef = useRef<string | null>(null);
 
   // Silent Audio Keep-Alive for iOS background (attempt to keep app active)
-  const keepAliveContextRef = useRef<AudioContext | null>(null);
-  const keepAliveOscillatorRef = useRef<OscillatorNode | null>(null);
-  const keepAliveGainRef = useRef<GainNode | null>(null);
 
   // 청킹 관련 Refs
   const chunkManagerRef = useRef<ChunkUploadManager | null>(null);
@@ -168,67 +165,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
   }, []);
 
-  /**
-   * Silent Audio Keep-Alive for iOS
-   * Plays a very low volume tone to attempt keeping the app active in background
-   */
-  const startKeepAliveAudio = useCallback(() => {
-    // Only attempt on iOS
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-    if (!isIOS) {
-      console.log("[KeepAlive] Not iOS, skipping silent audio");
-      return;
-    }
-
-    try {
-      // Create a separate AudioContext for keep-alive
-      const ctx = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
-      keepAliveContextRef.current = ctx;
-
-      // Create oscillator with low audible frequency (iOS may require audible audio)
-      const oscillator = ctx.createOscillator();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(200, ctx.currentTime); // 200Hz - low audible tone
-
-      // Create gain node with low volume (still audible but quiet)
-      const gainNode = ctx.createGain();
-      gainNode.gain.setValueAtTime(0.02, ctx.currentTime); // Slightly louder for iOS detection
-
-      oscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
-      oscillator.start();
-
-      keepAliveOscillatorRef.current = oscillator;
-      keepAliveGainRef.current = gainNode;
-
-      console.log("[KeepAlive] Silent audio started for iOS background");
-    } catch (err) {
-      console.warn("[KeepAlive] Failed to start:", err);
-    }
-  }, []);
-
-  const stopKeepAliveAudio = useCallback(() => {
-    if (keepAliveOscillatorRef.current) {
-      try {
-        keepAliveOscillatorRef.current.stop();
-        keepAliveOscillatorRef.current.disconnect();
-      } catch (e) {
-        // Ignore if already stopped
-      }
-      keepAliveOscillatorRef.current = null;
-    }
-    if (keepAliveGainRef.current) {
-      keepAliveGainRef.current.disconnect();
-      keepAliveGainRef.current = null;
-    }
-    if (keepAliveContextRef.current) {
-      keepAliveContextRef.current.close();
-      keepAliveContextRef.current = null;
-    }
-    console.log("[KeepAlive] Silent audio stopped");
-  }, []);
 
   // 세션 저장 함수
   const saveSessionToStorage = useCallback((session: RecordingSession) => {
@@ -277,7 +213,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         clearInterval(timerRef.current);
       }
       releaseWakeLock();
-      stopKeepAliveAudio();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
@@ -285,7 +220,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         chunkManagerRef.current.cleanup();
       }
     };
-  }, [releaseWakeLock, stopKeepAliveAudio]);
+  }, [releaseWakeLock]);
 
   /**
    * 현재 오디오 프레임 RMS 샘플링
@@ -518,11 +453,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     // Wake Lock 해제
     releaseWakeLock();
 
-    // Keep-alive 오디오 일시정지
-    if (keepAliveContextRef.current?.state === 'running') {
-      keepAliveContextRef.current.suspend();
-    }
-
     console.log("[ChunkedRecorder] Session paused and saved:", session);
 
     // 푸시알림 발송 (백그라운드에서)
@@ -552,10 +482,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         // 포그라운드로 복귀
         if (isRecording && !isPaused) {
           await requestWakeLock();
-          // Resume keep-alive audio context if suspended
-          if (keepAliveContextRef.current?.state === 'suspended') {
-            keepAliveContextRef.current.resume();
-          }
         }
 
         // 저장된 세션이 있는지 확인
@@ -701,11 +627,10 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       setIsRecording(true);
       setIsPaused(false);
 
-      // Wake Lock과 keep-alive는 백그라운드에서 실행 (non-blocking)
+      // Wake Lock은 백그라운드에서 실행 (non-blocking)
       requestWakeLock().catch((err) => {
         console.warn("[ChunkedRecorder] WakeLock request failed:", err);
       });
-      startKeepAliveAudio();
 
       // 타이머 시작
       startTimeRef.current = Date.now() - pausedTimeRef.current;
@@ -743,7 +668,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         setError("녹음을 시작할 수 없습니다.");
       }
     }
-  }, [requestWakeLock, startKeepAliveAudio, extractAndUploadChunk, clearSessionFromStorage, sampleCurrentChunkRms]);
+  }, [requestWakeLock, extractAndUploadChunk, clearSessionFromStorage, sampleCurrentChunkRms]);
 
   /**
    * 녹음 일시정지
@@ -759,10 +684,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }
 
       releaseWakeLock();
-      // Suspend keep-alive audio to save battery during pause
-      if (keepAliveContextRef.current?.state === 'running') {
-        keepAliveContextRef.current.suspend();
-      }
       console.log("[ChunkedRecorder] Recording paused");
     }
   }, [isRecording, isPaused, releaseWakeLock]);
@@ -773,10 +694,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const resumeRecording = useCallback(async () => {
     if (mediaRecorderRef.current && isRecording && isPaused) {
       await requestWakeLock();
-      // Resume keep-alive audio
-      if (keepAliveContextRef.current?.state === 'suspended') {
-        keepAliveContextRef.current.resume();
-      }
 
       mediaRecorderRef.current.resume();
       setIsPaused(false);
@@ -823,7 +740,6 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
 
     releaseWakeLock();
-    stopKeepAliveAudio();
     clearSessionFromStorage();
 
     return new Promise((resolve) => {
@@ -911,7 +827,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         }
       }, 100);
     });
-  }, [isRecording, releaseWakeLock, stopKeepAliveAudio, duration, clearSessionFromStorage, consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
+  }, [isRecording, releaseWakeLock, duration, clearSessionFromStorage, consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
 
   /**
    * 저장된 세션 재개 (백그라운드에서 복귀 시)

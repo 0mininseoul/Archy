@@ -582,38 +582,48 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
   const finalTitle = formatResult.data!.title;
   await updateProcessingStep(supabase, recordingId, "saving");
 
-  // Step 3: Notion (optional)
-  const notionResult = await stepNotionSave(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    formattedContent,
-    format,
-    duration
-  );
-  const notionUrl = notionResult.data || "";
+  // 빈 녹음(무음 등)이면 외부 서비스 저장 스킵
+  const isEmptyRecording = !transcript || transcript.trim().length === 0;
 
-  // Step 4: Google Docs (optional)
-  const googleResult = await stepGoogleDocSave(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    formattedContent
-  );
-  const googleDocUrl = googleResult.data || "";
+  let notionUrl = "";
+  let googleDocUrl = "";
 
-  // Step 5: Slack (optional)
-  await stepSlackNotify(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    duration,
-    notionUrl,
-    googleDocUrl
-  );
+  if (isEmptyRecording) {
+    log(recordingId, "Empty transcript - skipping Notion, Google Docs, and Slack");
+  } else {
+    // Step 3: Notion (optional)
+    const notionResult = await stepNotionSave(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      formattedContent,
+      format,
+      duration
+    );
+    notionUrl = notionResult.data || "";
+
+    // Step 4: Google Docs (optional)
+    const googleResult = await stepGoogleDocSave(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      formattedContent
+    );
+    googleDocUrl = googleResult.data || "";
+
+    // Step 5: Slack (optional)
+    await stepSlackNotify(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      duration,
+      notionUrl,
+      googleDocUrl
+    );
+  }
 
   // Mark as completed
   log(recordingId, "Processing completed successfully");
@@ -683,38 +693,48 @@ export async function processFromTranscripts(
   const finalTitle = formatResult.data!.title;
   await updateProcessingStep(supabase, recordingId, "saving");
 
-  // Step 3: Notion (optional)
-  const notionResult = await stepNotionSave(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    formattedContent,
-    format,
-    duration
-  );
-  const notionUrl = notionResult.data || "";
+  // 빈 녹음(무음 등)이면 외부 서비스 저장 스킵
+  const isEmptyRecording = !transcript || transcript.trim().length === 0;
 
-  // Step 4: Google Docs (optional)
-  const googleResult = await stepGoogleDocSave(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    formattedContent
-  );
-  const googleDocUrl = googleResult.data || "";
+  let notionUrl = "";
+  let googleDocUrl = "";
 
-  // Step 5: Slack (optional)
-  await stepSlackNotify(
-    supabase,
-    recordingId,
-    userData,
-    finalTitle,
-    duration,
-    notionUrl,
-    googleDocUrl
-  );
+  if (isEmptyRecording) {
+    log(recordingId, "Empty transcript - skipping Notion, Google Docs, and Slack");
+  } else {
+    // Step 3: Notion (optional)
+    const notionResult = await stepNotionSave(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      formattedContent,
+      format,
+      duration
+    );
+    notionUrl = notionResult.data || "";
+
+    // Step 4: Google Docs (optional)
+    const googleResult = await stepGoogleDocSave(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      formattedContent
+    );
+    googleDocUrl = googleResult.data || "";
+
+    // Step 5: Slack (optional)
+    await stepSlackNotify(
+      supabase,
+      recordingId,
+      userData,
+      finalTitle,
+      duration,
+      notionUrl,
+      googleDocUrl
+    );
+  }
 
   // Mark as completed
   log(recordingId, "Processing completed successfully");
