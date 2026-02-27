@@ -458,15 +458,15 @@ function OnboardingContent() {
                     </div>
                   </div>
 
-                  <div className="mt-auto pt-8 pb-4 shrink-0 w-full flex justify-center">
-                    <div className="w-[300px] max-w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
+                  <div className="mt-2.5 pb-2 shrink-0 w-full flex justify-center">
+                    <div className="w-[280px] max-w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
                       <button
                         onClick={() => setShowReferralInput(!showReferralInput)}
                         className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
                       >
-                        <span>{t.onboarding.step2.referralQuestion}</span>
+                        <span className="flex-1 text-center font-medium pr-1">{t.onboarding.step2.referralQuestion}</span>
                         <svg
-                          className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                          className={`w-4 h-4 text-slate-400 transition-transform duration-300 shrink-0 ${showReferralInput ? "rotate-180" : ""}`}
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
