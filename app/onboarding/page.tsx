@@ -216,10 +216,10 @@ function OnboardingContent() {
   return (
     <div className="app-container h-[100dvh] min-h-[100dvh] max-h-[100dvh] overflow-hidden">
       <main className="flex-1 min-h-0 flex flex-col items-center px-4 py-2 font-pretendard overflow-hidden">
-        <div className="w-full max-w-sm space-y-2 flex-1 min-h-0 flex flex-col">
+        <div className="w-full max-w-sm flex-1 min-h-0 flex flex-col pt-4">
           {/* Pro Promo Applied Banner */}
           {promoStatus?.isPro && (
-            <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl animate-fade-in">
+            <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl animate-fade-in mb-4">
               <div className="flex items-center gap-2">
                 <span className="text-lg">🎉</span>
                 <div className="flex-1">
@@ -236,169 +236,139 @@ function OnboardingContent() {
             </div>
           )}
 
-          {/* Progress Indicator */}
-          <div className="flex items-center justify-center gap-1">
-            {[1, 2].map((num) => (
-              <div key={num} className="flex items-center">
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] transition-all duration-300 ${step >= num
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-400"
-                    }`}
-                >
-                  {num}
-                </div>
-                {num < 2 && (
-                  <div
-                    className={`w-6 h-0.5 mx-1 rounded-full transition-all duration-300 ${step > num ? "bg-slate-900" : "bg-slate-200"
-                      }`}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-
           {/* Step Content */}
-          <div className="animate-slide-up flex-1 min-h-0 flex flex-col px-1">
+          <div className="animate-slide-up flex-1 min-h-0 flex flex-col px-1 pb-4">
             {step === 1 && (
-              <div className="flex-1 min-h-0 flex flex-col">
-                <button
-                  onClick={() => router.push("/")}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
-                  aria-label={t.common.back}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-
-                <div className="mt-8 space-y-1.5">
-                  <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step1.title}</h2>
-                  <p className="text-[15px] text-slate-500">{t.onboarding.step1.description}</p>
-                </div>
-
-                <button
-                  onClick={toggleAllConsents}
-                  className={`w-full mt-8 rounded-2xl px-5 py-4 flex items-center gap-4 transition-all duration-200 ${allConsentsChecked ? "bg-slate-100 border border-transparent shadow-sm" : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}
-                >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${allConsentsChecked ? "bg-slate-900 text-white" : "bg-slate-200 text-white"}`}>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <span className={`text-[19px] font-bold ${allConsentsChecked ? "text-slate-900" : "text-slate-700"}`}>{t.onboarding.step1.allAgree}</span>
-                </button>
-
-                <div className="mt-6 space-y-1.5 px-2">
-                  <button
-                    onClick={() => toggleConsent("age14")}
-                    className="w-full py-2 flex items-center group transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.age14 ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <span className={`text-[15px] ${consents.age14 ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredAge}</span>
-                    </div>
-                  </button>
-
-                  <div className="w-full py-2 flex items-center justify-between group">
-                    <button
-                      onClick={() => toggleConsent("terms")}
-                      className="flex items-center gap-3"
-                    >
-                      <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.terms ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <span className={`text-[15px] ${consents.terms ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredTerms}</span>
-                    </button>
-                    <a
-                      href="/terms"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
-                      aria-label={t.onboarding.step1.openTerms}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </a>
-                  </div>
-
-                  <div className="w-full py-2 flex items-center justify-between group">
-                    <button
-                      onClick={() => toggleConsent("privacy")}
-                      className="flex items-center gap-3"
-                    >
-                      <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.privacy ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <span className={`text-[15px] ${consents.privacy ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredPrivacy}</span>
-                    </button>
-                    <a
-                      href="/privacy"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
-                      aria-label={t.onboarding.step1.openPrivacy}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </a>
-                  </div>
-
-                  <div className="w-full py-2 flex items-center justify-between group">
-                    <button
-                      onClick={() => toggleConsent("serviceQuality")}
-                      className="flex items-center gap-3"
-                    >
-                      <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.serviceQuality ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <span className={`text-[15px] ${consents.serviceQuality ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.optionalQuality}</span>
-                    </button>
-                    <a
-                      href="/use-of-user-data"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
-                      aria-label={t.onboarding.step1.openQuality}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </a>
+              <div className="flex-1 min-h-0 flex flex-col relative h-full">
+                <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
+                  <div className="mt-2 space-y-1.5">
+                    <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step1.title}</h2>
+                    <p className="text-[15px] text-slate-500">{t.onboarding.step1.description}</p>
                   </div>
 
                   <button
-                    onClick={() => toggleConsent("marketing")}
-                    className="w-full py-2 flex items-center group transition-colors"
+                    onClick={toggleAllConsents}
+                    className={`w-full mt-8 rounded-2xl px-5 py-4 flex items-center gap-4 transition-all duration-200 ${allConsentsChecked ? "bg-slate-100 border border-transparent shadow-sm" : "bg-slate-50 border border-slate-100 hover:bg-slate-100"}`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.marketing ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <span className={`text-[15px] ${consents.marketing ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.optionalMarketing}</span>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${allConsentsChecked ? "bg-slate-900 text-white" : "bg-slate-200 text-white"}`}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
                     </div>
+                    <span className={`text-[19px] font-bold ${allConsentsChecked ? "text-slate-900" : "text-slate-700"}`}>{t.onboarding.step1.allAgree}</span>
                   </button>
+
+                  <div className="mt-6 space-y-1.5 px-2">
+                    <button
+                      onClick={() => toggleConsent("age14")}
+                      className="w-full py-2 flex items-center group transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.age14 ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <span className={`text-[15px] ${consents.age14 ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredAge}</span>
+                      </div>
+                    </button>
+
+                    <div className="w-full py-2 flex items-center justify-between group">
+                      <button
+                        onClick={() => toggleConsent("terms")}
+                        className="flex items-center gap-3"
+                      >
+                        <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.terms ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <span className={`text-[15px] ${consents.terms ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredTerms}</span>
+                      </button>
+                      <a
+                        href="/terms"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
+                        aria-label={t.onboarding.step1.openTerms}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </a>
+                    </div>
+
+                    <div className="w-full py-2 flex items-center justify-between group">
+                      <button
+                        onClick={() => toggleConsent("privacy")}
+                        className="flex items-center gap-3"
+                      >
+                        <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.privacy ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <span className={`text-[15px] ${consents.privacy ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.requiredPrivacy}</span>
+                      </button>
+                      <a
+                        href="/privacy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
+                        aria-label={t.onboarding.step1.openPrivacy}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </a>
+                    </div>
+
+                    <div className="w-full py-2 flex items-center justify-between group">
+                      <button
+                        onClick={() => toggleConsent("serviceQuality")}
+                        className="flex items-center gap-3"
+                      >
+                        <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.serviceQuality ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <span className={`text-[15px] ${consents.serviceQuality ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.optionalQuality}</span>
+                      </button>
+                      <a
+                        href="/use-of-user-data"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-300 hover:text-slate-500 transition-colors flex items-center p-1"
+                        aria-label={t.onboarding.step1.openQuality}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </a>
+                    </div>
+
+                    <button
+                      onClick={() => toggleConsent("marketing")}
+                      className="w-full py-2 flex items-center group transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex items-center justify-center w-[18px] h-[18px] rounded-full border transition-colors ${consents.marketing ? "bg-slate-900 border-slate-900 text-white" : "border-slate-300 text-transparent group-hover:border-slate-400"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <span className={`text-[15px] ${consents.marketing ? "text-slate-900 font-medium" : "text-slate-600"}`}>{t.onboarding.step1.optionalMarketing}</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {consentError && (
+                    <p className="mt-2 text-sm text-red-500">{consentError}</p>
+                  )}
                 </div>
 
-                {consentError && (
-                  <p className="mt-2 text-sm text-red-500">{consentError}</p>
-                )}
-
-                <div className="mt-auto pt-6 pb-4">
+                <div className="absolute bottom-0 left-0 right-0 pt-4 pb-2 bg-gradient-to-t from-white via-white to-transparent">
                   <button
                     onClick={handleConsentNext}
                     disabled={!requiredConsentsChecked || consentStatus === "loading"}
@@ -415,131 +385,122 @@ function OnboardingContent() {
             )}
 
             {step === 2 && (
-              <div className="flex-1 flex flex-col">
-                <button
-                  onClick={() => setStep(1)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
-                  aria-label={t.common.back}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-
-                <div className="mt-8 space-y-1.5">
-                  <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step2.title}</h2>
-                  <p className="text-[15px] text-slate-500">{t.onboarding.step2.description}</p>
-                </div>
-
-                <div className="mt-6 space-y-5">
-                  <div className="w-full flex items-start gap-4">
-                    <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.integrations.title}</h3>
-                      <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
-                        {t.onboarding.step2.integrations.description}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 mt-2.5">
-                        {[
-                          { name: 'Notion', icon: '/logos/notion.png' },
-                          { name: 'Google Docs', icon: '/logos/google-docs.png' },
-                          { name: 'Slack', icon: '/logos/slack.png' }
-                        ].map(app => (
-                          <span key={app.name} className="px-3 py-1 bg-slate-50 text-slate-600 text-[12px] font-medium rounded-full border border-slate-100 flex items-center gap-1.5">
-                            <img src={app.icon} alt={app.name} className="w-3.5 h-3.5 object-contain" />
-                            {app.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+              <div className="flex-1 flex flex-col relative h-full">
+                <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
+                  <div className="mt-2 space-y-1.5">
+                    <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step2.title}</h2>
+                    <p className="text-[15px] text-slate-500">{t.onboarding.step2.description}</p>
                   </div>
 
-                  <div className="w-full flex items-start gap-4">
-                    <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
-                      <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
-                        {t.onboarding.step2.autoFormat.description}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div className="flex items-start gap-2">
-                    <span className="text-[15px] pt-0.5">💡</span>
-                    <p className="text-[13px] text-slate-600 leading-tight">
-                      {t.onboarding.step2.settingsTip}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
-                  <button
-                    onClick={() => setShowReferralInput(!showReferralInput)}
-                    className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
-                  >
-                    <span>{t.onboarding.step2.referralQuestion}</span>
-                    <svg
-                      className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-
-                  {showReferralInput && (
-                    <div className="px-3 pb-3 pt-0 animate-slide-up">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={referralCode}
-                          onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                          placeholder={t.onboarding.step2.referralPlaceholder}
-                          className="flex-1 px-3 py-2 border border-slate-200 outline-none rounded-lg text-sm text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
-                          maxLength={8}
-                          disabled={referralStatus === "success" || referralStatus === "loading"}
-                        />
-                        <button
-                          onClick={handleApplyReferral}
-                          disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
-                          className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {referralStatus === "loading" ? (
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            t.onboarding.step2.referralApply
-                          )}
-                        </button>
-                      </div>
-
-                      {referralMessage && (
-                        <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
-                          {referralMessage}
+                  <div className="mt-6 space-y-5">
+                    <div className="w-full flex items-start gap-4">
+                      <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.integrations.title}</h3>
+                        <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
+                          {t.onboarding.step2.integrations.description}
                         </p>
-                      )}
+                        <div className="flex flex-wrap gap-1.5 mt-2.5">
+                          {[
+                            { name: 'Notion', icon: '/logos/notion.png' },
+                            { name: 'Google Docs', icon: '/logos/google-docs.png' },
+                            { name: 'Slack', icon: '/logos/slack.png' }
+                          ].map(app => (
+                            <span key={app.name} className="px-3 py-1 bg-slate-50 text-slate-600 text-[12px] font-medium rounded-full border border-slate-100 flex items-center gap-1.5">
+                              <img src={app.icon} alt={app.name} className="w-3.5 h-3.5 object-contain" />
+                              {app.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
 
-                <div className="mt-auto pt-6 pb-4">
-                  <button
-                    onClick={handleComplete}
-                    className="w-full h-[54px] bg-slate-900 hover:bg-slate-800 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
-                  >
-                    {t.onboarding.step2.start}
-                  </button>
+                    <div className="w-full flex items-start gap-4">
+                      <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
+                        <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
+                          {t.onboarding.step2.autoFormat.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[15px]">💡</span>
+                      <p className="text-[13px] text-slate-600 leading-tight translate-y-[0.5px]">
+                        {t.onboarding.step2.settingsTip}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
+                    <button
+                      onClick={() => setShowReferralInput(!showReferralInput)}
+                      className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
+                    >
+                      <span>{t.onboarding.step2.referralQuestion}</span>
+                      <svg
+                        className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {showReferralInput && (
+                      <div className="px-3 pb-3 pt-0 animate-slide-up">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={referralCode}
+                            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                            placeholder={t.onboarding.step2.referralPlaceholder}
+                            className="flex-1 px-3 py-2 border border-slate-200 outline-none rounded-lg text-sm text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
+                            maxLength={8}
+                            disabled={referralStatus === "success" || referralStatus === "loading"}
+                          />
+                          <button
+                            onClick={handleApplyReferral}
+                            disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
+                            className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {referralStatus === "loading" ? (
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              t.onboarding.step2.referralApply
+                            )}
+                          </button>
+                        </div>
+
+                        {referralMessage && (
+                          <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
+                            {referralMessage}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 pt-4 pb-2 bg-gradient-to-t from-white via-white to-transparent">
+                    <button
+                      onClick={handleComplete}
+                      className="w-full h-[54px] bg-slate-900 hover:bg-slate-800 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
+                    >
+                      {t.onboarding.step2.start}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
           </div>
-        </div>
       </main>
 
       <DesktopLoginNoticeModal

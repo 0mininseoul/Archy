@@ -425,7 +425,7 @@ export const translations = {
         description: "녹음 후 자동으로 문서가 완성됩니다",
         autoFormat: {
           title: "스마트 포맷",
-          description: "AI가 녹음 내용을 분석해 내용을 자동으로 판단하고\n형식에 맞추어 요약합니다.\n나만의 원하는 요약 스타일을 직접 정의할 수도 있습니다.",
+          description: "AI가 녹음 내용을 분석해 알맞은 형식으로 요약합니다.\n원하는 요약 스타일을 직접 정의할 수도 있습니다.",
         },
         integrations: {
           title: "서비스 연동",
