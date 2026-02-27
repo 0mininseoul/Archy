@@ -242,8 +242,8 @@ function OnboardingContent() {
               <div key={num} className="flex items-center">
                 <div
                   className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] transition-all duration-300 ${step >= num
-                      ? "bg-slate-900 text-white"
-                      : "bg-slate-100 text-slate-400"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-400"
                     }`}
                 >
                   {num}
@@ -398,11 +398,11 @@ function OnboardingContent() {
                   <p className="mt-2 text-sm text-red-500">{consentError}</p>
                 )}
 
-                <div className="mt-auto pt-8 pb-4">
+                <div className="mt-auto pt-6 pb-4">
                   <button
                     onClick={handleConsentNext}
                     disabled={!requiredConsentsChecked || consentStatus === "loading"}
-                    className="w-full h-[52px] bg-[#8993a4] hover:bg-[#7a8494] disabled:bg-slate-300 text-white text-[16px] font-semibold rounded-[20px] shadow-sm disabled:text-white/80 disabled:cursor-not-allowed transition-all flex items-center justify-center"
+                    className="w-full h-[54px] bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[16px] font-bold rounded-[18px] shadow-sm disabled:text-white/80 disabled:cursor-not-allowed transition-all flex items-center justify-center"
                   >
                     {consentStatus === "loading" ? (
                       <div className="w-5 h-5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
@@ -431,29 +431,17 @@ function OnboardingContent() {
                   <p className="text-[15px] text-slate-500">{t.onboarding.step2.description}</p>
                 </div>
 
-                <div className="mt-10 space-y-7">
-                  <div className="w-full flex items-start gap-4">
-                    <svg className="w-5 h-5 text-blue-600 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
-                      <p className="text-[13px] text-slate-500 leading-[1.6] mt-1.5">
-                        {t.onboarding.step2.autoFormat.description}
-                      </p>
-                    </div>
-                  </div>
-
+                <div className="mt-6 space-y-5">
                   <div className="w-full flex items-start gap-4">
                     <svg className="w-5 h-5 text-blue-600 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                     <div className="min-w-0 flex-1">
                       <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.integrations.title}</h3>
-                      <p className="text-[13px] text-slate-500 leading-[1.6] mt-1.5">
+                      <p className="text-[13px] text-slate-500 leading-[1.5] mt-1">
                         {t.onboarding.step2.integrations.description}
                       </p>
-                      <div className="flex flex-wrap gap-1.5 mt-3">
+                      <div className="flex flex-wrap gap-1.5 mt-2.5">
                         <span className="px-3 py-1 bg-slate-50 rounded-full text-[12px] font-medium text-slate-600">Notion</span>
                         <span className="px-3 py-1 bg-slate-50 rounded-full text-[12px] font-medium text-slate-600">Google Docs</span>
                         <span className="px-3 py-1 bg-slate-50 rounded-full text-[12px] font-medium text-slate-600">Slack</span>
@@ -466,31 +454,31 @@ function OnboardingContent() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.customFormat.title}</h3>
-                      <p className="text-[13px] text-slate-500 leading-[1.6] mt-1.5">
-                        {t.onboarding.step2.customFormat.description}
+                      <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
+                      <p className="text-[13px] text-slate-500 leading-[1.5] mt-1">
+                        {t.onboarding.step2.autoFormat.description}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-8 p-3.5 bg-slate-50/80 border border-slate-200/60 rounded-xl">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[16px]">💡</span>
-                    <p className="text-[13px] text-slate-600">
+                <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-start gap-2">
+                    <span className="text-[15px] pt-0.5">💡</span>
+                    <p className="text-[13px] text-slate-600 leading-tight">
                       {t.onboarding.step2.settingsTip}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-3 border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
+                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
                   <button
                     onClick={() => setShowReferralInput(!showReferralInput)}
-                    className="w-full px-4 py-3.5 text-[15px] text-slate-700 flex items-center justify-between"
+                    className="w-full px-4 py-3.5 text-[14px] text-slate-700 flex items-center justify-between"
                   >
                     <span>{t.onboarding.step2.referralQuestion}</span>
                     <svg
-                      className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                      className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -500,7 +488,7 @@ function OnboardingContent() {
                   </button>
 
                   {showReferralInput && (
-                    <div className="px-4 pb-4 pt-1 animate-slide-up">
+                    <div className="px-4 pb-4 pt-0 animate-slide-up">
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -533,10 +521,10 @@ function OnboardingContent() {
                   )}
                 </div>
 
-                <div className="mt-auto pt-8 pb-4">
+                <div className="mt-auto pt-6 pb-4">
                   <button
                     onClick={handleComplete}
-                    className="w-full h-[52px] bg-[#1a2f4c] text-white text-[16px] font-medium rounded-[20px] shadow-sm hover:bg-[#13243b] transition-colors"
+                    className="w-full h-[54px] bg-blue-600 hover:bg-blue-700 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
                   >
                     {t.onboarding.step2.start}
                   </button>
