@@ -241,7 +241,16 @@ function OnboardingContent() {
             {step === 1 && (
               <div className="flex-1 min-h-0 flex flex-col relative h-full">
                 <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
-                  <div className="mt-2 space-y-1.5">
+                  <button
+                    onClick={() => router.push("/")}
+                    className="w-8 h-8 -ml-1 mb-2 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+                    aria-label={t.common.back}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div className="mt-1 space-y-1.5">
                     <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step1.title}</h2>
                     <p className="text-[15px] text-slate-500">{t.onboarding.step1.description}</p>
                   </div>
@@ -386,13 +395,23 @@ function OnboardingContent() {
 
             {step === 2 && (
               <div className="flex-1 flex flex-col relative h-full">
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
-                  <div className="mt-2 space-y-1.5">
+                <div className="flex-1 overflow-y-auto no-scrollbar pb-24 flex flex-col">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="w-8 h-8 -ml-1 mb-2 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+                    aria-label={t.common.back}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+
+                  <div className="mt-1 space-y-1.5 shrink-0">
                     <h2 className="text-3xl max-[760px]:text-[28px] leading-tight font-bold text-slate-900 tracking-tight">{t.onboarding.step2.title}</h2>
                     <p className="text-[15px] text-slate-500">{t.onboarding.step2.description}</p>
                   </div>
 
-                  <div className="mt-6 space-y-5">
+                  <div className="mt-8 space-y-6 shrink-0">
                     <div className="w-full flex items-start gap-4">
                       <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -430,7 +449,7 @@ function OnboardingContent() {
                     </div>
                   </div>
 
-                  <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center">
+                  <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[15px]">💡</span>
                       <p className="text-[13px] text-slate-600 leading-tight translate-y-[0.5px]">
@@ -439,54 +458,56 @@ function OnboardingContent() {
                     </div>
                   </div>
 
-                  <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
-                    <button
-                      onClick={() => setShowReferralInput(!showReferralInput)}
-                      className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
-                    >
-                      <span>{t.onboarding.step2.referralQuestion}</span>
-                      <svg
-                        className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+                  <div className="mt-auto pt-8 pb-4 shrink-0 w-full flex justify-center">
+                    <div className="w-[300px] max-w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
+                      <button
+                        onClick={() => setShowReferralInput(!showReferralInput)}
+                        className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
+                        <span>{t.onboarding.step2.referralQuestion}</span>
+                        <svg
+                          className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
 
-                    {showReferralInput && (
-                      <div className="px-3 pb-3 pt-0 animate-slide-up">
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={referralCode}
-                            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                            placeholder={t.onboarding.step2.referralPlaceholder}
-                            className="flex-1 px-3 py-2 border border-slate-200 outline-none rounded-lg text-sm text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
-                            maxLength={8}
-                            disabled={referralStatus === "success" || referralStatus === "loading"}
-                          />
-                          <button
-                            onClick={handleApplyReferral}
-                            disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
-                            className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                          >
-                            {referralStatus === "loading" ? (
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              t.onboarding.step2.referralApply
-                            )}
-                          </button>
+                      {showReferralInput && (
+                        <div className="px-3 pb-3 pt-0 animate-slide-up">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={referralCode}
+                              onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                              placeholder={t.onboarding.step2.referralPlaceholder}
+                              className="flex-1 px-3 py-2 border border-slate-200 outline-none rounded-lg text-sm text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
+                              maxLength={8}
+                              disabled={referralStatus === "success" || referralStatus === "loading"}
+                            />
+                            <button
+                              onClick={handleApplyReferral}
+                              disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
+                              className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {referralStatus === "loading" ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                t.onboarding.step2.referralApply
+                              )}
+                            </button>
+                          </div>
+
+                          {referralMessage && (
+                            <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
+                              {referralMessage}
+                            </p>
+                          )}
                         </div>
-
-                        {referralMessage && (
-                          <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
-                            {referralMessage}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   <div className="absolute bottom-0 left-0 right-0 pt-4 pb-2 bg-gradient-to-t from-white via-white to-transparent">
