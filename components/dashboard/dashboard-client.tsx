@@ -33,9 +33,9 @@ export function DashboardClient() {
     }
   }, [userLoaded, fetchUserData]);
 
-  // Show settings tooltip when integrations not configured
+  // Show settings tooltip only when both Notion and Google Docs are not connected
   const showSettingsTooltip = connectionStatus
-    ? (!connectionStatus.notionConnected && !connectionStatus.googleConnected) || !connectionStatus.slackConnected
+    ? !connectionStatus.notionConnected && !connectionStatus.googleConnected
     : false;
 
   useEffect(() => {
