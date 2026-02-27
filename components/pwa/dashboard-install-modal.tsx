@@ -92,7 +92,17 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 animate-slide-up">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 animate-slide-up relative">
+        {/* Close Button */}
+        <button
+          onClick={handleDismiss}
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-full hover:bg-slate-50"
+          aria-label="Close"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
         {/* Header */}
         <div className="text-center">
           <div className="w-14 h-14 bg-gradient-primary rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3">
@@ -107,22 +117,22 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
         </div>
 
         {/* Benefits */}
-        <div className="bg-green-50 border border-green-100 rounded-lg p-3 space-y-2">
-          <div className="flex items-center gap-2 text-sm text-green-700">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <svg className="w-4 h-4 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
             <span>{t.pwaModal.benefits.fast}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-green-700">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <svg className="w-4 h-4 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
             <span>{t.pwaModal.benefits.fullscreen}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-green-700">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <svg className="w-4 h-4 text-slate-900 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
             <span>{t.pwaModal.benefits.offline}</span>
           </div>
@@ -132,7 +142,7 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
         {deviceType === "android" && deferredPrompt && (
           <button
             onClick={handleInstallClick}
-            className="btn-primary w-full"
+            className="w-full h-[54px] bg-slate-900 hover:bg-slate-800 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
           >
             {t.pwaModal.install}
           </button>
@@ -145,7 +155,7 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
             </p>
             <div className="flex items-center justify-center gap-3">
               <span className="text-xs text-slate-600">{t.pwaModal.iosSafari.step1}</span>
-              <div className="p-2 bg-blue-500 rounded-lg">
+              <div className="p-2 bg-slate-800 rounded-lg">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
@@ -167,7 +177,7 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
                   {t.pwaModal.iosChrome.step1}
                 </p>
                 <div className="mt-2 flex justify-end">
-                  <div className="p-1.5 bg-blue-500 rounded-lg">
+                  <div className="p-1.5 bg-slate-800 rounded-lg">
                     <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
@@ -192,14 +202,6 @@ export function DashboardPWAInstallModal({ onClose }: DashboardPWAInstallModalPr
             <p>{t.pwaModal.desktopMessage}</p>
           </div>
         )}
-
-        {/* Dismiss button */}
-        <button
-          onClick={handleDismiss}
-          className="w-full text-sm text-slate-500 hover:text-slate-700 transition-colors py-2"
-        >
-          {t.pwaModal.later}
-        </button>
       </div>
     </div>
   );
