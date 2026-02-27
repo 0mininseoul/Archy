@@ -18,7 +18,6 @@ interface ConsentState {
   age14: boolean;
   terms: boolean;
   privacy: boolean;
-  serviceQuality: boolean;
   marketing: boolean;
 }
 
@@ -33,7 +32,6 @@ function OnboardingContent() {
     age14: false,
     terms: false,
     privacy: false,
-    serviceQuality: false,
     marketing: false,
   });
   const [consentStatus, setConsentStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -45,7 +43,7 @@ function OnboardingContent() {
   const { t } = useI18n();
 
   const requiredConsentsChecked = consents.age14 && consents.terms && consents.privacy;
-  const allConsentsChecked = requiredConsentsChecked && consents.serviceQuality && consents.marketing;
+  const allConsentsChecked = requiredConsentsChecked && consents.marketing;
 
   // Check if user has promo applied (from signup link)
   useEffect(() => {
@@ -115,7 +113,6 @@ function OnboardingContent() {
       age14: shouldCheckAll,
       terms: shouldCheckAll,
       privacy: shouldCheckAll,
-      serviceQuality: shouldCheckAll,
       marketing: shouldCheckAll,
     });
   };
@@ -134,7 +131,6 @@ function OnboardingContent() {
           age14: consents.age14,
           terms: consents.terms,
           privacy: consents.privacy,
-          serviceQualityOptIn: consents.serviceQuality,
           marketingOptIn: consents.marketing,
         }),
       });
@@ -347,18 +343,6 @@ function OnboardingContent() {
                       </svg>
                     </a>
                   </div>
-
-                  <button
-                    onClick={() => toggleConsent("serviceQuality")}
-                    className="w-full py-2.5 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <svg className={`w-5 h-5 ${consents.serviceQuality ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span className="text-base text-slate-900">{t.onboarding.step1.optionalQuality}</span>
-                    </div>
-                  </button>
 
                   <button
                     onClick={() => toggleConsent("marketing")}
