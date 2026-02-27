@@ -491,7 +491,7 @@ export const translations = {
       benefits: {
         fast: "앱처럼 빠르게 실행",
         fullscreen: "전체 화면으로 사용",
-        offline: "오프라인에서도 접근 가능",
+        offline: "푸시 알림 기능 지원",
       },
       install: "홈 화면에 추가",
       iosSafari: {
@@ -1077,7 +1077,7 @@ export const translations = {
       benefits: {
         fast: "Launch like an app",
         fullscreen: "Use in full screen",
-        offline: "Access offline",
+        offline: "Supports push notifications",
       },
       install: "Add to Home Screen",
       iosSafari: {
