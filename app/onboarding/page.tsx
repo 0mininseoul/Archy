@@ -501,6 +501,7 @@ function OnboardingContent() {
               </div>
             )}
           </div>
+        </div>
       </main>
 
       <DesktopLoginNoticeModal
