@@ -449,10 +449,10 @@ function OnboardingContent() {
                     </div>
                   </div>
 
-                  <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center shrink-0">
+                  <div className="mt-5 p-3.5 bg-white border border-slate-200 rounded-xl flex items-center shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[15px]">💡</span>
-                      <p className="text-[13px] text-slate-600 leading-tight translate-y-[0.5px]">
+                      <p className="text-[13px] text-slate-700 leading-tight translate-y-[0.5px]">
                         {t.onboarding.step2.settingsTip}
                       </p>
                     </div>
@@ -461,11 +461,14 @@ function OnboardingContent() {
                   <div className="mt-2 w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white shrink-0 mb-4">
                     <button
                       onClick={() => setShowReferralInput(!showReferralInput)}
-                      className="w-full px-4 py-3 text-[14px] text-slate-700 flex items-center justify-center relative"
+                      className="w-full px-3.5 py-3 text-[14px] text-slate-700 flex items-center justify-between"
                     >
-                      <span className="font-medium text-center text-[13px]">{t.onboarding.step2.referralQuestion}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[15px]">🎁</span>
+                        <span className="font-medium text-[13px] leading-tight translate-y-[0.5px]">{t.onboarding.step2.referralQuestion}</span>
+                      </div>
                       <svg
-                        className={`absolute right-4 w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                        className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
