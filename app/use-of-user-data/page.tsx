@@ -6,7 +6,7 @@ export default function UseOfUserDataPage() {
           서비스 품질 향상을 위한 데이터 활용
         </h1>
         <p className="mt-3 text-sm text-gray-500">
-          최종 수정일: 2026년 2월 28일
+          최종 수정일: 2026년 2월 27일
         </p>
 
         <div className="mt-6 space-y-6 text-gray-700 leading-relaxed">
