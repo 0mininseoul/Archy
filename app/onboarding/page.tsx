@@ -239,8 +239,8 @@ function OnboardingContent() {
           {/* Step Content */}
           <div className="animate-slide-up flex-1 min-h-0 flex flex-col px-1 pb-4">
             {step === 1 && (
-              <div className="flex-1 min-h-0 flex flex-col relative h-full">
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
+              <div className="flex-1 min-h-0 flex flex-col h-full">
+                <div className="flex-1 flex flex-col">
                   <button
                     onClick={() => router.push("/")}
                     className="w-8 h-8 -ml-1 mb-2 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
@@ -377,7 +377,7 @@ function OnboardingContent() {
                   )}
                 </div>
 
-                <div className="absolute bottom-0 left-0 right-0 pt-4 pb-2 bg-gradient-to-t from-white via-white to-transparent">
+                <div className="mt-auto pt-4 pb-2">
                   <button
                     onClick={handleConsentNext}
                     disabled={!requiredConsentsChecked || consentStatus === "loading"}
@@ -394,8 +394,8 @@ function OnboardingContent() {
             )}
 
             {step === 2 && (
-              <div className="flex-1 flex flex-col relative h-full">
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-24 flex flex-col">
+              <div className="flex-1 flex flex-col h-full">
+                <div className="flex-1 flex flex-col">
                   <button
                     onClick={() => setStep(1)}
                     className="w-8 h-8 -ml-1 mb-2 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
@@ -412,6 +412,18 @@ function OnboardingContent() {
                   </div>
 
                   <div className="mt-8 space-y-6 shrink-0">
+                    <div className="w-full flex items-start gap-4">
+                      <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
+                        <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
+                          {t.onboarding.step2.autoFormat.description}
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="w-full flex items-start gap-4">
                       <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -435,18 +447,6 @@ function OnboardingContent() {
                         </div>
                       </div>
                     </div>
-
-                    <div className="w-full flex items-start gap-4">
-                      <svg className="w-5 h-5 text-slate-900 mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-[16px] font-bold text-slate-900">{t.onboarding.step2.autoFormat.title}</h3>
-                        <p className="text-[13px] text-slate-500 leading-[1.5] mt-1 whitespace-pre-line break-keep">
-                          {t.onboarding.step2.autoFormat.description}
-                        </p>
-                      </div>
-                    </div>
                   </div>
 
                   <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center shrink-0">
@@ -458,66 +458,64 @@ function OnboardingContent() {
                     </div>
                   </div>
 
-                  <div className="mt-2.5 pb-2 shrink-0 w-full flex justify-center">
-                    <div className="w-[280px] max-w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white">
-                      <button
-                        onClick={() => setShowReferralInput(!showReferralInput)}
-                        className="w-full px-3 py-3 text-[14px] text-slate-700 flex items-center justify-between"
-                      >
-                        <span className="flex-1 text-center font-medium pr-1">{t.onboarding.step2.referralQuestion}</span>
-                        <svg
-                          className={`w-4 h-4 text-slate-400 transition-transform duration-300 shrink-0 ${showReferralInput ? "rotate-180" : ""}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-
-                      {showReferralInput && (
-                        <div className="px-3 pb-3 pt-0 animate-slide-up">
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={referralCode}
-                              onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                              placeholder={t.onboarding.step2.referralPlaceholder}
-                              className="flex-1 px-3 py-2 border border-slate-200 outline-none rounded-lg text-sm text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
-                              maxLength={8}
-                              disabled={referralStatus === "success" || referralStatus === "loading"}
-                            />
-                            <button
-                              onClick={handleApplyReferral}
-                              disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
-                              className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                            >
-                              {referralStatus === "loading" ? (
-                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                t.onboarding.step2.referralApply
-                              )}
-                            </button>
-                          </div>
-
-                          {referralMessage && (
-                            <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
-                              {referralMessage}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-0 left-0 right-0 pt-4 pb-2 bg-gradient-to-t from-white via-white to-transparent">
+                  <div className="mt-2 w-full border border-slate-200 rounded-xl overflow-hidden transition-all duration-300 bg-white shrink-0 mb-4">
                     <button
-                      onClick={handleComplete}
-                      className="w-full h-[54px] bg-slate-900 hover:bg-slate-800 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
+                      onClick={() => setShowReferralInput(!showReferralInput)}
+                      className="w-full px-4 py-3 text-[14px] text-slate-700 flex items-center justify-center relative"
                     >
-                      {t.onboarding.step2.start}
+                      <span className="font-medium text-center text-[13px]">{t.onboarding.step2.referralQuestion}</span>
+                      <svg
+                        className={`absolute right-4 w-4 h-4 text-slate-400 transition-transform duration-300 ${showReferralInput ? "rotate-180" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
+                      </svg>
                     </button>
+
+                    {showReferralInput && (
+                      <div className="px-3 pb-3 pt-0 animate-slide-up">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={referralCode}
+                            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                            placeholder={t.onboarding.step2.referralPlaceholder}
+                            className="flex-1 min-w-0 px-3 py-2 border border-slate-200 outline-none rounded-lg text-[13px] text-slate-900 focus:ring-1 focus:ring-slate-900 uppercase"
+                            maxLength={8}
+                            disabled={referralStatus === "success" || referralStatus === "loading"}
+                          />
+                          <button
+                            onClick={handleApplyReferral}
+                            disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
+                            className="px-3.5 py-2 shrink-0 whitespace-nowrap bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {referralStatus === "loading" ? (
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              t.onboarding.step2.referralApply
+                            )}
+                          </button>
+                        </div>
+
+                        {referralMessage && (
+                          <p className={`mt-2 text-[12px] ${referralStatus === "success" ? "text-blue-600" : "text-red-500"}`}>
+                            {referralMessage}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
+                </div>
+
+                <div className="mt-auto pt-4 pb-2">
+                  <button
+                    onClick={handleComplete}
+                    className="w-full h-[54px] bg-slate-900 hover:bg-slate-800 text-white text-[16px] font-bold rounded-[18px] shadow-sm transition-colors"
+                  >
+                    {t.onboarding.step2.start}
+                  </button>
                 </div>
               </div>
             )}
@@ -529,7 +527,7 @@ function OnboardingContent() {
         isOpen={showDesktopLoginNotice}
         onClose={() => setShowDesktopLoginNotice(false)}
       />
-    </div>
+    </div >
   );
 }
 
