@@ -14,6 +14,14 @@ interface PromoStatus {
   daysRemaining: number | null;
 }
 
+interface ConsentState {
+  age14: boolean;
+  terms: boolean;
+  privacy: boolean;
+  serviceQuality: boolean;
+  marketing: boolean;
+}
+
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
   const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
@@ -21,11 +29,23 @@ function OnboardingContent() {
   const [referralCode, setReferralCode] = useState("");
   const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [referralMessage, setReferralMessage] = useState("");
+  const [consents, setConsents] = useState<ConsentState>({
+    age14: false,
+    terms: false,
+    privacy: false,
+    serviceQuality: false,
+    marketing: false,
+  });
+  const [consentStatus, setConsentStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [consentError, setConsentError] = useState("");
   const [promoStatus, setPromoStatus] = useState<PromoStatus | null>(null);
   const hasTrackedSignupCompletionRef = useRef(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
+
+  const requiredConsentsChecked = consents.age14 && consents.terms && consents.privacy;
+  const allConsentsChecked = requiredConsentsChecked && consents.serviceQuality && consents.marketing;
 
   // Check if user has promo applied (from signup link)
   useEffect(() => {
@@ -78,6 +98,59 @@ function OnboardingContent() {
     checkPromoStatus();
   }, []);
 
+  const toggleConsent = (key: keyof ConsentState) => {
+    setConsentError("");
+    setConsentStatus("idle");
+    setConsents((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const toggleAllConsents = () => {
+    setConsentError("");
+    setConsentStatus("idle");
+    const shouldCheckAll = !allConsentsChecked;
+    setConsents({
+      age14: shouldCheckAll,
+      terms: shouldCheckAll,
+      privacy: shouldCheckAll,
+      serviceQuality: shouldCheckAll,
+      marketing: shouldCheckAll,
+    });
+  };
+
+  const handleConsentNext = async () => {
+    if (!requiredConsentsChecked) return;
+
+    setConsentStatus("loading");
+    setConsentError("");
+
+    try {
+      const response = await fetch("/api/user/consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          age14: consents.age14,
+          terms: consents.terms,
+          privacy: consents.privacy,
+          serviceQualityOptIn: consents.serviceQuality,
+          marketingOptIn: consents.marketing,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save consents");
+      }
+
+      setConsentStatus("idle");
+      setStep(2);
+    } catch {
+      setConsentStatus("error");
+      setConsentError(t.onboarding.step1.saveFailed);
+    }
+  };
+
   const handleApplyReferral = async () => {
     if (!referralCode.trim()) return;
 
@@ -93,29 +166,29 @@ function OnboardingContent() {
 
       if (response.ok) {
         setReferralStatus("success");
-        setReferralMessage(t.onboarding.step1.referralSuccess);
+        setReferralMessage(t.onboarding.step2.referralSuccess);
       } else {
         setReferralStatus("error");
         switch (data.code) {
           case "INVALID_FORMAT":
-            setReferralMessage(t.onboarding.step1.referralInvalidFormat);
+            setReferralMessage(t.onboarding.step2.referralInvalidFormat);
             break;
           case "ALREADY_USED":
-            setReferralMessage(t.onboarding.step1.referralAlreadyUsed);
+            setReferralMessage(t.onboarding.step2.referralAlreadyUsed);
             break;
           case "SELF_REFERRAL":
-            setReferralMessage(t.onboarding.step1.referralSelf);
+            setReferralMessage(t.onboarding.step2.referralSelf);
             break;
           case "NOT_FOUND":
-            setReferralMessage(t.onboarding.step1.referralNotFound);
+            setReferralMessage(t.onboarding.step2.referralNotFound);
             break;
           default:
-            setReferralMessage(t.onboarding.step1.referralError);
+            setReferralMessage(t.onboarding.step2.referralError);
         }
       }
     } catch {
       setReferralStatus("error");
-      setReferralMessage(t.onboarding.step1.referralError);
+      setReferralMessage(t.onboarding.step2.referralError);
     }
   };
 
@@ -186,79 +259,132 @@ function OnboardingContent() {
           </div>
 
           {/* Step Content */}
-          <div className="card p-5 animate-slide-up flex-1 flex flex-col">
+          <div className={`${step === 1 ? "animate-slide-up flex-1 flex flex-col px-1" : "card p-5 animate-slide-up flex-1 flex flex-col"}`}>
             {step === 1 && (
-              <div className="space-y-5 text-center flex-1 flex flex-col justify-center">
-                <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl mx-auto">
-                  👋
-                </div>
-                <div className="space-y-2">
-                  <h2 className="text-xl font-bold text-slate-900">
-                    {t.onboarding.step1.title}
-                  </h2>
-                  <p className="text-sm text-slate-600">
-                    {t.onboarding.step1.description}
-                  </p>
-                </div>
+              <div className="flex-1 flex flex-col">
                 <button
-                  onClick={() => setStep(2)}
-                  className="btn-primary w-full flex items-center justify-center gap-2"
+                  onClick={() => router.push("/")}
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+                  aria-label={t.common.back}
                 >
-                  {t.onboarding.step1.getStarted}
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
 
-                {/* Referral Code Section */}
-                <div className="pt-4 border-t border-slate-100">
-                  <button
-                    onClick={() => setShowReferralInput(!showReferralInput)}
-                    className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mx-auto"
-                  >
-                    {t.onboarding.step1.referralQuestion}
-                    <svg
-                      className={`w-4 h-4 transition-transform ${showReferralInput ? "rotate-180" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                <div className="mt-5 space-y-2">
+                  <h2 className="text-3xl font-bold text-slate-900">{t.onboarding.step1.title}</h2>
+                  <p className="text-base text-slate-400">{t.onboarding.step1.description}</p>
+                </div>
+
+                <button
+                  onClick={toggleAllConsents}
+                  className="w-full mt-8 bg-slate-100 rounded-2xl px-4 py-5 flex items-center gap-3"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${allConsentsChecked ? "bg-slate-900 text-white" : "bg-slate-200 text-white"}`}>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
+                  </div>
+                  <span className="text-xl font-bold text-slate-900">{t.onboarding.step1.allAgree}</span>
+                </button>
+
+                <div className="mt-4 space-y-1">
+                  <button
+                    onClick={() => toggleConsent("age14")}
+                    className="w-full py-3 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <svg className={`w-5 h-5 ${consents.age14 ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-lg text-slate-900">{t.onboarding.step1.requiredAge}</span>
+                    </div>
                   </button>
 
-                  {showReferralInput && (
-                    <div className="mt-3 space-y-2 animate-fade-in">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={referralCode}
-                          onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                          placeholder={t.onboarding.step1.referralPlaceholder}
-                          className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent uppercase"
-                          maxLength={8}
-                          disabled={referralStatus === "success" || referralStatus === "loading"}
-                        />
-                        <button
-                          onClick={handleApplyReferral}
-                          disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
-                          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {referralStatus === "loading" ? (
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            t.onboarding.step1.referralApply
-                          )}
-                        </button>
-                      </div>
+                  <div className="w-full py-3 flex items-center justify-between">
+                    <button
+                      onClick={() => toggleConsent("terms")}
+                      className="flex items-center gap-3"
+                    >
+                      <svg className={`w-5 h-5 ${consents.terms ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-lg text-slate-900">{t.onboarding.step1.requiredTerms}</span>
+                    </button>
+                    <a
+                      href="/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-slate-400 hover:text-slate-600"
+                      aria-label={t.onboarding.step1.openTerms}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </a>
+                  </div>
 
-                      {referralMessage && (
-                        <p className={`text-xs ${referralStatus === "success" ? "text-green-600" : "text-red-500"}`}>
-                          {referralMessage}
-                        </p>
-                      )}
+                  <div className="w-full py-3 flex items-center justify-between">
+                    <button
+                      onClick={() => toggleConsent("privacy")}
+                      className="flex items-center gap-3"
+                    >
+                      <svg className={`w-5 h-5 ${consents.privacy ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-lg text-slate-900">{t.onboarding.step1.requiredPrivacy}</span>
+                    </button>
+                    <a
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-slate-400 hover:text-slate-600"
+                      aria-label={t.onboarding.step1.openPrivacy}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </a>
+                  </div>
+
+                  <button
+                    onClick={() => toggleConsent("serviceQuality")}
+                    className="w-full py-3 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <svg className={`w-5 h-5 ${consents.serviceQuality ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-lg text-slate-900">{t.onboarding.step1.optionalQuality}</span>
                     </div>
-                  )}
+                  </button>
+
+                  <button
+                    onClick={() => toggleConsent("marketing")}
+                    className="w-full py-3 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <svg className={`w-5 h-5 ${consents.marketing ? "text-blue-600" : "text-slate-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-lg text-slate-900">{t.onboarding.step1.optionalMarketing}</span>
+                    </div>
+                  </button>
+                </div>
+
+                {consentError && (
+                  <p className="mt-2 text-sm text-red-500">{consentError}</p>
+                )}
+
+                <div className="mt-auto pt-5">
+                  <button
+                    onClick={handleConsentNext}
+                    disabled={!requiredConsentsChecked || consentStatus === "loading"}
+                    className="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {consentStatus === "loading" ? t.common.loading : t.onboarding.step1.next}
+                  </button>
                 </div>
               </div>
             )}
@@ -337,6 +463,57 @@ function OnboardingContent() {
                         <strong>💡</strong> {t.onboarding.step2.settingsTip}
                       </p>
                     </div>
+
+                    {/* Referral Code Section */}
+                    <div className="border border-slate-200 rounded-lg p-3">
+                      <button
+                        onClick={() => setShowReferralInput(!showReferralInput)}
+                        className="w-full text-sm text-slate-600 hover:text-slate-800 flex items-center justify-between"
+                      >
+                        <span>{t.onboarding.step2.referralQuestion}</span>
+                        <svg
+                          className={`w-4 h-4 transition-transform ${showReferralInput ? "rotate-180" : ""}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+
+                      {showReferralInput && (
+                        <div className="mt-3 space-y-2 animate-fade-in">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={referralCode}
+                              onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                              placeholder={t.onboarding.step2.referralPlaceholder}
+                              className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent uppercase"
+                              maxLength={8}
+                              disabled={referralStatus === "success" || referralStatus === "loading"}
+                            />
+                            <button
+                              onClick={handleApplyReferral}
+                              disabled={!referralCode.trim() || referralStatus === "success" || referralStatus === "loading"}
+                              className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {referralStatus === "loading" ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                t.onboarding.step2.referralApply
+                              )}
+                            </button>
+                          </div>
+
+                          {referralMessage && (
+                            <p className={`text-xs ${referralStatus === "success" ? "text-green-600" : "text-red-500"}`}>
+                              {referralMessage}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -352,7 +529,7 @@ function OnboardingContent() {
                     onClick={handleComplete}
                     className="flex-1 btn-primary"
                   >
-                    시작하기
+                    {t.onboarding.step2.start}
                   </button>
                 </div>
               </div>

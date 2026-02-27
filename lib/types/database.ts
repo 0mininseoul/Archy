@@ -40,6 +40,16 @@ export interface User {
   // Audio Storage
   save_audio_enabled: boolean;
 
+  // Consent Tracking
+  age_14_confirmed_at?: string | null;
+  terms_agreed_at?: string | null;
+  terms_version?: string | null;
+  privacy_agreed_at?: string | null;
+  privacy_version?: string | null;
+  service_quality_opt_in?: boolean;
+  marketing_opt_in?: boolean;
+  consented_at?: string | null;
+
   // Usage & Limits
   monthly_minutes_used: number;
   last_reset_at: string;
