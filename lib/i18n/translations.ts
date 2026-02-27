@@ -425,17 +425,17 @@ export const translations = {
         description: "녹음 후 자동으로 문서가 완성됩니다",
         autoFormat: {
           title: "스마트 포맷",
-          description: "AI가 녹음 내용을 분석해 내용을 자동으로 판단하고 형식에 맞추어 요약합니다. 나만의 원하는 요약 스타일을 직접 정의할 수도 있습니다.",
+          description: "AI가 녹음 내용을 분석해 내용을 자동으로 판단하고\n형식에 맞추어 요약합니다.\n나만의 원하는 요약 스타일을 직접 정의할 수도 있습니다.",
         },
         integrations: {
           title: "서비스 연동",
-          description: "Notion, Google Docs, Slack과 연동하고 푸시 알림으로 완료 소식을 받아보세요.",
+          description: "Notion, Google Docs, Slack과 연동하고\n푸시 알림으로 완료 소식을 받아보세요.",
         },
         customFormat: {
           title: "나만의 포맷",
           description: "원하는 요약 스타일을 직접 정의할 수도 있습니다.",
         },
-        settingsTip: "연동 및 포맷 설정은 '설정' 메뉴에서 언제든 변경할 수 있어요.",
+        settingsTip: "연동 및 포맷은 '설정' 메뉴에서 언제든 변경할 수 있어요.",
         referralQuestion: "혹시 친구에게 추천 받으셨나요?",
         referralPlaceholder: "추천 코드 입력",
         referralApply: "적용",
