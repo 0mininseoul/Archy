@@ -170,6 +170,10 @@
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }
 
+  .font-pretendard {
+    font-family: var(--font-pretendard), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  }
+
   /* 모바일 패딩 통일 */
   .px-mobile {
     @apply px-4;
