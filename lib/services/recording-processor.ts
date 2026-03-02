@@ -11,7 +11,7 @@ import { transcribeAudio } from "@/lib/services/whisper";
 import { formatDocument } from "@/lib/services/openai";
 import { createNotionPage, getNotionDatabases, getNotionPages } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
-import { createGoogleDoc, getValidAccessToken, convertMarkdownToPlainText } from "@/lib/services/google";
+import { createGoogleDoc, getValidAccessToken } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
 import { logSttDecision } from "@/lib/services/stt-observability";
 import {
@@ -399,11 +399,10 @@ async function stepGoogleDocSave(
         .eq("id", userData.id);
     }
 
-    const plainTextContent = convertMarkdownToPlainText(content);
     const googleDocUrl = await createGoogleDoc(
       accessToken,
       title,
-      plainTextContent,
+      content,
       userData.google_folder_id || undefined
     );
 

@@ -202,61 +202,55 @@ function parseMarkdownToRequests(markdown: string): any[] {
 
   const lines = markdown.split("\n");
 
-  // First pass: Construct the full text insertion
-  // We insert line by line to track indices for styling
+  const getIndentInfo = (rawLine: string) => {
+    const leadingWhitespace = rawLine.match(/^[\t ]*/)?.[0] || "";
+    const indentWidth = leadingWhitespace.replace(/\t/g, "    ").length;
+    return {
+      indentLevel: indentWidth === 0 ? 0 : Math.max(1, Math.floor(indentWidth / 2)),
+      trimmed: rawLine.trimStart(),
+    };
+  };
 
-  // Actually, inserting one big block is efficient but makes styling harder to map if we strip chars.
-  // Strategy: Parse line, clean it, insert it, apply style to the inserted range.
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    let textToInsert = line;
+  for (const rawLine of lines) {
+    const { indentLevel, trimmed } = getIndentInfo(rawLine);
+    let textToInsert = trimmed;
     let styleType = "NORMAL_TEXT";
     let isList = false;
     let listType = "BULLET"; // Default
 
-    // 1. Identify Line Type & Strip Markers
-    if (line.startsWith("## ")) {
+    if (trimmed.startsWith("## ")) {
       styleType = "HEADING_2";
-      textToInsert = line.substring(3);
-    } else if (line.startsWith("### ")) {
+      textToInsert = trimmed.substring(3);
+    } else if (trimmed.startsWith("### ")) {
       styleType = "HEADING_3";
-      textToInsert = line.substring(4);
-    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      textToInsert = trimmed.substring(4);
+    } else if (/^- \[(x|X| )\] /.test(trimmed)) {
       isList = true;
-      textToInsert = line.substring(2);
-    } else if (/^\d+\. /.test(line)) {
+      textToInsert = trimmed.replace(/^- \[(x|X| )\] /, (match) => (match.toLowerCase().includes("x") ? "[v] " : "[ ] "));
+    } else if (/^[-*] /.test(trimmed)) {
       isList = true;
-      listType = "NUMBERED"; // Simplification: Usage same as bullet
-      textToInsert = line.replace(/^\d+\. /, "");
-    } else if (line.startsWith("- [ ] ") || line.startsWith("- [x] ")) {
-      // Checkboxes as bullets for now
+      textToInsert = trimmed.substring(2);
+    } else if (/^\d+\. /.test(trimmed)) {
       isList = true;
-      textToInsert = line.replace(/^- \[(x| )\] /, (match) => match.includes("x") ? "[v] " : "[ ] ");
+      listType = "NUMBERED";
+      textToInsert = trimmed.replace(/^\d+\. /, "");
     }
 
-    // Handle Table Separators (Simple skip)
-    if (line.match(/^\|[\s-]+\|/)) continue;
+    if (trimmed.match(/^\|[\s-]+\|/)) continue;
 
-    // Handle Table Rows (Simple conversion to text with spaces)
-    if (line.startsWith("|")) {
-      textToInsert = line.replace(/\|/g, " | ").trim(); // Naive table handling
+    if (trimmed.startsWith("|")) {
+      textToInsert = trimmed.replace(/\|/g, " | ").trim();
+    }
+
+    if (isList && indentLevel > 0) {
+      textToInsert = `${"\t".repeat(indentLevel)}${textToInsert}`;
     }
 
     // Newline at the end
     textToInsert += "\n";
 
-    // 2. Handle Inline Bold (**text**) within this line
-    // We need to insert text in chunks to apply styles correctly?
-    // Or insert full line then apply styles to ranges? -> Ranges is better.
-
-    // Clean inline formatting markers from textToInsert for final output?
-    // If we remove **, indices shift. 
-    // Let's Parse inline bold first to get ranges relative to the CLEANED string.
-
     const { cleanText, boldRanges } = parseInlineBold(textToInsert);
 
-    // 3. Insert Text
     requests.push({
       insertText: {
         text: cleanText,
@@ -267,7 +261,6 @@ function parseMarkdownToRequests(markdown: string): any[] {
     const startIndex = currentIndex;
     const endIndex = currentIndex + cleanText.length;
 
-    // 4. Apply Paragraph Style (Heading)
     if (styleType !== "NORMAL_TEXT") {
       requests.push({
         updateParagraphStyle: {
@@ -283,7 +276,6 @@ function parseMarkdownToRequests(markdown: string): any[] {
       });
     }
 
-    // 5. Apply List Style
     if (isList) {
       requests.push({
         createParagraphBullets: {
@@ -296,7 +288,6 @@ function parseMarkdownToRequests(markdown: string): any[] {
       });
     }
 
-    // 6. Apply Inline Bold Styles
     for (const range of boldRanges) {
       requests.push({
         updateTextStyle: {
@@ -312,7 +303,6 @@ function parseMarkdownToRequests(markdown: string): any[] {
       });
     }
 
-    // Update Index
     currentIndex += cleanText.length;
   }
 

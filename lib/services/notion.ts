@@ -374,35 +374,71 @@ function parseRichText(text: string): any[] {
 function convertMarkdownToBlocks(markdown: string): any[] {
   const lines = markdown.split("\n");
   const blocks: any[] = [];
+  const listStack: Array<{ indent: number; block: any }> = [];
   let inTable = false;
   let tableRows: any[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim(); // trim to handle indentation
+  const getIndentWidth = (rawLine: string): number => {
+    const leadingWhitespace = rawLine.match(/^[\t ]*/)?.[0] || "";
+    return leadingWhitespace.replace(/\t/g, "    ").length;
+  };
 
-    // Skip empty lines unless they are breaking a table
-    if (!line) {
-      if (inTable) {
-        // End of table
-        if (tableRows.length > 0) {
-          blocks.push({
-            type: "table",
-            table: {
-              table_width: 3, // Default, will be updated based on first row
-              has_column_header: true,
-              has_row_header: false,
-              children: tableRows
-            }
-          });
-        }
-        inTable = false;
-        tableRows = [];
+  const flushTable = () => {
+    if (!inTable || tableRows.length === 0) {
+      inTable = false;
+      tableRows = [];
+      return;
+    }
+
+    blocks.push({
+      type: "table",
+      table: {
+        table_width: tableRows[0].table_row.cells.length,
+        has_column_header: true,
+        has_row_header: false,
+        children: tableRows,
+      },
+    });
+    inTable = false;
+    tableRows = [];
+  };
+
+  const appendNonListBlock = (block: any) => {
+    listStack.length = 0;
+    blocks.push(block);
+  };
+
+  const appendListBlock = (block: any, indent: number) => {
+    while (listStack.length > 0 && indent <= listStack[listStack.length - 1].indent) {
+      listStack.pop();
+    }
+
+    if (listStack.length === 0) {
+      blocks.push(block);
+    } else {
+      const parent = listStack[listStack.length - 1].block;
+      const parentPayload = parent[parent.type];
+      if (!parentPayload.children) {
+        parentPayload.children = [];
       }
+      parentPayload.children.push(block);
+    }
+
+    listStack.push({ indent, block });
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      if (inTable) flushTable();
       continue;
     }
 
     // Table detection
     if (line.startsWith("|")) {
+      listStack.length = 0;
+
       // Table separator row (ignore |---|)
       if (line.match(/^\|[\s-]+\|/)) {
         continue;
@@ -410,125 +446,102 @@ function convertMarkdownToBlocks(markdown: string): any[] {
 
       const cells = line
         .split("|")
-        .filter((cell, index, arr) => {
-          // Filter out the empty strings from split at start/end if they exist
-          // Usually | a | b | splits to ["", " a ", " b ", ""]
-          return index !== 0 && index !== arr.length - 1;
-        })
-        .map(cell => ({
+        .filter((cell, index, arr) => index !== 0 && index !== arr.length - 1)
+        .map((cell) => ({
           type: "text",
           text: { content: cell.trim() },
-          annotations: { bold: false } // Simple text for table cells for now
+          annotations: { bold: false },
         }));
 
       if (cells.length > 0) {
         const rowBlock = {
           type: "table_row",
           table_row: {
-            cells: cells.map(cell => [cell])
-          }
+            cells: cells.map((cell) => [cell]),
+          },
         };
-
-        if (!inTable) {
-          inTable = true;
-          // Update table width based on first row
-          // We can't set width here easily because we need to wrap it in the table block later
-          // But Notion API requires table_width at creation. 
-          // We'll set it when pushing the table block.
-        }
+        inTable = true;
         tableRows.push(rowBlock);
       }
       continue;
     }
 
-    // If we were in a table but now line doesn't start with |, table ended
-    if (inTable) {
-      if (tableRows.length > 0) {
-        blocks.push({
-          type: "table",
-          table: {
-            table_width: tableRows[0].table_row.cells.length,
-            has_column_header: true,
-            has_row_header: false,
-            children: tableRows
-          }
-        });
-      }
-      inTable = false;
-      tableRows = [];
-    }
+    if (inTable) flushTable();
 
+    const indentWidth = getIndentWidth(rawLine);
 
-    // Heading 2
     if (line.startsWith("## ")) {
-      blocks.push({
+      appendNonListBlock({
         type: "heading_2",
         heading_2: {
           rich_text: parseRichText(line.replace("## ", "")),
         },
       });
+      continue;
     }
-    // Heading 3
-    else if (line.startsWith("### ")) {
-      blocks.push({
+
+    if (line.startsWith("### ")) {
+      appendNonListBlock({
         type: "heading_3",
         heading_3: {
           rich_text: parseRichText(line.replace("### ", "")),
         },
       });
+      continue;
     }
-    // Bullet list
-    else if (line.startsWith("- ")) {
-      blocks.push({
-        type: "bulleted_list_item",
-        bulleted_list_item: {
-          rich_text: parseRichText(line.replace("- ", "")),
-        },
-      });
-    }
-    // Numbered list
-    else if (/^\d+\. /.test(line)) {
-      blocks.push({
-        type: "numbered_list_item",
-        numbered_list_item: {
-          rich_text: parseRichText(line.replace(/^\d+\. /, "")),
-        },
-      });
-    }
-    // Checkbox
-    else if (line.startsWith("- [ ] ") || line.startsWith("- [x] ")) {
-      const checked = line.startsWith("- [x] ");
-      blocks.push({
-        type: "to_do",
-        to_do: {
-          rich_text: parseRichText(line.replace(/^- \[(x| )\] /, "")),
-          checked,
-        },
-      });
-    }
-    // Paragraph
-    else {
-      blocks.push({
-        type: "paragraph",
-        paragraph: {
-          rich_text: parseRichText(line),
-        },
-      });
-    }
-  }
 
-  // Flush remaining table
-  if (inTable && tableRows.length > 0) {
-    blocks.push({
-      type: "table",
-      table: {
-        table_width: tableRows[0].table_row.cells.length,
-        has_column_header: true,
-        has_row_header: false,
-        children: tableRows
-      }
+    const checkboxMatch = line.match(/^- \[(x|X| )\] (.+)$/);
+    if (checkboxMatch) {
+      appendListBlock(
+        {
+          type: "to_do",
+          to_do: {
+            rich_text: parseRichText(checkboxMatch[2]),
+            checked: checkboxMatch[1].toLowerCase() === "x",
+          },
+        },
+        indentWidth
+      );
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*] (.+)$/);
+    if (bulletMatch) {
+      appendListBlock(
+        {
+          type: "bulleted_list_item",
+          bulleted_list_item: {
+            rich_text: parseRichText(bulletMatch[1]),
+          },
+        },
+        indentWidth
+      );
+      continue;
+    }
+
+    const numberedMatch = line.match(/^\d+\. (.+)$/);
+    if (numberedMatch) {
+      appendListBlock(
+        {
+          type: "numbered_list_item",
+          numbered_list_item: {
+            rich_text: parseRichText(numberedMatch[1]),
+          },
+        },
+        indentWidth
+      );
+      continue;
+    }
+
+    appendNonListBlock({
+      type: "paragraph",
+      paragraph: {
+        rich_text: parseRichText(line),
+      },
     });
   }
+
+  if (inTable) flushTable();
 
   return blocks;
 }
