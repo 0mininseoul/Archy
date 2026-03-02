@@ -35,6 +35,32 @@ interface CustomFormat {
   created_at: string;
 }
 
+interface FormatsApiResponse {
+  success?: boolean;
+  data?: {
+    formats?: CustomFormat[];
+  };
+  formats?: CustomFormat[];
+}
+
+function parseFormatsResponse(payload: unknown): CustomFormat[] {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const dataContainer = (payload as FormatsApiResponse).data;
+  if (Array.isArray(dataContainer?.formats)) {
+    return dataContainer.formats;
+  }
+
+  const legacyFormats = (payload as FormatsApiResponse).formats;
+  if (Array.isArray(legacyFormats)) {
+    return legacyFormats;
+  }
+
+  return [];
+}
+
 const NOTION_OAUTH_ERROR_CODES = new Set([
   "notion_not_configured",
   "notion_auth_failed",
@@ -100,8 +126,8 @@ export function SettingsClient() {
       try {
         const response = await fetch("/api/formats");
         if (response.ok) {
-          const data = await response.json();
-          setCustomFormats(data.data || data.formats || []);
+          const payload = await response.json();
+          setCustomFormats(parseFormatsResponse(payload));
         }
       } catch (error) {
         console.error("Failed to fetch formats:", error);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 
 interface CustomFormat {
@@ -18,7 +18,9 @@ interface CustomFormatsSectionProps {
 export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionProps) {
   const { t } = useI18n();
 
-  const [customFormats, setCustomFormats] = useState<CustomFormat[]>(initialFormats);
+  const [customFormats, setCustomFormats] = useState<CustomFormat[]>(
+    Array.isArray(initialFormats) ? initialFormats : []
+  );
   const [showFormatForm, setShowFormatForm] = useState(false);
   const [newFormatName, setNewFormatName] = useState("");
   const [newFormatPrompt, setNewFormatPrompt] = useState("");
@@ -30,6 +32,11 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
 
   // temp ID로 기본값 설정 시도 시 저장 (서버 응답 후 실제 ID로 PUT 호출)
   const pendingDefaultTempIdRef = useRef<string | null>(null);
+
+  // 부모에서 포맷 목록을 다시 받아오면 로컬 상태와 동기화
+  useEffect(() => {
+    setCustomFormats(Array.isArray(initialFormats) ? initialFormats : []);
+  }, [initialFormats]);
 
   // 스마트 포맷이 기본값인지 확인 (커스텀 포맷 중 기본값이 없으면 스마트 포맷이 기본값)
   const isSmartFormatDefault = !customFormats.some(f => f.is_default);

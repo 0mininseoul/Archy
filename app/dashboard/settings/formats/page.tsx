@@ -4,6 +4,42 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CustomFormat } from "@/types";
 
+interface FormatsApiResponse {
+  data?: {
+    formats?: CustomFormat[];
+    format?: CustomFormat;
+  };
+  formats?: CustomFormat[];
+  format?: CustomFormat;
+}
+
+function parseFormats(payload: unknown): CustomFormat[] {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const dataContainer = (payload as FormatsApiResponse).data;
+  if (Array.isArray(dataContainer?.formats)) {
+    return dataContainer.formats;
+  }
+
+  const legacyFormats = (payload as FormatsApiResponse).formats;
+  return Array.isArray(legacyFormats) ? legacyFormats : [];
+}
+
+function parseCreatedFormat(payload: unknown): CustomFormat | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const dataContainer = (payload as FormatsApiResponse).data;
+  if (dataContainer?.format) {
+    return dataContainer.format;
+  }
+
+  return (payload as FormatsApiResponse).format ?? null;
+}
+
 export default function FormatsPage() {
   const router = useRouter();
   const [formats, setFormats] = useState<CustomFormat[]>([]);
@@ -18,8 +54,8 @@ export default function FormatsPage() {
   const fetchFormats = async () => {
     try {
       const response = await fetch("/api/formats");
-      const data = await response.json();
-      setFormats(data.formats || []);
+      const payload = await response.json();
+      setFormats(parseFormats(payload));
     } catch (error) {
       console.error("Failed to fetch formats:", error);
     } finally {
@@ -41,8 +77,11 @@ export default function FormatsPage() {
       });
 
       if (response.ok) {
-        const data = await response.json();
-        setFormats([data.format, ...formats]);
+        const payload = await response.json();
+        const createdFormat = parseCreatedFormat(payload);
+        if (createdFormat) {
+          setFormats((prev) => [createdFormat, ...prev]);
+        }
         setShowCreateModal(false);
         setNewFormat({ name: "", prompt: "" });
       }
