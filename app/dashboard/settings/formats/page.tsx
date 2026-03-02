@@ -253,6 +253,11 @@ export default function FormatsPage() {
                   {"{"}date{"}"}
                   {"}"}
                 </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  If {"{"}
+                  {"{"}transcript{"}"} {"}"} is missing, Archy automatically
+                  injects the transcript at runtime.
+                </p>
               </div>
             </div>
 

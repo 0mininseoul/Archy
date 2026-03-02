@@ -6,6 +6,9 @@ export interface FormatResult {
   content: string;
 }
 
+const TRANSCRIPT_PLACEHOLDER_REGEX = /\{\{\s*transcript\s*\}\}/gi;
+const TRANSCRIPT_PLACEHOLDER_DETECT_REGEX = /\{\{\s*transcript\s*\}\}/i;
+
 // Patterns that indicate AI returned a problematic response
 const PROBLEMATIC_RESPONSE_PATTERNS = {
   placeholder: [
@@ -203,6 +206,40 @@ async function callOpenAI(
   return response.choices[0].message.content || "";
 }
 
+function buildCustomPromptWithTranscript(
+  customPrompt: string,
+  transcript: string
+): {
+  promptWithTranscript: string;
+  hasTranscriptPlaceholder: boolean;
+  transcriptInjectedFallback: boolean;
+} {
+  const hasTranscriptPlaceholder =
+    TRANSCRIPT_PLACEHOLDER_DETECT_REGEX.test(customPrompt);
+
+  if (hasTranscriptPlaceholder) {
+    return {
+      promptWithTranscript: customPrompt.replace(
+        TRANSCRIPT_PLACEHOLDER_REGEX,
+        transcript
+      ),
+      hasTranscriptPlaceholder: true,
+      transcriptInjectedFallback: false,
+    };
+  }
+
+  return {
+    promptWithTranscript: `${customPrompt}
+
+## 녹취록
+<<<TRANSCRIPT>>>
+${transcript}
+<<<END_TRANSCRIPT>>>`,
+    hasTranscriptPlaceholder: false,
+    transcriptInjectedFallback: true,
+  };
+}
+
 /**
  * 녹취록을 포맷에 맞춰 요약/정리합니다.
  * Universal Prompt를 사용하여 AI가 문서 구성을 직접 결정합니다.
@@ -237,9 +274,14 @@ export async function formatDocument(
   // Build prompt
   let prompt: string;
   if (customPrompt) {
+    const {
+      promptWithTranscript,
+      hasTranscriptPlaceholder,
+      transcriptInjectedFallback,
+    } = buildCustomPromptWithTranscript(customPrompt, trimmedTranscript);
+
     // 커스텀 프롬프트에도 [TITLE]/[CONTENT] 형식 안내를 추가
-    const customPromptWithTranscript = customPrompt.replace("{{transcript}}", trimmedTranscript);
-    prompt = `${customPromptWithTranscript}
+    prompt = `${promptWithTranscript}
 
 ## 응답 형식 (반드시 준수)
 아래 형식으로 응답하세요. 태그는 반드시 포함해야 합니다.
@@ -250,7 +292,9 @@ export async function formatDocument(
 [CONTENT]
 정리된 내용 (마크다운 형식)
 [/CONTENT]`;
-    console.log("[Formatting] Using custom format");
+    console.log(
+      `[Formatting] Using custom format (custom_prompt_has_transcript_placeholder=${hasTranscriptPlaceholder}, transcript_injected_fallback=${transcriptInjectedFallback})`
+    );
   } else {
     prompt = buildUniversalPrompt(trimmedTranscript);
     console.log("[Formatting] Using universal prompt");
