@@ -316,6 +316,7 @@ export const translations = {
         editSuccess: "포맷이 수정되었습니다.",
         editFailed: "포맷 수정에 실패했습니다.",
         setDefaultFailed: "기본값 설정에 실패했습니다.",
+        setDefaultGuide: "요약에 적용할 커스텀 포맷을 탭해 기본값으로 설정하세요.",
       },
       data: {
         title: "데이터 관리",
@@ -902,6 +903,7 @@ export const translations = {
         editSuccess: "Format updated successfully.",
         editFailed: "Failed to update format.",
         setDefaultFailed: "Failed to set as default.",
+        setDefaultGuide: "Tap a custom format to set it as the default for summaries.",
       },
       data: {
         title: "Data Management",

@@ -40,6 +40,7 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
 
   // 스마트 포맷이 기본값인지 확인 (커스텀 포맷 중 기본값이 없으면 스마트 포맷이 기본값)
   const isSmartFormatDefault = !customFormats.some(f => f.is_default);
+  const showSetDefaultGuide = customFormats.length > 0;
 
   // 커스텀 포맷을 기본값으로 설정 (Optimistic Update)
   const handleSetDefaultFormat = useCallback(async (id: string) => {
@@ -136,12 +137,12 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
       id: tempId,
       name: newFormatName.trim(),
       prompt: newFormatPrompt.trim(),
-      is_default: false,
+      is_default: true,
       created_at: new Date().toISOString(),
     };
 
     const previousFormats = customFormats;
-    setCustomFormats(formats => [newFormat, ...formats]);
+    setCustomFormats(formats => [newFormat, ...formats.map(f => ({ ...f, is_default: false }))]);
     setShowFormatForm(false);
     setNewFormatName("");
     setNewFormatPrompt("");
@@ -153,7 +154,7 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
         body: JSON.stringify({
           name: newFormat.name,
           prompt: newFormat.prompt,
-          is_default: false,
+          is_default: true,
         }),
       });
 
@@ -291,6 +292,12 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
           </button>
         )}
       </div>
+
+      {showSetDefaultGuide && (
+        <p className="mb-3 text-xs text-slate-500">
+          {t.settings.formats.setDefaultGuide}
+        </p>
+      )}
 
       <div className="space-y-3">
         {/* Smart Format - clickable to set as default */}

@@ -20,7 +20,7 @@ export const GET = withAuth<{ formats: CustomFormat[] }>(async ({ user, supabase
 // POST /api/formats - Create custom format
 export const POST = withAuth<{ format: CustomFormat }>(async ({ user, supabase, request }) => {
   const body = await request!.json();
-  const { name, prompt, is_default } = body;
+  const { name, prompt } = body;
 
   // Validation
   const validationError = validateRequired({ name, prompt }, ["name", "prompt"]);
@@ -43,19 +43,17 @@ export const POST = withAuth<{ format: CustomFormat }>(async ({ user, supabase, 
     return errorResponse("Maximum format limit reached", 400);
   }
 
-  // If setting as default, clear existing default
-  if (is_default) {
-    await supabase
-      .from("custom_formats")
-      .update({ is_default: false })
-      .eq("user_id", user.id);
-  }
+  // New custom format is always the default format
+  await supabase
+    .from("custom_formats")
+    .update({ is_default: false })
+    .eq("user_id", user.id);
 
   const insertData: CustomFormatInsert = {
     user_id: user.id,
     name: name.trim(),
     prompt: prompt.trim(),
-    is_default: is_default || false,
+    is_default: true,
   };
 
   const { data: format, error } = await supabase
