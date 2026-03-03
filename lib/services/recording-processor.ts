@@ -586,6 +586,7 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
 
   let notionUrl = "";
   let googleDocUrl = "";
+  let hadOptionalSaveError = false;
 
   if (isEmptyRecording) {
     log(recordingId, "Empty transcript - skipping Notion, Google Docs, and Slack");
@@ -600,6 +601,9 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
       format,
       duration
     );
+    if (!notionResult.success) {
+      hadOptionalSaveError = true;
+    }
     notionUrl = notionResult.data || "";
 
     // Step 4: Google Docs (optional)
@@ -610,6 +614,9 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
       finalTitle,
       formattedContent
     );
+    if (!googleResult.success) {
+      hadOptionalSaveError = true;
+    }
     googleDocUrl = googleResult.data || "";
 
     // Step 5: Slack (optional)
@@ -624,16 +631,27 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
     );
   }
 
-  // Mark as completed
-  log(recordingId, "Processing completed successfully");
-  await supabase
-    .from("recordings")
-    .update({
-      status: "completed",
+  // Mark as completed (preserve optional-step errors if any)
+  log(
+    recordingId,
+    hadOptionalSaveError
+      ? "Processing completed with partial save failures"
+      : "Processing completed successfully"
+  );
+  const completionPayload = hadOptionalSaveError
+    ? {
+      status: "completed" as const,
+      processing_step: null,
+    }
+    : {
+      status: "completed" as const,
       processing_step: null,
       error_step: null,
       error_message: null,
-    })
+    };
+  await supabase
+    .from("recordings")
+    .update(completionPayload)
     .eq("id", recordingId);
 
   // Step 6: Push notification (after marking complete)
@@ -697,6 +715,7 @@ export async function processFromTranscripts(
 
   let notionUrl = "";
   let googleDocUrl = "";
+  let hadOptionalSaveError = false;
 
   if (isEmptyRecording) {
     log(recordingId, "Empty transcript - skipping Notion, Google Docs, and Slack");
@@ -711,6 +730,9 @@ export async function processFromTranscripts(
       format,
       duration
     );
+    if (!notionResult.success) {
+      hadOptionalSaveError = true;
+    }
     notionUrl = notionResult.data || "";
 
     // Step 4: Google Docs (optional)
@@ -721,6 +743,9 @@ export async function processFromTranscripts(
       finalTitle,
       formattedContent
     );
+    if (!googleResult.success) {
+      hadOptionalSaveError = true;
+    }
     googleDocUrl = googleResult.data || "";
 
     // Step 5: Slack (optional)
@@ -735,16 +760,27 @@ export async function processFromTranscripts(
     );
   }
 
-  // Mark as completed
-  log(recordingId, "Processing completed successfully");
-  await supabase
-    .from("recordings")
-    .update({
-      status: "completed",
+  // Mark as completed (preserve optional-step errors if any)
+  log(
+    recordingId,
+    hadOptionalSaveError
+      ? "Processing completed with partial save failures"
+      : "Processing completed successfully"
+  );
+  const completionPayload = hadOptionalSaveError
+    ? {
+      status: "completed" as const,
+      processing_step: null,
+    }
+    : {
+      status: "completed" as const,
       processing_step: null,
       error_step: null,
       error_message: null,
-    })
+    };
+  await supabase
+    .from("recordings")
+    .update(completionPayload)
     .eq("id", recordingId);
 
   // Step 6: Push notification (after marking complete)

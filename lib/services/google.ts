@@ -197,7 +197,10 @@ export async function createGoogleDoc(
  * 마크다운을 Google Docs API 요청으로 변환
  */
 function parseMarkdownToRequests(markdown: string): any[] {
-  const requests: any[] = [];
+  const insertRequests: any[] = [];
+  const paragraphStyleRequests: any[] = [];
+  const textStyleRequests: any[] = [];
+  const bulletRequests: Array<{ startIndex: number; request: any }> = [];
   let currentIndex = 1; // Google Docs starts at index 1
 
   const lines = markdown.split("\n");
@@ -251,7 +254,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
 
     const { cleanText, boldRanges } = parseInlineBold(textToInsert);
 
-    requests.push({
+    insertRequests.push({
       insertText: {
         text: cleanText,
         location: { index: currentIndex },
@@ -262,7 +265,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
     const endIndex = currentIndex + cleanText.length;
 
     if (styleType !== "NORMAL_TEXT") {
-      requests.push({
+      paragraphStyleRequests.push({
         updateParagraphStyle: {
           range: {
             startIndex: startIndex,
@@ -277,19 +280,22 @@ function parseMarkdownToRequests(markdown: string): any[] {
     }
 
     if (isList) {
-      requests.push({
-        createParagraphBullets: {
-          range: {
-            startIndex: startIndex,
-            endIndex: endIndex,
+      bulletRequests.push({
+        startIndex,
+        request: {
+          createParagraphBullets: {
+            range: {
+              startIndex: startIndex,
+              endIndex: endIndex,
+            },
+            bulletPreset: listType === "NUMBERED" ? "NUMBERED_DECIMAL_ALPHA_ROMAN" : "BULLET_DISC_CIRCLE_SQUARE",
           },
-          bulletPreset: listType === "NUMBERED" ? "NUMBERED_DECIMAL_ALPHA_ROMAN" : "BULLET_DISC_CIRCLE_SQUARE",
         },
       });
     }
 
     for (const range of boldRanges) {
-      requests.push({
+      textStyleRequests.push({
         updateTextStyle: {
           range: {
             startIndex: startIndex + range.start,
@@ -306,7 +312,18 @@ function parseMarkdownToRequests(markdown: string): any[] {
     currentIndex += cleanText.length;
   }
 
-  return requests;
+  // createParagraphBullets may remove leading tabs for nested lists.
+  // Apply bullet requests from bottom to top so index shifts do not break later ranges.
+  const sortedBulletRequests = bulletRequests
+    .sort((a, b) => b.startIndex - a.startIndex)
+    .map(({ request }) => request);
+
+  return [
+    ...insertRequests,
+    ...paragraphStyleRequests,
+    ...textStyleRequests,
+    ...sortedBulletRequests,
+  ];
 }
 
 /**
