@@ -281,7 +281,7 @@ export function CustomFormatsSection({ initialFormats }: CustomFormatsSectionPro
 
   return (
     <div className="card p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className={`flex items-center justify-between ${showSetDefaultGuide ? "mb-1" : "mb-3"}`}>
         <h2 className="text-base font-bold text-slate-900">{t.settings.formats.title}</h2>
         {customFormats.length < 1 && !showFormatForm && (
           <button
