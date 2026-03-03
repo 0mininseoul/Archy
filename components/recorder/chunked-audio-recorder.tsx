@@ -259,8 +259,10 @@ export function ChunkedAudioRecorder({
   // 재개 핸들러
   const handleResumeRecording = useCallback(async () => {
     if (!canResume) return;
-    await resumeRecording();
-    setStealthModeActive(true);
+    const resumed = await resumeRecording();
+    if (resumed) {
+      setStealthModeActive(true);
+    }
   }, [canResume, resumeRecording]);
 
   // 재개 모달에서 이어서 녹음

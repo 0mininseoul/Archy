@@ -91,7 +91,7 @@ export interface UseChunkedRecorderReturn {
   // 녹음 제어
   startRecording: () => Promise<void>;
   pauseRecording: () => void;
-  resumeRecording: () => Promise<void>;
+  resumeRecording: () => Promise<boolean>;
   stopRecording: () => Promise<ChunkedRecordingResult | null>;
 
   // 세션 제어
@@ -176,6 +176,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const recorderRuntimeStateRef = useRef<RecorderRuntimeState>("idle");
   const lastRecorderActionRef = useRef<RecorderAction | null>(null);
   const isBackgroundTransitioningRef = useRef<boolean>(false);
+  const resumeContextRef = useRef<RecordingSession | null>(null);
 
   // iOS 감지 (MP4를 사용하는 경우)
   const isIOSRef = useRef<boolean>(false);
@@ -811,88 +812,130 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
    * 녹음 시작
    */
   const startRecording = useCallback(async () => {
+    const resumeContext = resumeContextRef.current;
+    const isResumingExistingSession = Boolean(resumeContext?.sessionId);
+
     try {
       setRuntimeState("starting", "start");
       setIsControlBusy(true);
       setError(null);
       setIsBackgroundPaused(false);
-      setPausedSession(null);
-      clearSessionFromStorage();
+      if (!isResumingExistingSession) {
+        setPausedSession(null);
+        clearSessionFromStorage();
+      }
 
       console.log("[ChunkedRecorder] Starting recording...");
 
-      // 마이크 권한 요청과 서버 세션 시작을 병렬로 실행
-      // 마이크 권한 다이얼로그가 즉시 표시되고, 서버 요청도 동시에 진행됨
-      const [stream, sessionResponse] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 44100,
-          },
-        }),
-        fetch("/api/recordings/start", {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
+      if (audioContextRef.current) {
+        await audioContextRef.current.close().catch((closeError) => {
+          console.warn("[ChunkedRecorder] Failed to close previous AudioContext:", closeError);
+        });
+        audioContextRef.current = null;
+        analyserNodeRef.current = null;
+        setAnalyserNode(null);
+      }
+
+      mediaRecorderRef.current = null;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100,
+        },
+      });
+      streamRef.current = stream;
+
+      let activeSessionId = resumeContext?.sessionId ?? null;
+      if (!activeSessionId) {
+        const sessionResponse = await fetch("/api/recordings/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ format: "meeting" }),
-        }),
-      ]);
+        });
 
-      streamRef.current = stream;
+        if (!sessionResponse.ok) {
+          stream.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+          const errorData = await sessionResponse.json();
+          throw new Error(errorData.error || "Failed to start session");
+        }
 
-      if (!sessionResponse.ok) {
-        // 마이크 스트림 정리
-        stream.getTracks().forEach((track) => track.stop());
-        const errorData = await sessionResponse.json();
-        throw new Error(errorData.error || "Failed to start session");
+        const sessionData = await sessionResponse.json();
+        activeSessionId = sessionData.data.sessionId as string;
+        console.log(`[ChunkedRecorder] Session started: ${activeSessionId}`);
+      } else {
+        console.log(`[ChunkedRecorder] Resuming existing session: ${activeSessionId}`);
       }
 
-      const sessionData = await sessionResponse.json();
-      const newSessionId = sessionData.data.sessionId;
-      setSessionId(newSessionId);
-      sessionIdRef.current = newSessionId;
-      console.log(`[ChunkedRecorder] Session started: ${newSessionId}`);
+      setSessionId(activeSessionId);
+      sessionIdRef.current = activeSessionId;
 
-      // ChunkUploadManager 초기화 (세션 ID 포함)
-      chunkManagerRef.current = new ChunkUploadManager({
-        sessionId: newSessionId,
-        callbacks: {
-          onChunkUploaded: (result) => {
-            console.log(`[ChunkedRecorder] Chunk ${result.chunkIndex} transcribed`);
-            setChunksTranscribed((prev) => prev + 1);
-            setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
+      const shouldReuseChunkManager =
+        isResumingExistingSession &&
+        chunkManagerRef.current &&
+        chunkManagerRef.current.getSessionId() === activeSessionId;
+
+      if (!shouldReuseChunkManager) {
+        if (chunkManagerRef.current) {
+          chunkManagerRef.current.cleanup();
+        }
+        chunkManagerRef.current = new ChunkUploadManager({
+          sessionId: activeSessionId,
+          callbacks: {
+            onChunkUploaded: (result) => {
+              console.log(`[ChunkedRecorder] Chunk ${result.chunkIndex} transcribed`);
+              setChunksTranscribed((prev) => prev + 1);
+              setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
+            },
+            onChunkFailed: (chunkIndex, error) => {
+              console.error(
+                `[ChunkedRecorder] Chunk ${chunkIndex} failed:`,
+                error
+              );
+              setError(`청크 ${chunkIndex} 업로드 실패`);
+            },
+            onRetrying: (chunkIndex, retryCount) => {
+              console.log(
+                `[ChunkedRecorder] Retrying chunk ${chunkIndex} (${retryCount})`
+              );
+            },
+            onNetworkStatusChange: (online) => {
+              setIsOnline(online);
+              if (!online) {
+                console.warn("[ChunkedRecorder] Network offline");
+              }
+            },
           },
-          onChunkFailed: (chunkIndex, error) => {
-            console.error(
-              `[ChunkedRecorder] Chunk ${chunkIndex} failed:`,
-              error
-            );
-            setError(`청크 ${chunkIndex} 업로드 실패`);
-          },
-          onRetrying: (chunkIndex, retryCount) => {
-            console.log(
-              `[ChunkedRecorder] Retrying chunk ${chunkIndex} (${retryCount})`
-            );
-          },
-          onNetworkStatusChange: (online) => {
-            setIsOnline(online);
-            if (!online) {
-              console.warn("[ChunkedRecorder] Network offline");
-            }
-          },
-        },
-      });
+        });
+      } else {
+        chunkManagerRef.current?.setSessionId(activeSessionId);
+      }
 
       // 청킹 상태 초기화
+      const resumeDurationSeconds = resumeContext?.duration ?? 0;
       currentChunkDataRef.current = [];
       currentChunkRmsSamplesRef.current = [];
       currentChunkPeakRmsRef.current = 0;
-      currentChunkIndexRef.current = 0;
+      currentChunkIndexRef.current = resumeContext?.chunkIndex ?? 0;
       chunkStartTimeRef.current = Date.now();
       lastChunkTimeRef.current = 0;
+      pausedTimeRef.current = resumeDurationSeconds * 1000;
+      setDuration(resumeDurationSeconds);
       setChunksTranscribed(0);
       setChunksTotal(0);
-      setPendingChunks(0);
+      setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
 
       // AudioContext 및 AnalyserNode 생성
       const audioContext = new AudioContext();
@@ -974,13 +1017,20 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         }
       }, 1000);
 
-      console.log("[ChunkedRecorder] Recording started with session:", newSessionId);
+      clearSessionFromStorage();
+      setPausedSession(null);
+      resumeContextRef.current = null;
+      console.log("[ChunkedRecorder] Recording started with session:", activeSessionId);
     } catch (err) {
       console.error("[ChunkedRecorder] Error starting:", err);
       setRuntimeState("error", "start");
       setIsControlBusy(false);
       setIsRecording(false);
       setIsPaused(false);
+      if (resumeContextRef.current) {
+        setPausedSession(resumeContextRef.current);
+        setIsBackgroundPaused(true);
+      }
       if (err instanceof Error && err.name === "NotAllowedError") {
         setError("마이크 접근 권한이 필요합니다.");
       } else {
@@ -1018,13 +1068,48 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   /**
    * 녹음 재개
    */
-  const resumeRecording = useCallback(async () => {
-    if (!mediaRecorderRef.current || !isRecordingRef.current || !isPausedRef.current) return;
-    if (isRestartingRef.current) return;
+  const resumeRecording = useCallback(async (): Promise<boolean> => {
+    if (!mediaRecorderRef.current || !isRecordingRef.current || !isPausedRef.current) return false;
+    if (isRestartingRef.current) return false;
+
+    const hasLiveAudioTrack =
+      streamRef.current?.getAudioTracks().some((track) => track.readyState === "live") ?? false;
+    const recorderInactive = mediaRecorderRef.current.state === "inactive";
+    if (recorderInactive || !hasLiveAudioTrack) {
+      const fallbackSession =
+        pausedSession ||
+        (sessionIdRef.current
+          ? {
+              sessionId: sessionIdRef.current,
+              duration: Math.floor(pausedTimeRef.current / 1000),
+              pausedAt: Date.now(),
+              chunkIndex: currentChunkIndexRef.current,
+            }
+          : null);
+
+      if (!fallbackSession) {
+        setRuntimeState("inactive_unexpected", "resume");
+        setError("녹음을 다시 시작할 세션 정보를 찾을 수 없습니다.");
+        return false;
+      }
+
+      console.warn(
+        "[ChunkedRecorder] Recorder became inactive while paused, rebuilding media pipeline"
+      );
+      resumeContextRef.current = fallbackSession;
+      await startRecording();
+      return recorderRuntimeStateRef.current === "recording";
+    }
+
+    if (audioContextRef.current?.state === "suspended") {
+      await audioContextRef.current.resume().catch((error) => {
+        console.warn("[ChunkedRecorder] Failed to resume AudioContext:", error);
+      });
+    }
 
     await requestWakeLock();
     const resumed = safeResume("resume");
-    if (!resumed) return;
+    if (!resumed) return false;
 
     setIsBackgroundPaused(false);
 
@@ -1048,7 +1133,16 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }, 1000);
 
     console.log("[ChunkedRecorder] Recording resumed");
-  }, [requestWakeLock, safeResume, sampleCurrentChunkRms, extractAndUploadChunk]);
+    return true;
+  }, [
+    extractAndUploadChunk,
+    pausedSession,
+    requestWakeLock,
+    safeResume,
+    sampleCurrentChunkRms,
+    setRuntimeState,
+    startRecording,
+  ]);
 
   /**
    * 녹음 중지 및 결과 반환
@@ -1173,15 +1267,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
    */
   const resumeSession = useCallback(async (session: RecordingSession) => {
     console.log("[ChunkedRecorder] Resuming session:", session);
-
-    // 세션 정보 설정
-    setSessionId(session.sessionId);
-    sessionIdRef.current = session.sessionId;
-    currentChunkIndexRef.current = session.chunkIndex;
-    pausedTimeRef.current = session.duration * 1000;
-    setDuration(session.duration);
-
-    // 새로 녹음 시작
+    resumeContextRef.current = session;
     await startRecording();
   }, [startRecording]);
 
@@ -1209,6 +1295,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     setIsBackgroundPaused(false);
     setSessionId(null);
     sessionIdRef.current = null;
+    resumeContextRef.current = null;
     setRuntimeState("idle", "state_sync");
   }, [pausedSession, clearSessionFromStorage, setRuntimeState]);
 
@@ -1225,6 +1312,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     clearSessionFromStorage();
     setPausedSession(null);
     setIsBackgroundPaused(false);
+    resumeContextRef.current = null;
     setRuntimeState("idle", "state_sync");
 
     // 결과 반환 (세션 ID만 전달하여 서버에서 처리)
