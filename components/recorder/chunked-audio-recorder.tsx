@@ -140,6 +140,10 @@ export function ChunkedAudioRecorder({
     error,
     isWakeLockActive,
     analyserNode,
+    isControlBusy,
+    canPause,
+    canResume,
+    canStop,
     chunksTotal,
     isOnline,
     sessionId,
@@ -222,6 +226,7 @@ export function ChunkedAudioRecorder({
 
   // 녹음 중지 핸들러 - 즉시 history로 이동, 백그라운드에서 처리
   const handleStopRecording = useCallback(() => {
+    if (!canStop) return;
     setStealthModeActive(false);
 
     // 현재 sessionId와 duration을 즉시 캡처
@@ -242,19 +247,21 @@ export function ChunkedAudioRecorder({
     stopRecording().catch((err) => {
       console.error("[ChunkedAudioRecorder] Error in background stopRecording:", err);
     });
-  }, [sessionId, duration, chunksTotal, stopRecording, onRecordingComplete]);
+  }, [canStop, sessionId, duration, chunksTotal, stopRecording, onRecordingComplete]);
 
   // 일시정지 핸들러
   const handlePauseRecording = useCallback(() => {
+    if (!canPause) return;
     pauseRecording();
     setStealthModeActive(false);
-  }, [pauseRecording]);
+  }, [canPause, pauseRecording]);
 
   // 재개 핸들러
   const handleResumeRecording = useCallback(async () => {
+    if (!canResume) return;
     await resumeRecording();
     setStealthModeActive(true);
-  }, [resumeRecording]);
+  }, [canResume, resumeRecording]);
 
   // 재개 모달에서 이어서 녹음
   const handleResumeFromModal = useCallback(async () => {
@@ -353,7 +360,12 @@ export function ChunkedAudioRecorder({
             {/* Pause/Resume Button */}
             <button
               onClick={isPaused ? handleResumeRecording : handlePauseRecording}
-              className="flex items-center justify-center w-14 h-14 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all hover:scale-105 active:scale-95"
+              disabled={isPaused ? !canResume : !canPause}
+              className={`flex items-center justify-center w-14 h-14 rounded-full bg-white border border-slate-200 text-slate-700 shadow-sm transition-all ${
+                (isPaused ? canResume : canPause)
+                  ? "hover:bg-slate-50 hover:border-slate-300 hover:scale-105 active:scale-95"
+                  : "opacity-50 cursor-not-allowed"
+              }`}
               aria-label={isPaused ? "Resume" : "Pause"}
             >
               {isPaused ? (
@@ -369,8 +381,13 @@ export function ChunkedAudioRecorder({
 
             {/* Stop Button */}
             <button
-              onClick={handleStopRecording}
-              className="group relative flex items-center justify-center w-20 h-20 rounded-full bg-white border-2 border-red-100 hover:border-red-200 shadow-xl shadow-red-500/10 transition-all hover:scale-105 active:scale-95"
+              onClick={canStop ? handleStopRecording : undefined}
+              disabled={!canStop}
+              className={`group relative flex items-center justify-center w-20 h-20 rounded-full bg-white border-2 border-red-100 shadow-xl shadow-red-500/10 transition-all ${
+                canStop
+                  ? "hover:border-red-200 hover:scale-105 active:scale-95"
+                  : "opacity-50 cursor-not-allowed"
+              }`}
               aria-label="Stop Recording"
             >
               <div className="w-7 h-7 rounded-lg bg-red-500 group-hover:bg-red-600 transition-colors" />
@@ -391,7 +408,8 @@ export function ChunkedAudioRecorder({
       {/* Stealth Mode (Dim Screen) Button - Bottom Right */}
       {isRecording && !stealthModeActive && !isPaused && (
         <button
-          onClick={() => setStealthModeActive(true)}
+          onClick={isControlBusy ? undefined : () => setStealthModeActive(true)}
+          disabled={isControlBusy}
           className="fixed bottom-24 right-4 flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-full text-sm font-medium shadow-lg hover:bg-slate-800 transition-colors z-50"
           style={{
             bottom: 'calc(env(safe-area-inset-bottom, 0px) + 96px)',

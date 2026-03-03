@@ -9,6 +9,11 @@ interface ChunkTranscript {
   transcript: string;
 }
 
+type FinalizeSessionStatus = Extract<
+  Recording["status"],
+  "recording" | "processing" | "completed" | "failed"
+>;
+
 interface FinalizeRequest {
   sessionId?: string; // 새로운 세션 기반 방식
   transcripts?: ChunkTranscript[]; // 레거시 지원
@@ -18,6 +23,8 @@ interface FinalizeRequest {
 
 interface FinalizeResponse {
   recording: Pick<Recording, "id" | "title" | "status">;
+  idempotent: boolean;
+  statusBefore?: FinalizeSessionStatus;
 }
 
 // POST /api/recordings/finalize - 청크 전사 결과 병합 및 최종 처리
@@ -41,35 +48,62 @@ export const POST = withAuth<FinalizeResponse>(
       return errorResponse("User not found", 404);
     }
 
-    // Check usage limit (Pro users have unlimited usage)
     const durationMinutes = Math.ceil(totalDurationSeconds / 60);
-    if (!hasUnlimitedUsage(userData)) {
-      const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
-      if (userData.monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
-        return errorResponse("Monthly usage limit exceeded", 403);
-      }
-    }
 
     let recordingId: string;
     let title: string;
     let mergedTranscript: string;
+    let shouldRunProcessing = false;
+    let shouldConsumeUsage = false;
+    let statusBefore: FinalizeSessionStatus | undefined;
 
     // 세션 기반 방식 (새로운 방식)
     if (sessionId) {
-      // 기존 세션 조회
-      const { data: session } = await supabase
+      // 기존 세션 조회 (idempotency 판단용)
+      const { data: session, error: sessionError } = await supabase
         .from("recordings")
-        .select("*")
+        .select("id, title, status, transcript, last_chunk_index")
         .eq("id", sessionId)
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
+
+      if (sessionError) {
+        console.error("[Finalize] Failed to load session:", sessionError);
+        return errorResponse("Failed to load session", 500);
+      }
 
       if (!session) {
         return errorResponse("Session not found", 404);
       }
 
-      if (session.status !== "recording") {
-        return errorResponse("Session is not active", 400);
+      statusBefore = session.status as FinalizeSessionStatus;
+
+      if (statusBefore === "failed") {
+        console.warn(`[Finalize] Rejecting finalize for failed session ${sessionId}`);
+        return errorResponse("Session already failed", 409);
+      }
+
+      if (statusBefore === "processing" || statusBefore === "completed") {
+        console.log(
+          `[Finalize] Idempotent finalize skip for session ${sessionId}, status=${statusBefore}`
+        );
+        return successResponse({
+          recording: {
+            id: session.id,
+            title: session.title,
+            status: session.status,
+          },
+          idempotent: true,
+          statusBefore,
+        });
+      }
+
+      // Check usage limit (멱등 skip 경로는 제외)
+      if (!hasUnlimitedUsage(userData)) {
+        const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
+        if (userData.monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
+          return errorResponse("Monthly usage limit exceeded", 403);
+        }
       }
 
       recordingId = session.id;
@@ -130,8 +164,8 @@ export const POST = withAuth<FinalizeResponse>(
 
       console.log(`[Finalize] Final transcript length: ${mergedTranscript.length}`);
 
-      // 세션 상태를 'processing'으로 업데이트
-      const { error: updateError } = await supabase
+      // 원자적 상태 전이로 처리권 선점 (recording -> processing)
+      const { data: claimedSession, error: claimError } = await supabase
         .from("recordings")
         .update({
           status: "processing",
@@ -140,15 +174,70 @@ export const POST = withAuth<FinalizeResponse>(
           session_paused_at: null,
         })
         .eq("id", sessionId)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .eq("status", "recording")
+        .select("id, title, status")
+        .maybeSingle();
 
-      if (updateError) {
-        console.error("[Finalize] Failed to update session:", updateError);
+      if (claimError) {
+        console.error("[Finalize] Failed to claim session:", claimError);
         return errorResponse("Failed to finalize session", 500);
       }
+
+      if (!claimedSession) {
+        // 다른 요청이 먼저 상태를 전환한 경우 -> 상태 재조회 후 idempotent 처리
+        const { data: latestSession, error: latestError } = await supabase
+          .from("recordings")
+          .select("id, title, status")
+          .eq("id", sessionId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (latestError) {
+          console.error("[Finalize] Failed to load latest session:", latestError);
+          return errorResponse("Failed to load session state", 500);
+        }
+
+        if (!latestSession) {
+          return errorResponse("Session not found", 404);
+        }
+
+        const latestStatus = latestSession.status as FinalizeSessionStatus;
+        if (latestStatus === "processing" || latestStatus === "completed") {
+          console.log(
+            `[Finalize] Idempotent finalize skip after claim miss for session ${sessionId}, status=${latestStatus}`
+          );
+          return successResponse({
+            recording: {
+              id: latestSession.id,
+              title: latestSession.title,
+              status: latestSession.status,
+            },
+            idempotent: true,
+            statusBefore: latestStatus,
+          });
+        }
+
+        if (latestStatus === "failed") {
+          return errorResponse("Session already failed", 409);
+        }
+
+        return errorResponse("Session is not active", 400);
+      }
+
+      shouldRunProcessing = true;
+      shouldConsumeUsage = true;
     }
     // 레거시 방식 (transcripts 배열 전달)
     else if (transcripts && Array.isArray(transcripts) && transcripts.length > 0) {
+      // 레거시 방식에서도 usage limit 검사 유지
+      if (!hasUnlimitedUsage(userData)) {
+        const totalMinutesAvailable = MONTHLY_MINUTES_LIMIT + (userData.bonus_minutes || 0);
+        if (userData.monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
+          return errorResponse("Monthly usage limit exceeded", 403);
+        }
+      }
+
       // Sort and merge transcripts
       const sortedTranscripts = [...transcripts].sort((a, b) => a.chunkIndex - b.chunkIndex);
       mergedTranscript = sortedTranscripts.map((t) => t.transcript).join("\n\n");
@@ -182,17 +271,25 @@ export const POST = withAuth<FinalizeResponse>(
       }
 
       recordingId = recording.id;
+      shouldRunProcessing = true;
+      shouldConsumeUsage = true;
     } else {
       return errorResponse("Either sessionId or transcripts array is required", 400);
     }
 
-    // Update usage
-    await supabase
-      .from("users")
-      .update({
-        monthly_minutes_used: userData.monthly_minutes_used + durationMinutes,
-      })
-      .eq("id", user.id);
+    if (shouldConsumeUsage) {
+      // Update usage (idempotent skip 경로에서는 실행하지 않음)
+      await supabase
+        .from("users")
+        .update({
+          monthly_minutes_used: userData.monthly_minutes_used + durationMinutes,
+        })
+        .eq("id", user.id);
+    }
+
+    if (!shouldRunProcessing) {
+      return errorResponse("Failed to claim processing ownership", 500);
+    }
 
     // Process synchronously (Vercel serverless terminates after response, so we must await)
     const result = await processFromTranscripts({
@@ -202,8 +299,8 @@ export const POST = withAuth<FinalizeResponse>(
       duration: totalDurationSeconds,
       userData: userData as User,
       title,
-    }).catch((error) => {
-      handleProcessingError(recordingId, error);
+    }).catch(async (error) => {
+      await handleProcessingError(recordingId, error);
       return null;
     });
 
@@ -213,6 +310,8 @@ export const POST = withAuth<FinalizeResponse>(
         title: result?.title || title,
         status: result?.success ? "completed" : "failed",
       },
+      idempotent: false,
+      statusBefore,
     });
   }
 );

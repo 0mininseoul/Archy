@@ -30,6 +30,13 @@ function detectLocale(request: NextRequest): "ko" | "en" {
 // Public pages that don't need authentication or session check
 // Skip auth for these to significantly improve TTFB
 const PUBLIC_PAGES = ["/", "/privacy", "/terms"];
+const MIDDLEWARE_DEBUG_ENABLED = process.env.MIDDLEWARE_DEBUG_LOGS === "true";
+
+function debugLog(...args: unknown[]) {
+  if (MIDDLEWARE_DEBUG_ENABLED) {
+    console.log(...args);
+  }
+}
 
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -47,7 +54,7 @@ export async function updateSession(request: NextRequest) {
         maxAge: 60 * 60 * 24 * 365, // 1 year
         sameSite: "lax",
       });
-      console.log("[Middleware] Public page - set locale cookie to:", detectedLocale);
+      debugLog("[Middleware] Public page - set locale cookie to:", detectedLocale);
     }
 
     return response;
@@ -92,9 +99,15 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  console.log("[Middleware] Path:", request.nextUrl.pathname);
-  console.log("[Middleware] User:", user?.id || "No user");
-  console.log("[Middleware] Cookies:", request.cookies.getAll().map(c => c.name).filter(n => n.includes('supabase')));
+  debugLog("[Middleware] Path:", request.nextUrl.pathname);
+  debugLog("[Middleware] User:", user?.id || "No user");
+  debugLog(
+    "[Middleware] Cookies:",
+    request.cookies
+      .getAll()
+      .map((cookie) => cookie.name)
+      .filter((name) => name.includes("supabase") || name.startsWith("sb-"))
+  );
 
   // Protected routes
   const protectedRoutes = ["/dashboard", "/onboarding"];
@@ -106,7 +119,7 @@ export async function updateSession(request: NextRequest) {
   const isWithdrawComplete = request.nextUrl.pathname === "/dashboard/settings/contact/withdraw/complete";
 
   if (isProtectedRoute && !isWithdrawComplete && !user) {
-    console.log("[Middleware] Redirecting to home - no user on protected route");
+    debugLog("[Middleware] Redirecting to home - no user on protected route");
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
@@ -123,7 +136,7 @@ export async function updateSession(request: NextRequest) {
       .single();
 
     if (userData?.is_onboarded) {
-      console.log("[Middleware] User already onboarded, redirecting to dashboard");
+      debugLog("[Middleware] User already onboarded, redirecting to dashboard");
       const url = request.nextUrl.clone();
       url.pathname = "/dashboard";
       return NextResponse.redirect(url);
@@ -139,7 +152,7 @@ export async function updateSession(request: NextRequest) {
       maxAge: 60 * 60 * 24 * 365, // 1 year
       sameSite: "lax",
     });
-    console.log("[Middleware] Set locale cookie to:", detectedLocale);
+    debugLog("[Middleware] Set locale cookie to:", detectedLocale);
   }
 
   return supabaseResponse;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ChunkedAudioRecorder } from "@/components/recorder/chunked-audio-recorder";
@@ -21,6 +21,7 @@ export function DashboardClient() {
   const router = useRouter();
   const [showPWAModal, setShowPWAModal] = useState(false);
   const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
+  const inFlightFinalizeSetRef = useRef<Set<string>>(new Set());
 
   // Use cached data from store
   const { connectionStatus, fetchUserData, isLoaded: userLoaded } = useUserStore();
@@ -97,27 +98,42 @@ export function DashboardClient() {
         try {
           // 세션 기반인 경우
           if (sessionId) {
+            if (inFlightFinalizeSetRef.current.has(sessionId)) {
+              console.log(`[Dashboard] Finalize already in-flight for session ${sessionId}, skipping duplicate call`);
+              return;
+            }
+
+            inFlightFinalizeSetRef.current.add(sessionId);
             console.log(
               `[Dashboard] Finalizing session in background: ${sessionId}, ${totalDuration}s`
             );
 
-            const response = await fetch("/api/recordings/finalize", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                sessionId,
-                totalDurationSeconds: totalDuration,
-              }),
-            });
+            try {
+              const response = await fetch("/api/recordings/finalize", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  sessionId,
+                  totalDurationSeconds: totalDuration,
+                }),
+              });
 
-            if (!response.ok) {
-              const errorData = await response.json();
-              console.error("Error finalizing session:", errorData.error);
-            } else {
-              console.log(`[Dashboard] Session ${sessionId} finalized successfully`);
-              invalidateRecordings();
+              if (!response.ok) {
+                const errorData = await response.json();
+                console.error("Error finalizing session:", errorData.error);
+              } else {
+                const data = await response.json();
+                if (data?.data?.idempotent) {
+                  console.log(`[Dashboard] Session ${sessionId} finalize skipped as idempotent`);
+                } else {
+                  console.log(`[Dashboard] Session ${sessionId} finalized successfully`);
+                }
+                invalidateRecordings();
+              }
+            } finally {
+              inFlightFinalizeSetRef.current.delete(sessionId);
             }
             return;
           }

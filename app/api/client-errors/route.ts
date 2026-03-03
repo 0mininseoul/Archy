@@ -14,14 +14,39 @@ interface ClientErrorPayload {
   isStandalone?: boolean;
   timestamp?: string;
   trace?: string | null;
+  fingerprint?: string;
+  category?: "recorder_state" | "external_extension" | "client_runtime";
+  origin?: "app" | "external_extension";
+  sampled?: boolean;
+  recorderRuntimeState?:
+    | "idle"
+    | "starting"
+    | "recording"
+    | "pausing"
+    | "paused"
+    | "resuming"
+    | "stopping"
+    | "inactive_unexpected"
+    | "error"
+    | null;
+  mediaRecorderState?: RecordingState | null;
+  action?:
+    | "start"
+    | "pause"
+    | "resume"
+    | "stop"
+    | "background_transition"
+    | "chunk_restart"
+    | "state_sync"
+    | null;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as ClientErrorPayload;
     const message = typeof body?.message === "string" ? body.message : "Unknown client error";
-
-    console.error("[ClientError]", {
+    const category = body?.category || "client_runtime";
+    const logPayload = {
       type: body?.type || "error",
       message,
       stack: body?.stack || null,
@@ -35,11 +60,24 @@ export async function POST(request: NextRequest) {
       isStandalone: body?.isStandalone ?? null,
       timestamp: body?.timestamp || new Date().toISOString(),
       trace: body?.trace || null,
+      fingerprint: body?.fingerprint || null,
+      category,
+      origin: body?.origin || "app",
+      sampled: body?.sampled ?? true,
+      recorderRuntimeState: body?.recorderRuntimeState ?? null,
+      mediaRecorderState: body?.mediaRecorderState ?? null,
+      action: body?.action ?? null,
       ip:
         request.headers.get("x-forwarded-for") ||
         request.headers.get("x-real-ip") ||
         "unknown",
-    });
+    };
+
+    if (category === "external_extension") {
+      console.warn("[ClientError]", logPayload);
+    } else {
+      console.error("[ClientError]", logPayload);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -19,6 +19,35 @@ const AUDIO_BITRATE = 64000; // 64kbps
 // 로컬 스토리지 키
 const SESSION_STORAGE_KEY = "archy_recording_session";
 
+export type RecorderRuntimeState =
+  | "idle"
+  | "starting"
+  | "recording"
+  | "pausing"
+  | "paused"
+  | "resuming"
+  | "stopping"
+  | "inactive_unexpected"
+  | "error";
+
+type RecorderAction =
+  | "start"
+  | "pause"
+  | "resume"
+  | "stop"
+  | "background_transition"
+  | "chunk_restart"
+  | "state_sync";
+
+type RecorderContextWindow = Window & {
+  __archyRecorderContext?: {
+    recorderRuntimeState: RecorderRuntimeState;
+    mediaRecorderState: RecordingState;
+    action: RecorderAction | null;
+    updatedAt: string;
+  };
+};
+
 export interface RecordingSession {
   sessionId: string;
   duration: number;
@@ -41,6 +70,11 @@ export interface UseChunkedRecorderReturn {
   error: string | null;
   isWakeLockActive: boolean;
   analyserNode: AnalyserNode | null;
+  recorderRuntimeState: RecorderRuntimeState;
+  isControlBusy: boolean;
+  canPause: boolean;
+  canResume: boolean;
+  canStop: boolean;
 
   // 청킹 상태
   chunksTranscribed: number;
@@ -57,7 +91,7 @@ export interface UseChunkedRecorderReturn {
   // 녹음 제어
   startRecording: () => Promise<void>;
   pauseRecording: () => void;
-  resumeRecording: () => void;
+  resumeRecording: () => Promise<void>;
   stopRecording: () => Promise<ChunkedRecordingResult | null>;
 
   // 세션 제어
@@ -98,6 +132,9 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const [error, setError] = useState<string | null>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  const [recorderRuntimeState, setRecorderRuntimeState] =
+    useState<RecorderRuntimeState>("idle");
+  const [isControlBusy, setIsControlBusy] = useState(false);
 
   // 청킹 상태
   const [chunksTranscribed, setChunksTranscribed] = useState(0);
@@ -134,9 +171,220 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const lastChunkTimeRef = useRef<number>(0);
   const isRestartingRef = useRef<boolean>(false); // iOS용 MediaRecorder 재시작 중 플래그
   const analyserNodeRef = useRef<AnalyserNode | null>(null); // AnalyserNode 참조 유지
+  const isRecordingRef = useRef<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
+  const recorderRuntimeStateRef = useRef<RecorderRuntimeState>("idle");
+  const lastRecorderActionRef = useRef<RecorderAction | null>(null);
+  const isBackgroundTransitioningRef = useRef<boolean>(false);
 
   // iOS 감지 (MP4를 사용하는 경우)
   const isIOSRef = useRef<boolean>(false);
+
+  const getMediaRecorderState = useCallback((): RecordingState => {
+    return mediaRecorderRef.current?.state ?? "inactive";
+  }, []);
+
+  const publishRecorderContext = useCallback(
+    (action?: RecorderAction) => {
+      if (typeof window === "undefined") return;
+      const targetWindow = window as RecorderContextWindow;
+      if (action) {
+        lastRecorderActionRef.current = action;
+      }
+      targetWindow.__archyRecorderContext = {
+        recorderRuntimeState: recorderRuntimeStateRef.current,
+        mediaRecorderState: getMediaRecorderState(),
+        action: lastRecorderActionRef.current,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    [getMediaRecorderState]
+  );
+
+  const setRuntimeState = useCallback(
+    (nextState: RecorderRuntimeState, action?: RecorderAction) => {
+      recorderRuntimeStateRef.current = nextState;
+      setRecorderRuntimeState(nextState);
+      publishRecorderContext(action);
+    },
+    [publishRecorderContext]
+  );
+
+  const syncRuntimeStateFromRecorder = useCallback(
+    (action: RecorderAction, inactiveErrorMessage?: string): RecordingState => {
+      const state = getMediaRecorderState();
+
+      if (state === "recording") {
+        setIsRecording(true);
+        setIsPaused(false);
+        setRuntimeState("recording", action);
+        return state;
+      }
+
+      if (state === "paused") {
+        setIsRecording(true);
+        setIsPaused(true);
+        setRuntimeState("paused", action);
+        return state;
+      }
+
+      setIsRecording(false);
+      setIsPaused(false);
+      if (inactiveErrorMessage) {
+        setError(inactiveErrorMessage);
+      }
+      if (recorderRuntimeStateRef.current !== "idle") {
+        setRuntimeState("inactive_unexpected", action);
+      } else {
+        publishRecorderContext(action);
+      }
+      return state;
+    },
+    [getMediaRecorderState, publishRecorderContext, setRuntimeState]
+  );
+
+  const safeRequestData = useCallback((action: RecorderAction) => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return false;
+    if (recorder.state !== "recording") return false;
+
+    try {
+      recorder.requestData();
+      publishRecorderContext(action);
+      return true;
+    } catch (error) {
+      console.warn("[ChunkedRecorder] requestData not supported:", error);
+      syncRuntimeStateFromRecorder(action);
+      return false;
+    }
+  }, [publishRecorderContext, syncRuntimeStateFromRecorder]);
+
+  const safePause = useCallback(
+    (action: RecorderAction): boolean => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) return false;
+
+      if (recorder.state !== "recording") {
+        syncRuntimeStateFromRecorder(
+          action,
+          "녹음 상태가 비정상적으로 변경되었습니다. 다시 녹음을 시작해주세요."
+        );
+        return false;
+      }
+
+      setRuntimeState("pausing", action);
+      setIsControlBusy(true);
+
+      try {
+        recorder.pause();
+        return true;
+      } catch (error) {
+        console.warn("[ChunkedRecorder] pause failed:", error);
+        syncRuntimeStateFromRecorder(
+          action,
+          "녹음 상태가 비정상적으로 변경되었습니다. 다시 녹음을 시작해주세요."
+        );
+        setIsControlBusy(false);
+        return false;
+      }
+    },
+    [setRuntimeState, syncRuntimeStateFromRecorder]
+  );
+
+  const safeResume = useCallback(
+    (action: RecorderAction): boolean => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) return false;
+
+      if (recorder.state !== "paused") {
+        syncRuntimeStateFromRecorder(action);
+        return false;
+      }
+
+      setRuntimeState("resuming", action);
+      setIsControlBusy(true);
+
+      try {
+        recorder.resume();
+        return true;
+      } catch (error) {
+        console.warn("[ChunkedRecorder] resume failed:", error);
+        syncRuntimeStateFromRecorder(
+          action,
+          "녹음 재개에 실패했습니다. 상태를 확인해주세요."
+        );
+        setIsControlBusy(false);
+        return false;
+      }
+    },
+    [setRuntimeState, syncRuntimeStateFromRecorder]
+  );
+
+  const safeStop = useCallback(
+    (action: RecorderAction): boolean => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) return false;
+      if (recorder.state === "inactive") {
+        syncRuntimeStateFromRecorder(action);
+        return false;
+      }
+
+      setRuntimeState("stopping", action);
+      setIsControlBusy(true);
+      try {
+        recorder.stop();
+        return true;
+      } catch (error) {
+        console.warn("[ChunkedRecorder] stop failed:", error);
+        syncRuntimeStateFromRecorder(
+          action,
+          "녹음 종료 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+        );
+        setIsControlBusy(false);
+        return false;
+      }
+    },
+    [setRuntimeState, syncRuntimeStateFromRecorder]
+  );
+
+  const attachRecorderLifecycleListeners = useCallback(
+    (recorder: MediaRecorder) => {
+      recorder.addEventListener("start", () => {
+        setIsRecording(true);
+        setIsPaused(false);
+        setRuntimeState("recording", "state_sync");
+        setIsControlBusy(false);
+      });
+
+      recorder.addEventListener("pause", () => {
+        setIsRecording(true);
+        setIsPaused(true);
+        setRuntimeState("paused", "state_sync");
+        setIsControlBusy(false);
+      });
+
+      recorder.addEventListener("resume", () => {
+        setIsRecording(true);
+        setIsPaused(false);
+        setRuntimeState("recording", "state_sync");
+        setIsControlBusy(false);
+      });
+
+      recorder.addEventListener("stop", () => {
+        if (isRestartingRef.current) {
+          publishRecorderContext("chunk_restart");
+          return;
+        }
+        if (recorderRuntimeStateRef.current === "stopping") {
+          setRuntimeState("idle", "state_sync");
+        } else {
+          syncRuntimeStateFromRecorder("state_sync");
+        }
+        setIsControlBusy(false);
+      });
+    },
+    [publishRecorderContext, setRuntimeState, syncRuntimeStateFromRecorder]
+  );
 
   // Wake Lock 관리
   const requestWakeLock = useCallback(async () => {
@@ -180,6 +428,25 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
   }, []);
 
+  const persistPausedSession = useCallback(
+    (pausedAt: number = Date.now()) => {
+      const session: RecordingSession = {
+        sessionId: sessionIdRef.current || "",
+        duration: Math.floor(pausedTimeRef.current / 1000),
+        pausedAt,
+        chunkIndex: currentChunkIndexRef.current,
+      };
+      saveSessionToStorage(session);
+      setPausedSession(session);
+      setIsBackgroundPaused(true);
+      setIsPaused(true);
+      setIsRecording(true);
+      setRuntimeState("paused", "background_transition");
+      return session;
+    },
+    [saveSessionToStorage, setRuntimeState]
+  );
+
   // 세션 로드 함수
   const loadSessionFromStorage = useCallback((): RecordingSession | null => {
     try {
@@ -219,8 +486,30 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       if (chunkManagerRef.current) {
         chunkManagerRef.current.cleanup();
       }
+      recorderRuntimeStateRef.current = "idle";
+      if (typeof window !== "undefined") {
+        const targetWindow = window as RecorderContextWindow;
+        targetWindow.__archyRecorderContext = {
+          recorderRuntimeState: "idle",
+          mediaRecorderState: "inactive",
+          action: "state_sync",
+          updatedAt: new Date().toISOString(),
+        };
+      }
     };
   }, [releaseWakeLock]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    publishRecorderContext("state_sync");
+  }, [publishRecorderContext, recorderRuntimeState]);
 
   /**
    * 현재 오디오 프레임 RMS 샘플링
@@ -308,68 +597,95 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     if (mediaRecorderRef.current.state !== "recording") return;
 
     isRestartingRef.current = true;
-    const chunkIndex = currentChunkIndexRef.current;
-    const chunkDuration = Date.now() - chunkStartTimeRef.current;
-    const durationSeconds = Math.floor(chunkDuration / 1000);
-    const mimeType = mimeTypeRef.current;
+    setIsControlBusy(true);
 
-    console.log(`[ChunkedRecorder] iOS: Restarting MediaRecorder for chunk ${chunkIndex}`);
+    try {
+      const chunkIndex = currentChunkIndexRef.current;
+      const chunkDuration = Date.now() - chunkStartTimeRef.current;
+      const durationSeconds = Math.floor(chunkDuration / 1000);
+      const mimeType = mimeTypeRef.current;
 
-    // 현재 MediaRecorder 정지 → onstop에서 완전한 Blob 획득
-    const currentRecorder = mediaRecorderRef.current;
+      console.log(`[ChunkedRecorder] iOS: Restarting MediaRecorder for chunk ${chunkIndex}`);
 
-    const chunkBlobPromise = new Promise<Blob>((resolve) => {
-      const handleStop = () => {
-        const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
-        currentChunkDataRef.current = [];
-        resolve(chunkBlob);
-        currentRecorder.removeEventListener("stop", handleStop);
+      // 현재 MediaRecorder 정지 → onstop에서 완전한 Blob 획득
+      const currentRecorder = mediaRecorderRef.current;
+      if (!currentRecorder) return;
+
+      const chunkBlobPromise = new Promise<Blob>((resolve) => {
+        const handleStop = () => {
+          const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
+          currentChunkDataRef.current = [];
+          resolve(chunkBlob);
+          currentRecorder.removeEventListener("stop", handleStop);
+        };
+        currentRecorder.addEventListener("stop", handleStop);
+      });
+
+      currentRecorder.stop();
+
+      // Blob 획득
+      const chunkBlob = await chunkBlobPromise;
+      const signalMetrics = consumeCurrentChunkSignalMetrics();
+
+      // 청크 인덱스 증가
+      currentChunkIndexRef.current++;
+      chunkStartTimeRef.current = Date.now();
+
+      // 새 MediaRecorder 생성 및 시작
+      const newRecorder = new MediaRecorder(streamRef.current, {
+        mimeType,
+        audioBitsPerSecond: AUDIO_BITRATE,
+      });
+
+      attachRecorderLifecycleListeners(newRecorder);
+      newRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          currentChunkDataRef.current.push(event.data);
+        }
       };
-      currentRecorder.addEventListener("stop", handleStop);
-    });
 
-    // 정지
-    currentRecorder.stop();
+      newRecorder.onerror = (event) => {
+        console.error("[ChunkedRecorder] MediaRecorder error:", event);
+        setRuntimeState("error", "chunk_restart");
+        setError("녹음 중 오류가 발생했습니다.");
+      };
 
-    // Blob 획득
-    const chunkBlob = await chunkBlobPromise;
-    const signalMetrics = consumeCurrentChunkSignalMetrics();
-
-    // 청크 인덱스 증가
-    currentChunkIndexRef.current++;
-    chunkStartTimeRef.current = Date.now();
-
-    // 새 MediaRecorder 생성 및 시작
-    const newRecorder = new MediaRecorder(streamRef.current, {
-      mimeType,
-      audioBitsPerSecond: AUDIO_BITRATE,
-    });
-
-    newRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        currentChunkDataRef.current.push(event.data);
+      mediaRecorderRef.current = newRecorder;
+      try {
+        newRecorder.start(1000); // 1초마다 데이터 수집
+      } catch (startError) {
+        console.warn("[ChunkedRecorder] Failed to start restarted recorder:", startError);
+        setRuntimeState("inactive_unexpected", "chunk_restart");
+        pausedTimeRef.current = Date.now() - startTimeRef.current;
+        const fallbackSession = persistPausedSession();
+        await releaseWakeLock();
+        console.warn("[ChunkedRecorder] Session moved to paused fallback after restart failure:", fallbackSession);
+        setError("녹음 상태가 일시 중단되었습니다. 이어서 녹음을 다시 시작해주세요.");
+        return;
       }
-    };
 
-    newRecorder.onerror = (event) => {
-      console.error("[ChunkedRecorder] MediaRecorder error:", event);
-      setError("녹음 중 오류가 발생했습니다.");
-    };
+      // 1KB 미만 청크는 무시
+      if (chunkBlob.size < 1024) {
+        console.warn(
+          `[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`
+        );
+        return;
+      }
 
-    mediaRecorderRef.current = newRecorder;
-    newRecorder.start(1000); // 1초마다 데이터 수집
-
-    isRestartingRef.current = false;
-
-    // 1KB 미만 청크는 무시
-    if (chunkBlob.size < 1024) {
-      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
-      return;
+      // 백그라운드에서 업로드
+      uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
+    } finally {
+      isRestartingRef.current = false;
+      setIsControlBusy(false);
     }
-
-    // 백그라운드에서 업로드
-    uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
-  }, [consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
+  }, [
+    attachRecorderLifecycleListeners,
+    consumeCurrentChunkSignalMetrics,
+    persistPausedSession,
+    releaseWakeLock,
+    setRuntimeState,
+    uploadChunkBlob,
+  ]);
 
   /**
    * WebM용: 현재 청크 추출 및 업로드 (기존 방식)
@@ -410,65 +726,57 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
   const handleBackgroundTransition = useCallback(async () => {
-    if (!mediaRecorderRef.current || !isRecording || isPaused) return;
+    if (!mediaRecorderRef.current || !isRecordingRef.current || isPausedRef.current) return;
+    if (isBackgroundTransitioningRef.current) return;
 
-    console.log("[ChunkedRecorder] Background transition detected, extracting chunk...");
+    isBackgroundTransitioningRef.current = true;
 
-    // 현재까지 데이터 즉시 추출
     try {
-      if (mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.requestData();
+      setIsControlBusy(true);
+      console.log("[ChunkedRecorder] Background transition detected, extracting chunk...");
+
+      // 현재까지 데이터 즉시 추출
+      safeRequestData("background_transition");
+
+      // 약간의 딜레이 후 청크 업로드
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await extractAndUploadChunk();
+
+      // 녹음 일시정지
+      safePause("background_transition");
+
+      // 타이머 정지
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        pausedTimeRef.current = Date.now() - startTimeRef.current;
       }
-    } catch (e) {
-      console.warn("[ChunkedRecorder] requestData not supported:", e);
+
+      // 세션 정보 저장
+      const session = persistPausedSession();
+
+      // Wake Lock 해제
+      await releaseWakeLock();
+
+      console.log("[ChunkedRecorder] Session paused and saved:", session);
+
+      // 푸시알림 발송 (백그라운드에서)
+      try {
+        fetch("/api/recordings/pause-notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: session.sessionId,
+            duration: session.duration,
+          }),
+        }).catch((e) => console.warn("[ChunkedRecorder] Failed to send pause notify:", e));
+      } catch (e) {
+        console.warn("[ChunkedRecorder] Failed to send pause notify:", e);
+      }
+    } finally {
+      isBackgroundTransitioningRef.current = false;
+      setIsControlBusy(false);
     }
-
-    // 약간의 딜레이 후 청크 업로드
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await extractAndUploadChunk();
-
-    // 녹음 일시정지
-    if (mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.pause();
-    }
-
-    // 타이머 정지
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      pausedTimeRef.current = Date.now() - startTimeRef.current;
-    }
-
-    // 세션 정보 저장
-    const session: RecordingSession = {
-      sessionId: sessionIdRef.current || "",
-      duration: Math.floor(pausedTimeRef.current / 1000),
-      pausedAt: Date.now(),
-      chunkIndex: currentChunkIndexRef.current,
-    };
-    saveSessionToStorage(session);
-    setPausedSession(session);
-    setIsBackgroundPaused(true);
-    setIsPaused(true);
-
-    // Wake Lock 해제
-    releaseWakeLock();
-
-    console.log("[ChunkedRecorder] Session paused and saved:", session);
-
-    // 푸시알림 발송 (백그라운드에서)
-    try {
-      fetch("/api/recordings/pause-notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: session.sessionId,
-          duration: session.duration,
-        }),
-      }).catch((e) => console.warn("[ChunkedRecorder] Failed to send pause notify:", e));
-    } catch (e) {
-      console.warn("[ChunkedRecorder] Failed to send pause notify:", e);
-    }
-  }, [isRecording, isPaused, extractAndUploadChunk, saveSessionToStorage, releaseWakeLock]);
+  }, [extractAndUploadChunk, persistPausedSession, releaseWakeLock, safePause, safeRequestData]);
 
   // Wake Lock 재획득 및 백그라운드 복귀 처리 (visibility change)
   useEffect(() => {
@@ -504,6 +812,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
    */
   const startRecording = useCallback(async () => {
     try {
+      setRuntimeState("starting", "start");
+      setIsControlBusy(true);
       setError(null);
       setIsBackgroundPaused(false);
       setPausedSession(null);
@@ -608,6 +918,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         audioBitsPerSecond: AUDIO_BITRATE, // 64kbps
       });
 
+      attachRecorderLifecycleListeners(mediaRecorder);
       mediaRecorderRef.current = mediaRecorder;
 
       // 데이터 수집
@@ -619,13 +930,17 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       mediaRecorder.onerror = (event) => {
         console.error("[ChunkedRecorder] MediaRecorder error:", event);
+        setRuntimeState("error", "start");
+        setIsControlBusy(false);
         setError("녹음 중 오류가 발생했습니다.");
       };
 
       // 녹음 먼저 시작 (지연 없이 즉시)
       mediaRecorder.start(1000);
+      setRuntimeState("recording", "start");
       setIsRecording(true);
       setIsPaused(false);
+      setIsControlBusy(false);
 
       // Wake Lock은 백그라운드에서 실행 (non-blocking)
       requestWakeLock().catch((err) => {
@@ -662,76 +977,97 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       console.log("[ChunkedRecorder] Recording started with session:", newSessionId);
     } catch (err) {
       console.error("[ChunkedRecorder] Error starting:", err);
+      setRuntimeState("error", "start");
+      setIsControlBusy(false);
+      setIsRecording(false);
+      setIsPaused(false);
       if (err instanceof Error && err.name === "NotAllowedError") {
         setError("마이크 접근 권한이 필요합니다.");
       } else {
         setError("녹음을 시작할 수 없습니다.");
       }
     }
-  }, [requestWakeLock, extractAndUploadChunk, clearSessionFromStorage, sampleCurrentChunkRms]);
+  }, [
+    attachRecorderLifecycleListeners,
+    clearSessionFromStorage,
+    extractAndUploadChunk,
+    requestWakeLock,
+    sampleCurrentChunkRms,
+    setRuntimeState,
+  ]);
 
   /**
    * 녹음 일시정지
    */
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording && !isPaused) {
-      mediaRecorderRef.current.pause();
-      setIsPaused(true);
+    if (!mediaRecorderRef.current || !isRecordingRef.current || isPausedRef.current) return;
+    if (isRestartingRef.current) return;
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        pausedTimeRef.current = Date.now() - startTimeRef.current;
-      }
+    const paused = safePause("pause");
+    if (!paused) return;
 
-      releaseWakeLock();
-      console.log("[ChunkedRecorder] Recording paused");
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      pausedTimeRef.current = Date.now() - startTimeRef.current;
     }
-  }, [isRecording, isPaused, releaseWakeLock]);
+
+    releaseWakeLock();
+    console.log("[ChunkedRecorder] Recording paused");
+  }, [releaseWakeLock, safePause]);
 
   /**
    * 녹음 재개
    */
   const resumeRecording = useCallback(async () => {
-    if (mediaRecorderRef.current && isRecording && isPaused) {
-      await requestWakeLock();
+    if (!mediaRecorderRef.current || !isRecordingRef.current || !isPausedRef.current) return;
+    if (isRestartingRef.current) return;
 
-      mediaRecorderRef.current.resume();
-      setIsPaused(false);
-      setIsBackgroundPaused(false);
+    await requestWakeLock();
+    const resumed = safeResume("resume");
+    if (!resumed) return;
 
-      startTimeRef.current = Date.now() - pausedTimeRef.current;
-      chunkStartTimeRef.current = Date.now(); // 청크 타이머 리셋
-      timerRef.current = setInterval(() => {
-        sampleCurrentChunkRms();
+    setIsBackgroundPaused(false);
 
-        const elapsed = Math.floor(
-          (Date.now() - startTimeRef.current) / 1000
-        );
-        setDuration(elapsed);
+    startTimeRef.current = Date.now() - pausedTimeRef.current;
+    chunkStartTimeRef.current = Date.now(); // 청크 타이머 리셋
+    timerRef.current = setInterval(() => {
+      sampleCurrentChunkRms();
 
-        // 20초마다 청크 추출
-        const elapsedSinceLastChunk = Math.floor(
-          (Date.now() - chunkStartTimeRef.current) / 1000
-        );
-        if (elapsedSinceLastChunk >= CHUNK_DURATION_SECONDS) {
-          extractAndUploadChunk();
-        }
-      }, 1000);
+      const elapsed = Math.floor(
+        (Date.now() - startTimeRef.current) / 1000
+      );
+      setDuration(elapsed);
 
-      console.log("[ChunkedRecorder] Recording resumed");
-    }
-  }, [isRecording, isPaused, requestWakeLock, extractAndUploadChunk, sampleCurrentChunkRms]);
+      // 20초마다 청크 추출
+      const elapsedSinceLastChunk = Math.floor(
+        (Date.now() - chunkStartTimeRef.current) / 1000
+      );
+      if (elapsedSinceLastChunk >= CHUNK_DURATION_SECONDS) {
+        extractAndUploadChunk();
+      }
+    }, 1000);
+
+    console.log("[ChunkedRecorder] Recording resumed");
+  }, [requestWakeLock, safeResume, sampleCurrentChunkRms, extractAndUploadChunk]);
 
   /**
    * 녹음 중지 및 결과 반환
    */
   const stopRecording = useCallback(async (): Promise<ChunkedRecordingResult | null> => {
-    if (!mediaRecorderRef.current || !isRecording) {
+    if (!mediaRecorderRef.current || !isRecordingRef.current) {
       return null;
     }
 
     const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder.state === "inactive") {
+      syncRuntimeStateFromRecorder("stop");
+      setIsControlBusy(false);
+      return null;
+    }
+
     const currentSessionId = sessionIdRef.current;
+    setRuntimeState("stopping", "stop");
+    setIsControlBusy(true);
 
     // 타이머 정지
     if (timerRef.current) {
@@ -808,26 +1144,29 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       // 일시정지 상태면 재개
       if (mediaRecorder.state === "paused") {
-        mediaRecorder.resume();
+        safeResume("stop");
       }
 
       // 데이터 플러시
-      if (mediaRecorder.state === "recording") {
-        try {
-          mediaRecorder.requestData();
-        } catch (e) {
-          console.warn("[ChunkedRecorder] requestData not supported:", e);
-        }
-      }
+      safeRequestData("stop");
 
       // 약간의 딜레이 후 정지
       setTimeout(() => {
-        if (mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
+        safeStop("stop");
       }, 100);
     });
-  }, [isRecording, releaseWakeLock, duration, clearSessionFromStorage, consumeCurrentChunkSignalMetrics, uploadChunkBlob]);
+  }, [
+    clearSessionFromStorage,
+    consumeCurrentChunkSignalMetrics,
+    duration,
+    releaseWakeLock,
+    safeRequestData,
+    safeResume,
+    safeStop,
+    setRuntimeState,
+    syncRuntimeStateFromRecorder,
+    uploadChunkBlob,
+  ]);
 
   /**
    * 저장된 세션 재개 (백그라운드에서 복귀 시)
@@ -870,7 +1209,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     setIsBackgroundPaused(false);
     setSessionId(null);
     sessionIdRef.current = null;
-  }, [pausedSession, clearSessionFromStorage]);
+    setRuntimeState("idle", "state_sync");
+  }, [pausedSession, clearSessionFromStorage, setRuntimeState]);
 
   /**
    * 현재 세션을 여기까지만 저장 (finalize)
@@ -885,6 +1225,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     clearSessionFromStorage();
     setPausedSession(null);
     setIsBackgroundPaused(false);
+    setRuntimeState("idle", "state_sync");
 
     // 결과 반환 (세션 ID만 전달하여 서버에서 처리)
     return {
@@ -893,7 +1234,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       totalChunks: session.chunkIndex,
       sessionId: session.sessionId,
     };
-  }, [pausedSession, clearSessionFromStorage]);
+  }, [pausedSession, clearSessionFromStorage, setRuntimeState]);
 
   // 마운트 시 저장된 세션 확인
   useEffect(() => {
@@ -904,6 +1245,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
   }, [loadSessionFromStorage]);
 
+  const canPause = !isControlBusy && recorderRuntimeState === "recording";
+  const canResume = !isControlBusy && recorderRuntimeState === "paused";
+  const canStop =
+    !isControlBusy &&
+    (recorderRuntimeState === "recording" ||
+      recorderRuntimeState === "paused" ||
+      recorderRuntimeState === "pausing" ||
+      recorderRuntimeState === "resuming");
+
   return {
     // 기본 상태
     isRecording,
@@ -912,6 +1262,11 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     error,
     isWakeLockActive,
     analyserNode,
+    recorderRuntimeState,
+    isControlBusy,
+    canPause,
+    canResume,
+    canStop,
 
     // 청킹 상태
     chunksTranscribed,

@@ -14,7 +14,8 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public (public files)
      * - api/recordings/chunk (heavy upload path, skip middleware to avoid session locking)
+     * - api/client-errors (telemetry endpoint, skip auth middleware)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/recordings/chunk|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/recordings/chunk|api/client-errors|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
