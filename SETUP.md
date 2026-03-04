@@ -29,8 +29,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 OPENAI_API_KEY=
 GROQ_API_KEY=
+GROQ_API_KEY_TIER_2=
+GROQ_API_KEY_TIER_3=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
+
+`GROQ_API_KEY_TIER_2`, `GROQ_API_KEY_TIER_3`는 선택 사항입니다.
+- 동시 녹음 유저 3명 이상: `GROQ_API_KEY_TIER_2`
+- 동시 녹음 유저 5명 이상: `GROQ_API_KEY_TIER_3`
 
 ### 연동/옵션
 
@@ -92,6 +98,7 @@ Supabase SQL Editor에서 아래 순서로 실행합니다.
 17. `database/migrations/add_custom_format_is_default.sql`
 18. `database/migrations/add_notion_save_target_icon_fields.sql`
 19. `database/migrations/add_promo_system.sql`
+20. `database/migrations/add_active_recording_index.sql`
 
 ## 5. Supabase Storage (선택)
 

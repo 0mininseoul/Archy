@@ -5,6 +5,9 @@ export interface TranscriptionOptions {
   avgRms?: number;
   peakRms?: number;
   chunkIndex?: number;
+  apiKeyOverride?: string;
+  apiKeySource?: string;
+  activeRecorderUsers?: number;
 }
 
 export interface TranscriptionMetrics {
@@ -130,12 +133,18 @@ export async function transcribeAudio(
   audioFile: File,
   options: TranscriptionOptions = {}
 ): Promise<TranscriptionResult> {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error("GROQ_API_KEY not configured");
+  const groqApiKey = options.apiKeyOverride || process.env.GROQ_API_KEY;
+  if (!groqApiKey) {
+    throw new Error("Groq API key not configured");
   }
 
   console.log("[Transcription] Starting Groq Whisper transcription...");
   console.log("[Transcription] File type:", audioFile.type, "Size:", audioFile.size);
+  if (options.apiKeySource) {
+    console.log(
+      `[Transcription] Using key source=${options.apiKeySource}, activeRecorders=${options.activeRecorderUsers ?? "n/a"}`
+    );
+  }
 
   const formData = new FormData();
   formData.append("file", audioFile);
@@ -149,7 +158,7 @@ export async function transcribeAudio(
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          Authorization: `Bearer ${groqApiKey}`,
         },
         body: formData,
       }

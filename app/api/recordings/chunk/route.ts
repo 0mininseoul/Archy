@@ -1,6 +1,7 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { transcribeAudio } from "@/lib/services/whisper";
 import { logSttDecision } from "@/lib/services/stt-observability";
+import { resolveGroqKeySelection } from "@/lib/services/groq-key-router";
 
 // Vercel Free tier: 4.5MB limit
 // 20초 청크 (64kbps): ~160KB
@@ -109,10 +110,18 @@ export const POST = withAuth<ChunkTranscriptResponse>(
           },
         });
       } else {
+        const keySelection = await resolveGroqKeySelection();
+        console.log(
+          `[Chunk] Key routing for chunk ${chunkIndex}: activeRecorders=${keySelection.activeRecorderUsers}, keySource=${keySelection.source}`
+        );
+
         const transcription = await transcribeAudio(audioChunk, {
           avgRms,
           peakRms,
           chunkIndex,
+          apiKeyOverride: keySelection.apiKey,
+          apiKeySource: keySelection.source,
+          activeRecorderUsers: keySelection.activeRecorderUsers,
         });
         transcript = transcription.text;
         silenceReason = transcription.isLikelySilence
@@ -160,9 +169,11 @@ export const POST = withAuth<ChunkTranscriptResponse>(
               transcript?: string;
               last_chunk_index: number;
               duration_seconds: number;
+              session_paused_at: null;
             } = {
               last_chunk_index: chunkIndex,
               duration_seconds: totalDuration,
+              session_paused_at: null,
             };
 
             if (transcript.trim().length > 0) {

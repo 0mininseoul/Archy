@@ -59,6 +59,10 @@ npm run dev
 - `GROQ_API_KEY`
 - `NEXT_PUBLIC_APP_URL`
 
+STT 다중 키 라우팅(선택):
+- `GROQ_API_KEY_TIER_2` (동시 녹음 유저 3명 이상일 때 사용)
+- `GROQ_API_KEY_TIER_3` (동시 녹음 유저 5명 이상일 때 사용)
+
 연동/옵션:
 - Notion: `NOTION_CLIENT_ID`, `NOTION_CLIENT_SECRET`, `NOTION_REDIRECT_URI`
 - Slack: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`
@@ -93,6 +97,7 @@ npm run dev
 16. `add_custom_format_is_default.sql`
 17. `add_notion_save_target_icon_fields.sql`
 18. `add_promo_system.sql`
+19. `add_active_recording_index.sql`
 
 ## API 개요
 
