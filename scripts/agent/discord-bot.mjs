@@ -198,36 +198,55 @@ const client = new Client({
 });
 
 let dailyRunInFlight = null;
-let quickReportCache = {
-  report: null,
-  expiresAt: 0,
-};
+const quickReportCache = new Map();
 
 function invalidateQuickReportCache() {
-  quickReportCache = {
-    report: null,
-    expiresAt: 0,
-  };
+  quickReportCache.clear();
 }
 
-async function getCachedQuickReport() {
+async function getCachedQuickReport({ targetYmd = null } = {}) {
   const now = Date.now();
-  if (quickReportCache.report && now < quickReportCache.expiresAt) {
-    return quickReportCache.report;
+  const key = targetYmd || "__default__";
+  const cached = quickReportCache.get(key);
+
+  if (cached?.report && now < cached.expiresAt) {
+    return cached.report;
   }
 
   const report = await runDailyPipeline({
     runDate: new Date(),
+    targetYmd,
     dryRun: true,
     skipStrategicReview: true,
   });
 
-  quickReportCache = {
+  quickReportCache.set(key, {
     report,
     expiresAt: now + CHAT_REPORT_CACHE_SECONDS * 1000,
-  };
+  });
 
   return report;
+}
+
+function formatKstDateTime(input = new Date()) {
+  const date = input instanceof Date ? input : new Date(input);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} KST`;
 }
 
 function splitMessage(content, limit = 1800) {
@@ -270,6 +289,27 @@ function buildDailyEmbed(report) {
       text: `집계일: ${report.targetYmd} | 실행일: ${report.runYmd} (KST)`,
     })
     .setTimestamp(new Date());
+}
+
+function buildStatsEmbed({ report, asOfDate }) {
+  const { overviewText, heavyUserText, amplitudeSourceText } = buildDiscordMetricText(report);
+  const asOfKst = formatKstDateTime(asOfDate);
+
+  return new EmbedBuilder()
+    .setColor(0x17a2d4)
+    .setTitle("📊 봇 상태")
+    .setDescription("Archy 실시간 운영 스냅샷")
+    .addFields(
+      { name: "기준일", value: report.dailyLabel, inline: true },
+      { name: "기준시각", value: asOfKst, inline: true },
+      { name: "가입전환율 소스", value: amplitudeSourceText || "-", inline: true },
+      { name: "핵심 지표", value: overviewText, inline: false },
+      { name: "헤비 유저 TOP3 (누적 녹음)", value: heavyUserText, inline: false }
+    )
+    .setFooter({
+      text: `집계 대상일: ${report.targetYmd} | 표시 시각: ${asOfKst}`,
+    })
+    .setTimestamp(asOfDate instanceof Date ? asOfDate : new Date(asOfDate));
 }
 
 async function runDailyAndPost({ trigger = "schedule" } = {}) {
@@ -592,10 +632,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === "stats") {
-      await interaction.deferReply({ ephemeral: true });
-      const report = await getCachedQuickReport();
-      const { overviewText } = buildDiscordMetricText(report);
-      await interaction.editReply(`최신 지표 (${report.dailyLabel})\n${overviewText}`);
+      const now = new Date();
+      const targetYmd = toKstYmd(now);
+      await interaction.deferReply();
+      const report = await getCachedQuickReport({ targetYmd });
+      const embed = buildStatsEmbed({ report, asOfDate: now });
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 

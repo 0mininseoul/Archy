@@ -1195,6 +1195,25 @@ function compareNotionMetric(currentValue, previousValue) {
   return summarizeDiffRate(currentValue, previousValue);
 }
 
+function describeAmplitudeSource(amplitudeConversion) {
+  const source = amplitudeConversion?.source;
+  if (!source) return "-";
+
+  const map = {
+    dashboard_api: "Amplitude Dashboard API",
+    custom_api: "커스텀 API",
+    static_env: "환경변수 고정값",
+    not_configured: "미설정(차트 ID 없음)",
+    dashboard_unparsed: "Dashboard 응답 파싱 실패",
+    custom_api_unparsed: "커스텀 API 응답 파싱 실패",
+    error: "조회 실패",
+  };
+
+  const base = map[source] || source;
+  const error = amplitudeConversion?.error ? ` / ${String(amplitudeConversion.error).slice(0, 120)}` : "";
+  return `${base}${error}`;
+}
+
 export async function runDailyPipeline({
   runDate = new Date(),
   targetYmd: forcedTargetYmd = null,
@@ -1210,10 +1229,20 @@ export async function runDailyPipeline({
   const metrics = buildMetricsForDate(snapshot, targetYmd);
   const previousMetrics = buildMetricsForDate(snapshot, previousYmd);
 
-  const amplitudeConversion = await fetchAmplitudeSignupConversion({
-    targetYmd,
-    previousYmd,
-  });
+  let amplitudeConversion = null;
+  try {
+    amplitudeConversion = await fetchAmplitudeSignupConversion({
+      targetYmd,
+      previousYmd,
+    });
+  } catch (error) {
+    amplitudeConversion = {
+      source: "error",
+      currentRate: null,
+      previousRate: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 
   const dailyLabel = formatKoreanDayLabel(targetYmd);
   const previousLabel = formatKoreanDayLabel(previousYmd);
@@ -1309,15 +1338,18 @@ export function buildDiscordMetricText(report) {
   const prevActivation = previous?.activationRate ?? previousRates.activation30d ?? null;
   const prevPayment = previous?.paymentRate ?? previousRates.payment ?? null;
   const prevConversion = previous?.conversionRate ?? report.amplitudeConversion.previousRate ?? null;
+  const conversionSourceText = describeAmplitudeSource(report.amplitudeConversion);
+  const conversionUnavailableSuffix =
+    report.amplitudeConversion?.currentRate === null ? ` (미조회: ${conversionSourceText})` : "";
 
   const lines = [
-    `유저 수: ${summarizeDiffCount(report.counts.totalSignups, prevUserCount)}`,
-    `가입전환율: ${compareNotionMetric(report.amplitudeConversion.currentRate, prevConversion)}`,
-    `온보딩율: ${compareNotionMetric(report.rates.onboarding, prevOnboarding)}`,
-    `PWA 설치율: ${compareNotionMetric(report.rates.pwa, prevPwa)}`,
-    `연동율: ${compareNotionMetric(report.rates.integrationAny, prevIntegration)}`,
-    `활성화율(30일): ${compareNotionMetric(report.rates.activation30d, prevActivation)}`,
-    `결제율: ${compareNotionMetric(report.rates.payment, prevPayment)}`,
+    `**유저 수**: ${summarizeDiffCount(report.counts.totalSignups, prevUserCount)}`,
+    `**가입전환율**: ${compareNotionMetric(report.amplitudeConversion.currentRate, prevConversion)}${conversionUnavailableSuffix}`,
+    `**온보딩율**: ${compareNotionMetric(report.rates.onboarding, prevOnboarding)}`,
+    `**PWA 설치율**: ${compareNotionMetric(report.rates.pwa, prevPwa)}`,
+    `**연동율**: ${compareNotionMetric(report.rates.integrationAny, prevIntegration)}`,
+    `**활성화율(30일)**: ${compareNotionMetric(report.rates.activation30d, prevActivation)}`,
+    `**결제율**: ${compareNotionMetric(report.rates.payment, prevPayment)}`,
   ];
 
   const heavy = report.heavyUserTop3
@@ -1327,6 +1359,7 @@ export function buildDiscordMetricText(report) {
   return {
     overviewText: lines.join("\n"),
     heavyUserText: heavy || "데이터 없음",
+    amplitudeSourceText: conversionSourceText,
   };
 }
 
