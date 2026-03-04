@@ -904,23 +904,45 @@ export async function getNotionMetricsByLabel(label) {
 }
 
 async function readWorkDbTargetPage(notion, targetYmd) {
-  const search = await notion.search({
-    query: "업무 DB",
-    filter: { property: "object", value: "database" },
-    page_size: 5,
-  });
+  const searchWithObjectType = async (objectType) =>
+    notion.search({
+      query: "업무 DB",
+      filter: { property: "object", value: objectType },
+      page_size: 10,
+    });
 
-  const database = search.results?.[0];
-  if (!database || database.object !== "database") {
-    return null;
+  let search = null;
+  try {
+    // Newer Notion API object filter prefers "data_source".
+    search = await searchWithObjectType("data_source");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("body failed validation")) throw error;
+
+    // Backward-compatible fallback for older API behavior.
+    search = await searchWithObjectType("database");
   }
 
+  const collection =
+    search?.results?.find((item) => item.object === "data_source") ||
+    search?.results?.find((item) => item.object === "database") ||
+    null;
+
+  if (!collection) return null;
+
   const token = targetYmd.slice(2).replaceAll("-", ""); // 2026-03-04 -> 260304
-  const pages = await notion.databases.query({
-    database_id: database.id,
-    page_size: 30,
-    sorts: [{ direction: "descending", timestamp: "created_time" }],
-  });
+  const pages =
+    collection.object === "data_source"
+      ? await notion.dataSources.query({
+          data_source_id: collection.id,
+          page_size: 30,
+          sorts: [{ direction: "descending", timestamp: "created_time" }],
+        })
+      : await notion.databases.query({
+          database_id: collection.id,
+          page_size: 30,
+          sorts: [{ direction: "descending", timestamp: "created_time" }],
+        });
 
   const extractTitle = (page) => {
     const titleProperty = Object.values(page.properties || {}).find(
