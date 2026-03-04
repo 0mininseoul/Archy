@@ -17,19 +17,38 @@ import {
   toKstYmd,
 } from "./daily-runner.mjs";
 
-function getEnv(name, { optional = false, fallback = undefined } = {}) {
-  const value = process.env[name] ?? fallback;
-  if (!optional && (value === undefined || value === null || value === "")) {
-    throw new Error(`Missing required environment variable: ${name}`);
+function getEnv(name, { optional = false, fallback = undefined, aliases = [] } = {}) {
+  for (const key of [name, ...aliases]) {
+    const value = process.env[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
   }
-  return value;
+
+  if (fallback !== undefined && fallback !== null && fallback !== "") {
+    return fallback;
+  }
+
+  if (!optional) {
+    const suffix = aliases.length ? ` (or ${aliases.join(", ")})` : "";
+    throw new Error(`Missing required environment variable: ${name}${suffix}`);
+  }
+
+  return fallback;
 }
 
-const DISCORD_BOT_TOKEN = getEnv("DISCORD_BOT_TOKEN");
-const DAILY_CHANNEL_ID = getEnv("DISCORD_DAILY_CHANNEL_ID");
-const GUILD_ID = getEnv("DISCORD_GUILD_ID", { optional: true });
+const DISCORD_BOT_TOKEN = getEnv("DISCORD_BOT_TOKEN", {
+  aliases: ["DISCORD_TOKEN"],
+});
+const DAILY_CHANNEL_ID = getEnv("DISCORD_DAILY_CHANNEL_ID", {
+  aliases: ["DISCORD_CHANNEL_ID"],
+});
+const GUILD_ID = getEnv("DISCORD_GUILD_ID", {
+  optional: true,
+  aliases: ["DISCORD_SERVER_ID"],
+});
 const CHAT_CHANNEL_IDS = new Set(
-  (process.env.DISCORD_CHAT_CHANNEL_IDS || "")
+  (process.env.DISCORD_CHAT_CHANNEL_IDS || process.env.DISCORD_CHANNEL_IDS || "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean)
