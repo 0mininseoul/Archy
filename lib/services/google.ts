@@ -90,9 +90,6 @@ export async function getGoogleDriveFolders(accessToken: string): Promise<Array<
 /**
  * Google Docs 문서 생성
  */
-/**
- * Google Docs 문서 생성
- */
 export async function createGoogleDoc(
   accessToken: string,
   title: string,
@@ -124,8 +121,9 @@ export async function createGoogleDoc(
   const documentId = doc.documentId;
   console.log("[Google] Created doc:", documentId);
 
-  // 2. 마크다운 파싱 및 배치 요청 생성
-  const requests = parseMarkdownToRequests(content); // No starting index needed for empty doc (starts at 1)
+  // 2. 제목을 본문에 포함한 뒤 마크다운 파싱 및 배치 요청 생성
+  const contentWithTitle = buildGoogleDocBody(title, content);
+  const requests = parseMarkdownToRequests(contentWithTitle); // No starting index needed for empty doc (starts at 1)
 
   // 3. 배치 업데이트 실행
   if (requests.length > 0) {
@@ -201,6 +199,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
   const paragraphStyleRequests: any[] = [];
   const textStyleRequests: any[] = [];
   const bulletRequests: Array<{ startIndex: number; request: any }> = [];
+  const orderedListCounters: number[] = [];
   let currentIndex = 1; // Google Docs starts at index 1
 
   const lines = markdown.split("\n");
@@ -218,25 +217,46 @@ function parseMarkdownToRequests(markdown: string): any[] {
     const { indentLevel, trimmed } = getIndentInfo(rawLine);
     let textToInsert = trimmed;
     let styleType = "NORMAL_TEXT";
-    let isList = false;
-    let listType = "BULLET"; // Default
+    let isHeading = false;
+    let applyBulletStyle = false;
+    let isOrderedLine = false;
 
-    if (trimmed.startsWith("## ")) {
+    if (trimmed.startsWith("# ")) {
+      isHeading = true;
+      styleType = "HEADING_1";
+      textToInsert = trimmed.substring(2);
+    } else if (trimmed.startsWith("## ")) {
+      isHeading = true;
       styleType = "HEADING_2";
       textToInsert = trimmed.substring(3);
     } else if (trimmed.startsWith("### ")) {
+      isHeading = true;
       styleType = "HEADING_3";
       textToInsert = trimmed.substring(4);
     } else if (/^- \[(x|X| )\] /.test(trimmed)) {
-      isList = true;
+      applyBulletStyle = true;
       textToInsert = trimmed.replace(/^- \[(x|X| )\] /, (match) => (match.toLowerCase().includes("x") ? "[v] " : "[ ] "));
     } else if (/^[-*] /.test(trimmed)) {
-      isList = true;
+      applyBulletStyle = true;
       textToInsert = trimmed.substring(2);
     } else if (/^\d+\. /.test(trimmed)) {
-      isList = true;
-      listType = "NUMBERED";
-      textToInsert = trimmed.replace(/^\d+\. /, "");
+      // Google Docs에서 줄 단위 createParagraphBullets(NUMBERED)를 적용하면
+      // 항목마다 새 리스트로 인식되어 1,1,1로 리셋될 수 있어 서버에서 직접 번호를 계산한다.
+      isOrderedLine = true;
+      orderedListCounters.length = indentLevel + 1;
+      const nextNumber = (orderedListCounters[indentLevel] || 0) + 1;
+      orderedListCounters[indentLevel] = nextNumber;
+      textToInsert = `${nextNumber}. ${trimmed.replace(/^\d+\. /, "")}`;
+    }
+
+    if (isHeading || (trimmed.length > 0 && !isOrderedLine && !applyBulletStyle)) {
+      // 일반 문단/헤더가 나오면 새 번호 목록 시작을 위해 카운터 초기화
+      orderedListCounters.length = 0;
+    }
+
+    if (applyBulletStyle && indentLevel === 0) {
+      // 최상위 불릿 목록은 기존 번호 목록과 별개로 처리
+      orderedListCounters.length = 0;
     }
 
     if (trimmed.match(/^\|[\s-]+\|/)) continue;
@@ -245,7 +265,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
       textToInsert = trimmed.replace(/\|/g, " | ").trim();
     }
 
-    if (isList && indentLevel > 0) {
+    if ((applyBulletStyle || isOrderedLine) && indentLevel > 0) {
       textToInsert = `${"\t".repeat(indentLevel)}${textToInsert}`;
     }
 
@@ -279,7 +299,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
       });
     }
 
-    if (isList) {
+    if (applyBulletStyle) {
       bulletRequests.push({
         startIndex,
         request: {
@@ -288,7 +308,7 @@ function parseMarkdownToRequests(markdown: string): any[] {
               startIndex: startIndex,
               endIndex: endIndex,
             },
-            bulletPreset: listType === "NUMBERED" ? "NUMBERED_DECIMAL_ALPHA_ROMAN" : "BULLET_DISC_CIRCLE_SQUARE",
+            bulletPreset: "BULLET_DISC_CIRCLE_SQUARE",
           },
         },
       });
@@ -324,6 +344,47 @@ function parseMarkdownToRequests(markdown: string): any[] {
     ...textStyleRequests,
     ...sortedBulletRequests,
   ];
+}
+
+/**
+ * Google Docs 본문에 제목을 항상 포함한다.
+ * 이미 첫 줄에 같은 제목이 있다면 중복 삽입하지 않는다.
+ */
+function buildGoogleDocBody(title: string, content: string): string {
+  const normalizedTitle = title.trim();
+  const normalizedContent = content.trim();
+
+  if (!normalizedTitle) {
+    return normalizedContent;
+  }
+
+  if (!normalizedContent) {
+    return `# ${normalizedTitle}`;
+  }
+
+  const firstNonEmptyLine = normalizedContent
+    .split("\n")
+    .find((line) => line.trim().length > 0);
+
+  if (firstNonEmptyLine) {
+    const normalizedFirstLine = normalizeTitleComparisonLine(firstNonEmptyLine);
+    const normalizedTitleLine = normalizeTitleComparisonLine(normalizedTitle);
+    if (normalizedFirstLine === normalizedTitleLine) {
+      return normalizedContent;
+    }
+  }
+
+  return `# ${normalizedTitle}\n\n${normalizedContent}`;
+}
+
+function normalizeTitleComparisonLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^\*\*(.*)\*\*$/, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 /**
