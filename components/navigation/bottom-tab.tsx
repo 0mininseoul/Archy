@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 
@@ -10,7 +10,6 @@ interface BottomTabProps {
 
 export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const { t } = useI18n();
 
   const tabs = [
@@ -70,6 +69,7 @@ export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
             )}
             <Link
               href={tab.path}
+              prefetch={false}
               className={`bottom-tab-item ${isActive(tab.path) ? "active" : ""}`}
             >
               {tab.icon}

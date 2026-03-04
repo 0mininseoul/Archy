@@ -3,7 +3,7 @@
 import { useI18n } from "@/lib/i18n";
 import { useState } from "react";
 import Image from "next/image";
-import { PlanManagementModal } from "./plan-management-modal";
+import dynamic from "next/dynamic";
 
 interface AccountSectionProps {
   email: string;
@@ -11,6 +11,11 @@ interface AccountSectionProps {
   avatarUrl?: string | null;
   usage: { used: number; limit: number | null; isPro?: boolean; proDaysRemaining?: number | null };
 }
+
+const PlanManagementModal = dynamic(
+  () => import("./plan-management-modal").then((mod) => mod.PlanManagementModal),
+  { ssr: false }
+);
 
 export function AccountSection({ email, name, avatarUrl, usage }: AccountSectionProps) {
   const { t } = useI18n();
@@ -101,12 +106,14 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
         </div>
       </div>
 
-      <PlanManagementModal
-        isOpen={isPlanModalOpen}
-        onClose={() => setIsPlanModalOpen(false)}
-        isPro={usage.isPro}
-        proDaysRemaining={usage.proDaysRemaining}
-      />
+      {isPlanModalOpen && (
+        <PlanManagementModal
+          isOpen={isPlanModalOpen}
+          onClose={() => setIsPlanModalOpen(false)}
+          isPro={usage.isPro}
+          proDaysRemaining={usage.proDaysRemaining}
+        />
+      )}
     </>
   );
 }

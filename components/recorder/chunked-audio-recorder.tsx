@@ -36,7 +36,7 @@ function WaveformVisualizer({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const draw = () => {
+    const draw = (sampleAudio: boolean) => {
       const width = canvas.width;
       const height = canvas.height;
       const barWidth = width / maxBars;
@@ -54,7 +54,7 @@ function WaveformVisualizer({
       ctx.lineTo(playheadX, height);
       ctx.stroke();
 
-      if (analyserNode && isRecording && !isPaused) {
+      if (sampleAudio && analyserNode) {
         const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
         analyserNode.getByteFrequencyData(dataArray);
 
@@ -91,15 +91,29 @@ function WaveformVisualizer({
       ctx.beginPath();
       ctx.arc(playheadX, 8, 4, 0, Math.PI * 2);
       ctx.fill();
-
-      animationRef.current = requestAnimationFrame(draw);
     };
 
-    draw();
+    if (!isRecording || isPaused || !analyserNode) {
+      draw(false);
+      return () => {
+        if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+          animationRef.current = null;
+        }
+      };
+    }
+
+    const drawFrame = () => {
+      draw(true);
+      animationRef.current = requestAnimationFrame(drawFrame);
+    };
+
+    drawFrame();
 
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
       }
     };
   }, [analyserNode, isRecording, isPaused]);

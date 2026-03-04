@@ -127,8 +127,7 @@ const RECORDING_LIST_FIELDS = `
   error_message,
   notion_page_url,
   google_doc_url,
-  format,
-  transcript
+  format
 `;
 
 const PAGE_SIZE = 20;
@@ -159,7 +158,40 @@ export const GET = withAuth<{
 
   const fetchedRecordings = recordings ?? [];
   const hasMore = fetchedRecordings.length > limit;
-  const returnRecordings = hasMore ? fetchedRecordings.slice(0, limit) : fetchedRecordings;
+  const pageRecordings = hasMore ? fetchedRecordings.slice(0, limit) : fetchedRecordings;
+
+  // Keep list payload small by returning only a transcript existence flag.
+  let transcriptAvailableIds = new Set<string>();
+  if (pageRecordings.length > 0) {
+    const ids = pageRecordings
+      .map((recording) => recording.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    if (ids.length > 0) {
+      const { data: transcriptRows, error: transcriptError } = await supabase
+        .from("recordings")
+        .select("id")
+        .eq("user_id", user.id)
+        .in("id", ids)
+        .not("transcript", "is", null)
+        .neq("transcript", "");
+
+      if (transcriptError) {
+        console.error("[Recordings API] Failed to fetch transcript availability:", transcriptError);
+      } else {
+        transcriptAvailableIds = new Set(
+          (transcriptRows ?? [])
+            .map((row) => row.id)
+            .filter((id): id is string => typeof id === "string" && id.length > 0)
+        );
+      }
+    }
+  }
+
+  const returnRecordings: RecordingListItem[] = pageRecordings.map((recording) => ({
+    ...recording,
+    has_transcript: transcriptAvailableIds.has(recording.id),
+  }));
 
   return successResponse({
     recordings: returnRecordings,

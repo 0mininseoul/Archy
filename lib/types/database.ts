@@ -119,7 +119,9 @@ export interface RecordingListItem {
   notion_page_url?: string | null;
   google_doc_url?: string | null;
   format: RecordingFormat;
-  // Optional fields that may be needed for detail view navigation
+  // Lightweight transcript signal for list/detail navigation decisions
+  has_transcript?: boolean;
+  // Legacy fallback field kept temporarily for backward compatibility
   transcript?: string | null;
 }
 

@@ -19,6 +19,7 @@ interface RecordingsStore {
     // Actions
     setRecordings: (recordings: RecordingListItem[]) => void;
     appendRecordings: (recordings: RecordingListItem[]) => void;
+    mergePolledRecordings: (recordings: RecordingListItem[]) => void;
     fetchRecordings: () => Promise<void>;
     fetchMoreRecordings: () => Promise<void>;
     invalidate: () => void;
@@ -40,6 +41,25 @@ const sortRecordings = (recordings: RecordingListItem[]): RecordingListItem[] =>
         }
         return a.is_pinned ? -1 : 1;
     });
+};
+
+const isSameRecordingListItem = (a: RecordingListItem, b: RecordingListItem): boolean => {
+    return (
+        a.id === b.id &&
+        a.title === b.title &&
+        a.status === b.status &&
+        a.processing_step === b.processing_step &&
+        a.created_at === b.created_at &&
+        a.duration_seconds === b.duration_seconds &&
+        a.is_pinned === b.is_pinned &&
+        a.error_step === b.error_step &&
+        a.error_message === b.error_message &&
+        a.notion_page_url === b.notion_page_url &&
+        a.google_doc_url === b.google_doc_url &&
+        a.format === b.format &&
+        a.has_transcript === b.has_transcript &&
+        a.transcript === b.transcript
+    );
 };
 
 export const useRecordingsStore = create<RecordingsStore>((set, get) => ({
@@ -66,6 +86,46 @@ export const useRecordingsStore = create<RecordingsStore>((set, get) => ({
             const uniqueNew = newRecordings.filter((r) => !existingIds.has(r.id));
             return {
                 recordings: sortRecordings([...state.recordings, ...uniqueNew]),
+            };
+        });
+    },
+
+    mergePolledRecordings: (polledRecordings) => {
+        set((state) => {
+            if (polledRecordings.length === 0) {
+                return state;
+            }
+
+            const incomingById = new Map(polledRecordings.map((recording) => [recording.id, recording] as const));
+            let hasChanges = false;
+
+            const merged = state.recordings.map((existing) => {
+                const incoming = incomingById.get(existing.id);
+                if (!incoming) {
+                    return existing;
+                }
+
+                incomingById.delete(existing.id);
+                if (isSameRecordingListItem(existing, incoming)) {
+                    return existing;
+                }
+
+                hasChanges = true;
+                return { ...existing, ...incoming };
+            });
+
+            if (incomingById.size > 0) {
+                hasChanges = true;
+                merged.push(...incomingById.values());
+            }
+
+            if (!hasChanges) {
+                return state;
+            }
+
+            return {
+                recordings: sortRecordings(merged),
+                lastFetchedAt: Date.now(),
             };
         });
     },

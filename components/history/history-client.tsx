@@ -22,6 +22,7 @@ export function HistoryClient() {
     hasMore,
     fetchRecordings,
     fetchMoreRecordings,
+    mergePolledRecordings,
     updateRecording,
     removeRecording,
   } = useRecordingsStore();
@@ -71,7 +72,7 @@ export function HistoryClient() {
 
         const data = await response.json();
         const freshRecordings = data.data?.recordings || data.recordings || [];
-        useRecordingsStore.getState().setRecordings(freshRecordings);
+        mergePolledRecordings(freshRecordings);
       } catch (error) {
         console.error("Failed to poll recordings:", error);
       }
@@ -89,7 +90,7 @@ export function HistoryClient() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [hasActivePipeline]);
+  }, [hasActivePipeline, mergePolledRecordings]);
 
   const handleHideRecording = useCallback(
     async (id: string) => {
@@ -139,7 +140,7 @@ export function HistoryClient() {
   );
 
   // Show loading state only on initial load
-  if (!isLoaded && isLoading) {
+  if (!isLoaded) {
     return (
       <div className="px-4 py-4 space-y-3">
         {[1, 2, 3].map((i) => (

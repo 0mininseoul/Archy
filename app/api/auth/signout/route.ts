@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST() {
+async function signOutAndRedirect(request: NextRequest) {
   const supabase = await createClient();
 
   const {
@@ -12,7 +12,15 @@ export async function POST() {
     await supabase.auth.signOut();
   }
 
-  return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_APP_URL!), {
+  return NextResponse.redirect(new URL("/", request.url), {
     status: 302,
   });
+}
+
+export async function GET(request: NextRequest) {
+  return signOutAndRedirect(request);
+}
+
+export async function POST(request: NextRequest) {
+  return signOutAndRedirect(request);
 }

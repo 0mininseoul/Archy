@@ -9,13 +9,12 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
+     * - api (API routes are authenticated in each handler via withAuth)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public (public files)
-     * - api/recordings/chunk (heavy upload path, skip middleware to avoid session locking)
-     * - api/client-errors (telemetry endpoint, skip auth middleware)
+     * - static assets (public files)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/recordings/chunk|api/client-errors|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|txt|xml|json)$).*)",
   ],
 };

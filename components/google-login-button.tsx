@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import * as amplitude from "@amplitude/analytics-browser";
 import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
 import { detectInAppBrowserType, isAndroid, openExternalBrowser, InAppBrowserType } from "@/lib/browser";
@@ -12,6 +11,18 @@ import { markLoginIntent } from "@/lib/desktop-login-notice";
 interface GoogleLoginButtonProps {
   variant?: "nav" | "primary" | "cta";
   label?: string;
+}
+
+async function trackAmplitudeEvent(
+  eventName: string,
+  eventProperties: Record<string, unknown>
+) {
+  try {
+    const amplitude = await import("@amplitude/analytics-browser");
+    amplitude.track(eventName, eventProperties);
+  } catch (error) {
+    console.warn(`[Amplitude] Failed to track ${eventName}:`, error);
+  }
 }
 
 export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonProps) {
@@ -25,19 +36,15 @@ export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonP
     const browserType = detectInAppBrowserType();
     const promoCode = searchParams.get("promo");
 
-    try {
-      amplitude.track("signup_started", {
-        signup_method: "google_oauth",
-        source: "landing",
-        button_variant: variant,
-        locale,
-        has_promo_code: Boolean(promoCode),
-        in_app_browser: Boolean(browserType),
-        path: window.location.pathname,
-      });
-    } catch (error) {
-      console.warn("[Amplitude] Failed to track signup_started:", error);
-    }
+    void trackAmplitudeEvent("signup_started", {
+      signup_method: "google_oauth",
+      source: "landing",
+      button_variant: variant,
+      locale,
+      has_promo_code: Boolean(promoCode),
+      in_app_browser: Boolean(browserType),
+      path: window.location.pathname,
+    });
 
     if (browserType) {
       if (isAndroid()) {

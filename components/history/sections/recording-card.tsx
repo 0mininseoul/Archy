@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 import { RecordingListItem } from "@/lib/types/database";
@@ -103,13 +103,7 @@ export function RecordingCard({
 }: RecordingCardProps) {
   const router = useRouter();
   const { t } = useI18n();
-
-  // Prefetch for performance
-  useEffect(() => {
-    if (recording.transcript) {
-      router.prefetch(`/dashboard/recordings/${recording.id}`);
-    }
-  }, [recording.id, recording.transcript, router]);
+  const hasTranscript = recording.has_transcript ?? Boolean(recording.transcript);
 
   // Gesture state
   const [touchStart, setTouchStart] = useState<number | null>(null);
@@ -227,10 +221,10 @@ export function RecordingCard({
       return;
     }
 
-    if (recording.transcript) {
+    if (hasTranscript) {
       router.push(`/dashboard/recordings/${recording.id}`);
     }
-  }, [recording.transcript, recording.id, router, swipeOffset]);
+  }, [hasTranscript, recording.id, router, swipeOffset]);
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
@@ -280,7 +274,7 @@ export function RecordingCard({
 
       {/* Main Card Content */}
       <div
-        className={`bg-white py-4 pl-4 pr-3 relative transition-transform duration-200 ease-out border ${recording.transcript ? "cursor-pointer active:bg-slate-50" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-100 shadow-sm"}`}
+        className={`bg-white py-4 pl-4 pr-3 relative transition-transform duration-200 ease-out border ${hasTranscript ? "cursor-pointer active:bg-slate-50" : "cursor-default"} ${recording.is_pinned ? "border-blue-200 bg-blue-50/10" : "border-slate-100 shadow-sm"}`}
         style={{ transform: `translateX(${swipeOffset}px)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}

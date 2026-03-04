@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
-import { I18nProvider, Locale } from "@/lib/i18n";
+import { I18nProvider, loadTranslations, Locale } from "@/lib/i18n";
 import { pretendard } from "@/lib/fonts";
 import { ClientProviders } from "./client-providers";
 
@@ -57,6 +57,7 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const localeCookie = cookieStore.get("archy_locale")?.value;
   const initialLocale: Locale = (localeCookie === "en" ? "en" : "ko");
+  const initialTranslations = await loadTranslations(initialLocale);
 
   return (
     <html lang={initialLocale} className={pretendard.variable}>
@@ -93,7 +94,10 @@ export default async function RootLayout({
         <link rel="apple-touch-startup-image" href="/splashscreens/splash-1290x2796.png" media="screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
       </head>
       <body className={`${pretendard.className} antialiased`}>
-        <I18nProvider initialLocale={initialLocale}>
+        <I18nProvider
+          initialLocale={initialLocale}
+          initialTranslations={initialTranslations}
+        >
           <ClientProviders />
           {children}
           <SpeedInsights />

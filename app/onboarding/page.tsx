@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import * as amplitude from "@amplitude/analytics-browser";
 import { useI18n } from "@/lib/i18n";
 import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal";
 import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
@@ -20,6 +19,18 @@ interface ConsentState {
   privacy: boolean;
   serviceQuality: boolean;
   marketing: boolean;
+}
+
+async function trackAmplitudeEvent(
+  eventName: string,
+  eventProperties: Record<string, unknown>
+) {
+  try {
+    const amplitude = await import("@amplitude/analytics-browser");
+    amplitude.track(eventName, eventProperties);
+  } catch {
+    console.warn(`[Amplitude] Failed to track ${eventName}`);
+  }
 }
 
 function OnboardingContent() {
@@ -62,15 +73,11 @@ function OnboardingContent() {
 
     hasTrackedSignupCompletionRef.current = true;
 
-    try {
-      amplitude.track("signup_completed", {
-        signup_method: "google_oauth",
-        completion_entry: "onboarding",
-        path: window.location.pathname,
-      });
-    } catch {
-      console.warn("[Amplitude] Failed to track signup_completed");
-    }
+    void trackAmplitudeEvent("signup_completed", {
+      signup_method: "google_oauth",
+      completion_entry: "onboarding",
+      path: window.location.pathname,
+    });
 
     const cleanedParams = new URLSearchParams(searchParams.toString());
     cleanedParams.delete("signup");

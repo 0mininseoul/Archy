@@ -46,7 +46,6 @@ export function DashboardClient() {
   }, []);
 
   useEffect(() => {
-    // PWA install modal check
     const checkPWAModal = () => {
       const ua = navigator.userAgent;
       const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
@@ -76,7 +75,17 @@ export function DashboardClient() {
       }
     };
 
-    checkPWAModal();
+    // Defer non-critical checks so first interaction/render is not blocked.
+    const idleCallback = window.requestIdleCallback;
+    const cancelIdleCallback = window.cancelIdleCallback;
+
+    if (typeof idleCallback === "function") {
+      const idleId = idleCallback(checkPWAModal, { timeout: 1500 });
+      return () => cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(checkPWAModal, 300);
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const handleRecordingComplete = useCallback(

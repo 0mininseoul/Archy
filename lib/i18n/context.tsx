@@ -1,24 +1,24 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { Locale, translations } from "./translations";
-
-// Use a more flexible type that allows any translation value
-type TranslationValue = string | { [key: string]: TranslationValue };
-type Translations = { [key: string]: TranslationValue };
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import {
+  Locale,
+  TranslationKeys,
+  defaultLocale,
+  isLocale,
+  loadTranslations,
+} from "./translations";
 
 interface I18nContextType {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-  t: typeof translations.ko;
+  t: TranslationKeys;
 }
 
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
-// Cookie name for language preference
 const LOCALE_COOKIE = "archy_locale";
 
-// Helper to get cookie value
 function getCookie(name: string): string | undefined {
   if (typeof document === "undefined") return undefined;
   const value = `; ${document.cookie}`;
@@ -27,8 +27,7 @@ function getCookie(name: string): string | undefined {
   return undefined;
 }
 
-// Helper to set cookie
-function setCookie(name: string, value: string, days: number = 365) {
+function setCookie(name: string, value: string, days = 365) {
   if (typeof document === "undefined") return;
   const expires = new Date();
   expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
@@ -38,35 +37,21 @@ function setCookie(name: string, value: string, days: number = 365) {
 interface I18nProviderProps {
   children: React.ReactNode;
   initialLocale?: Locale;
+  initialTranslations?: TranslationKeys;
 }
 
-export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
-  const [locale, setLocaleState] = useState<Locale>(initialLocale || "ko");
-  const [mounted, setMounted] = useState(false);
+export function I18nProvider({
+  children,
+  initialLocale,
+  initialTranslations,
+}: I18nProviderProps) {
+  const resolvedInitialLocale = initialLocale ?? defaultLocale;
+  const [locale, setLocaleState] = useState<Locale>(resolvedInitialLocale);
+  const [translations, setTranslationsState] = useState<TranslationKeys>(
+    initialTranslations ?? ({} as TranslationKeys)
+  );
+  const translationRequestIdRef = useRef(0);
 
-  // Initialize locale from cookie or server-provided value
-  useEffect(() => {
-    const cookieLocale = getCookie(LOCALE_COOKIE) as Locale | undefined;
-    if (cookieLocale && (cookieLocale === "ko" || cookieLocale === "en")) {
-      setLocaleState(cookieLocale);
-    } else if (initialLocale) {
-      setLocaleState(initialLocale);
-    }
-    setMounted(true);
-  }, [initialLocale]);
-
-  // Update locale and persist to cookie
-  const setLocale = useCallback((newLocale: Locale) => {
-    setLocaleState(newLocale);
-    setCookie(LOCALE_COOKIE, newLocale);
-
-    // Update HTML lang attribute
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = newLocale;
-    }
-  }, []);
-
-  // Update locale in database when user is authenticated
   const updateLocaleInDb = useCallback(async (newLocale: Locale) => {
     try {
       await fetch("/api/user/language", {
@@ -79,32 +64,53 @@ export function I18nProvider({ children, initialLocale }: I18nProviderProps) {
     }
   }, []);
 
-  // Wrapper that updates both cookie and database
-  const setLocaleWithPersist = useCallback((newLocale: Locale) => {
-    setLocale(newLocale);
-    updateLocaleInDb(newLocale);
-  }, [setLocale, updateLocaleInDb]);
+  useEffect(() => {
+    const cookieLocale = getCookie(LOCALE_COOKIE);
+    if (isLocale(cookieLocale) && cookieLocale !== locale) {
+      setLocaleState(cookieLocale);
+    }
+  }, [locale]);
+
+  useEffect(() => {
+    const requestId = ++translationRequestIdRef.current;
+
+    const loadByLocale = async () => {
+      try {
+        const loadedTranslations = await loadTranslations(locale);
+        if (translationRequestIdRef.current === requestId) {
+          setTranslationsState(loadedTranslations);
+        }
+      } catch (error) {
+        console.error("Failed to load translations:", error);
+      }
+    };
+
+    void loadByLocale();
+
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = locale;
+    }
+  }, [locale]);
+
+  const setLocale = useCallback(
+    (newLocale: Locale) => {
+      setLocaleState(newLocale);
+      setCookie(LOCALE_COOKIE, newLocale);
+      if (typeof document !== "undefined") {
+        document.documentElement.lang = newLocale;
+      }
+      void updateLocaleInDb(newLocale);
+    },
+    [updateLocaleInDb]
+  );
 
   const value: I18nContextType = {
     locale,
-    setLocale: setLocaleWithPersist,
-    t: translations[locale] as typeof translations.ko,
+    setLocale,
+    t: translations,
   };
 
-  // Prevent hydration mismatch by not rendering until mounted
-  if (!mounted) {
-    return (
-      <I18nContext.Provider value={{ locale: initialLocale || "ko", setLocale: setLocaleWithPersist, t: translations[initialLocale || "ko"] as typeof translations.ko }}>
-        {children}
-      </I18nContext.Provider>
-    );
-  }
-
-  return (
-    <I18nContext.Provider value={value}>
-      {children}
-    </I18nContext.Provider>
-  );
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n() {
@@ -115,7 +121,6 @@ export function useI18n() {
   return context;
 }
 
-// Export the hook to get just translations for convenience
 export function useTranslations() {
   const { t } = useI18n();
   return t;
