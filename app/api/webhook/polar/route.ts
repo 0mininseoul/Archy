@@ -1,7 +1,8 @@
+import { NextResponse, type NextRequest } from "next/server";
 import { Webhooks } from "@polar-sh/nextjs";
 import { createClient } from "@/lib/supabase/server";
 
-export const POST = Webhooks({
+const polarWebhookHandler = Webhooks({
     webhookSecret: process.env.POLAR_WEBHOOK_SECRET!,
 
     // 구독 활성화 시 Pro 상태 부여
@@ -85,3 +86,41 @@ export const POST = Webhooks({
         }
     },
 });
+
+const extractUnknownEventType = (error: Error): string | null => {
+    const messages: string[] = [error.message];
+    const cause = (error as Error & { cause?: unknown }).cause;
+
+    if (cause instanceof Error) {
+        messages.push(cause.message);
+    } else if (typeof cause === "string") {
+        messages.push(cause);
+    }
+
+    for (const message of messages) {
+        const match = message.match(/Unknown event type:\s*([a-zA-Z0-9_.-]+)/);
+        if (match?.[1]) {
+            return match[1];
+        }
+    }
+
+    return null;
+};
+
+export const POST = async (request: NextRequest) => {
+    try {
+        return await polarWebhookHandler(request);
+    } catch (error) {
+        if (error instanceof Error) {
+            const unsupportedEventType = extractUnknownEventType(error);
+            if (unsupportedEventType) {
+                console.warn(
+                    `Ignoring unsupported Polar webhook event type: ${unsupportedEventType}`,
+                );
+                return NextResponse.json({ received: true, ignored: true });
+            }
+        }
+
+        throw error;
+    }
+};
