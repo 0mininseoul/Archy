@@ -76,6 +76,83 @@ function parseJsonSafe(text) {
   }
 }
 
+function isBusinessCriticalQuestion(question) {
+  const text = String(question || "").toLowerCase();
+  const keywords = [
+    "지표",
+    "전환",
+    "리텐션",
+    "활성화",
+    "결제",
+    "매출",
+    "전략",
+    "로드맵",
+    "실험",
+    "가설",
+    "리스크",
+    "우선순위",
+    "온보딩",
+    "퍼널",
+    "cohort",
+    "funnel",
+    "retention",
+    "activation",
+    "conversion",
+    "pricing",
+    "revenue",
+    "kpi",
+    "okr",
+  ];
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function buildAdvisorSystemInstruction({ question, model }) {
+  const businessCritical = isBusinessCriticalQuestion(question);
+
+  const sharedRules = [
+    "너는 Archy 서비스 운영 어시스턴트다.",
+    "톤은 친근하고 캐주얼하게 유지하되, 중요한 내용은 전문가처럼 정확히 말한다.",
+    "핵심 결론을 먼저 말하고, 근거/가정/리스크를 분명히 구분한다.",
+    "문맥상 자연스러울 때만 가벼운 드립이나 ㅋㅋ를 0~1회 사용한다.",
+    "중요한 업무 항목은 절대 생략하지 않는다.",
+    "한국어로 답한다.",
+    `기본 사용 모델은 ${GEMINI_PRO_MODEL}이며, 가벼운 요청만 ${GEMINI_FLASH_MODEL}로 처리한다. 이번 응답 모델은 ${model}이다.`,
+  ];
+
+  if (businessCritical) {
+    sharedRules.push(
+      "업무/전략 질문에서는 단정적 표현 전에 근거를 제시하고, 실행 액션을 우선순위로 제안한다.",
+      "형식보다 내용 정확도를 우선하며, 필요 시 짧아도 빠짐없이 답한다."
+    );
+  } else {
+    sharedRules.push(
+      "가벼운 질문에는 부담 없는 톤으로 답하되, 도움되는 한 줄 액션을 함께 준다."
+    );
+  }
+
+  return sharedRules.join(" ");
+}
+
+function buildAdvisorResponseGuide(question) {
+  const businessCritical = isBusinessCriticalQuestion(question);
+  if (businessCritical) {
+    return [
+      "답변 형식:",
+      "1) 한 줄 결론",
+      "2) 근거(숫자/사실/가정)",
+      "3) 바로 실행 액션(1~3개, 우선순위 순)",
+      "4) 추가 확인이 필요한 데이터(있으면만)",
+    ].join("\n");
+  }
+
+  return [
+    "답변 형식:",
+    "1) 짧은 결론",
+    "2) 이유 또는 맥락",
+    "3) 다음 액션 1개",
+  ].join("\n");
+}
+
 const DISCORD_BOT_TOKEN = getEnv("DISCORD_BOT_TOKEN", {
   aliases: ["DISCORD_TOKEN"],
 });
@@ -356,16 +433,12 @@ async function answerAdvisorQuestion(message, question) {
 
   const memoryContext = formatMemoryContext(memory);
 
-  const systemInstruction = [
-    "당신은 Archy 서비스 운영 어시스턴트다.",
-    "모호한 말보다 실행 지시와 숫자 근거를 우선한다.",
-    "한국어로 간결하게 답한다.",
-    `기본 사용 모델은 ${GEMINI_PRO_MODEL}이며, 가벼운 요청만 ${GEMINI_FLASH_MODEL}로 처리한다.`,
-  ].join(" ");
+  const systemInstruction = buildAdvisorSystemInstruction({ question, model });
 
   const prompt = [
     `현재 시각(KST): ${new Date().toISOString()} / KST 날짜: ${toKstYmd(new Date())}`,
     "아래 컨텍스트를 바탕으로 질문에 답해라.",
+    buildAdvisorResponseGuide(question),
     "[장기 메모 요약]",
     memoryContext.summaryText,
     "[사용자/프로젝트 사실 메모]",
