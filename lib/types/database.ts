@@ -64,6 +64,14 @@ export interface User {
   promo_applied_at?: string | null;
   promo_expires_at?: string | null;
 
+  // Payment Tracking
+  is_paid_user?: boolean;
+  paid_ever?: boolean;
+  paid_started_at?: string | null;
+  paid_ended_at?: string | null;
+  polar_customer_id?: string | null;
+  polar_subscription_id?: string | null;
+
   created_at: string;
 }
 

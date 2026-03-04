@@ -98,6 +98,8 @@ STT 다중 키 라우팅(선택):
 17. `add_notion_save_target_icon_fields.sql`
 18. `add_promo_system.sql`
 19. `add_active_recording_index.sql`
+20. `add_paid_subscription_fields.sql`
+21. `add_user_recording_stats_view.sql`
 
 ## API 개요
 
@@ -137,8 +139,13 @@ npm run build
 npm run start
 npm run lint
 npm run check:notion-oauth
+npm run agent:daily
+npm run agent:daily:dry
+npm run agent:discord
 npx tsc --noEmit
 ```
+
+Assistant Agent(Discord + Daily Ops) 설정은 [docs/assistant-agent.md](docs/assistant-agent.md) 참고.
 
 ## 문서
 

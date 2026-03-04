@@ -99,6 +99,8 @@ Supabase SQL Editor에서 아래 순서로 실행합니다.
 18. `database/migrations/add_notion_save_target_icon_fields.sql`
 19. `database/migrations/add_promo_system.sql`
 20. `database/migrations/add_active_recording_index.sql`
+21. `database/migrations/add_paid_subscription_fields.sql`
+22. `database/migrations/add_user_recording_stats_view.sql`
 
 ## 5. Supabase Storage (선택)
 
