@@ -8,7 +8,8 @@
 2. Supabase + Amplitude 기반 지표 집계
 3. Google Sheet / Notion 멱등 업데이트 (`있으면 update, 없으면 insert`)
 4. Discord 리포트 전송 + Gemini Pro 전략 리뷰 자동 생성
-5. 일반 채팅 질문 응답(기본 Pro 라우팅)
+5. 멘션 채팅 질의 응답(기본 Pro 라우팅)
+6. Supabase 기반 대화 메모리(요약 + 사실 메모)로 연속 맥락 유지
 
 ## 핵심 정의 (고정)
 - 제외 테스트 유저 ID:
@@ -31,6 +32,7 @@ Polar 웹훅에서 아래 필드를 `users`에 기록합니다.
 
 마이그레이션:
 - `database/migrations/add_paid_subscription_fields.sql`
+- `database/migrations/add_agent_memory_tables.sql`
 
 ## 녹음 횟수 추적
 `users.recording_count`를 직접 업데이트하지 않고 뷰를 사용합니다.
@@ -50,10 +52,11 @@ npm run agent:discord
 ```
 
 ## Discord 명령
-- `!archy daily` : 데일리 배치 즉시 실행
-- `!archy stats` : 최신 집계 요약
-- `!archy ask <질문>` : 전략/운영 질의
-- 봇 멘션으로도 질문 가능 (`DISCORD_CHAT_CHANNEL_IDS` 설정 시 채널 제한)
+- `/daily` : 데일리 배치 즉시 실행
+- `/stats` : 최신 집계 요약
+- `/help` : 명령 안내
+- 전략/운영 질의는 봇 멘션으로 입력 (`DISCORD_CHAT_CHANNEL_IDS` 설정 시 채널 제한)
+  - 예: `@사업 개고수 에이전트 오늘 데이터 해석해줘`
 
 ## 필수 환경변수
 `.env.example`에 추가된 키를 설정하세요.
@@ -62,7 +65,9 @@ npm run agent:discord
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 - Notion: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`
 - Amplitude: `AMPLITUDE_DASHBOARD_REST_API_KEY`, `AMPLITUDE_DASHBOARD_REST_SECRET`, `AMPLITUDE_SIGNUP_CONVERSION_CHART_ID`
+- Memory(옵션): `ARCHY_MEMORY_ENABLED`, `ARCHY_MEMORY_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_TURNS`, `ARCHY_MEMORY_SUMMARY_KEEP_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES`
 
 ## 참고
 - 데일리 배치는 기본적으로 `전날(targetYmd)` 데이터를 기준으로 집계합니다.
 - 주간(Notion 위클리)은 일요일 00:00 실행 시 실행일 라벨(예: `3/8(일)`)로 upsert합니다.
+- 슬래시 명령 반영이 늦으면 봇 재초대(Scopes: `bot`, `applications.commands`) 후 확인하세요.

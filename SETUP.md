@@ -101,6 +101,7 @@ Supabase SQL Editor에서 아래 순서로 실행합니다.
 20. `database/migrations/add_active_recording_index.sql`
 21. `database/migrations/add_paid_subscription_fields.sql`
 22. `database/migrations/add_user_recording_stats_view.sql`
+23. `database/migrations/add_agent_memory_tables.sql`
 
 ## 5. Supabase Storage (선택)
 

@@ -18,6 +18,12 @@ export const FIXED_EXCLUDED_USER_IDS = [
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, "../..");
+const PROJECT_CONTEXT_CACHE_MS = 60 * 60 * 1000;
+
+let projectContextCache = {
+  value: "",
+  loadedAtMs: 0,
+};
 
 function loadDotenvFile(filepath) {
   if (!fsSync.existsSync(filepath)) return;
@@ -1028,7 +1034,12 @@ export async function getWorkProgressContext(targetYmd) {
 }
 
 async function loadProjectContext() {
-  const files = ["docs/prd.md", "docs/FEATURE_SPEC.md", "docs/SERVICE_FLOW.md"];
+  const now = Date.now();
+  if (projectContextCache.value && now - projectContextCache.loadedAtMs < PROJECT_CONTEXT_CACHE_MS) {
+    return projectContextCache.value;
+  }
+
+  const files = ["docs/prd.md", "docs/FEATURE_SPEC.md", "docs/SERVICE_FLOW.md", "docs/assistant-agent.md"];
   const chunks = [];
 
   for (const relativePath of files) {
@@ -1041,7 +1052,13 @@ async function loadProjectContext() {
     }
   }
 
-  return chunks.join("\n\n");
+  const merged = chunks.join("\n\n");
+  projectContextCache = {
+    value: merged,
+    loadedAtMs: now,
+  };
+
+  return merged;
 }
 
 export async function generateGeminiText({
