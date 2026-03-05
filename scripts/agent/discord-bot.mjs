@@ -316,6 +316,17 @@ async function sendLongMessage(channel, content) {
   }
 }
 
+function pickDailyStartMessage() {
+  const candidates = [
+    "데일리 리포트 보내드릴게요. 잠시만요.",
+    "오늘자 데일리 지표 정리해서 바로 공유할게요.",
+    "좋아요, 최신 데일리 리포트 지금 만들고 있어요.",
+    "오케이, 데이터 집계해서 데일리 리포트 올릴게요.",
+    "금방 끝나요. 데일리 리포트 준비 중입니다.",
+  ];
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 function buildDailyEmbed(report) {
   const { overviewText, heavyUserText } = buildDiscordMetricText(report);
 
@@ -390,7 +401,7 @@ function buildStatsEmbed({ report, asOfDate }) {
   return embed;
 }
 
-async function runDailyAndPost({ trigger = "schedule" } = {}) {
+async function runDailyAndPost() {
   if (dailyRunInFlight) return dailyRunInFlight;
 
   dailyRunInFlight = (async () => {
@@ -399,7 +410,7 @@ async function runDailyAndPost({ trigger = "schedule" } = {}) {
       throw new Error("Daily channel is missing or not text-based");
     }
 
-    await channel.send(`데일리 배치 실행 시작 (${trigger})`);
+    await channel.send(pickDailyStartMessage());
     const report = await runDailyPipeline({
       runDate: new Date(),
       dryRun: false,
@@ -664,14 +675,14 @@ client.on(Events.ClientReady, async () => {
   }
 
   cron.schedule(
-    "0 0 * * *",
-    async () => {
-      try {
-        await runDailyAndPost({ trigger: "schedule" });
-      } catch (error) {
-        console.error("Scheduled daily run failed:", error);
-      }
-    },
+      "0 0 * * *",
+      async () => {
+        try {
+          await runDailyAndPost();
+        } catch (error) {
+          console.error("Scheduled daily run failed:", error);
+        }
+      },
     {
       timezone: "Asia/Seoul",
     }
@@ -711,7 +722,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === "daily") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const report = await runDailyAndPost({ trigger: `slash:${interaction.user.username}` });
+      const report = await runDailyAndPost();
       await interaction.editReply(
         `데일리 배치 완료 (${report.dailyLabel})\n채널 ${DAILY_CHANNEL_ID}에 결과를 전송했습니다.`
       );
