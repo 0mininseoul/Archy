@@ -58,6 +58,10 @@ function getPositiveInt(value, fallback) {
   return Math.floor(parsed);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function logBotEvent(event, payload = {}) {
   const line = {
     ts: new Date().toISOString(),
@@ -1172,7 +1176,7 @@ function splitMessage(content, limit = 1800) {
 }
 
 async function sendLongMessage(channel, content, options = {}) {
-  const { withSequence = false } = options;
+  const { withSequence = false, maxSendRetries = 2 } = options;
   const chunks = splitMessage(content);
   const total = chunks.length;
 
@@ -1180,8 +1184,28 @@ async function sendLongMessage(channel, content, options = {}) {
     const chunk = chunks[i];
     if (!chunk) continue;
     const decorated = withSequence && total > 1 ? `(${i + 1}/${total})\n${chunk}` : chunk;
-    await channel.send({ content: decorated });
+    let sent = false;
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxSendRetries; attempt += 1) {
+      try {
+        await channel.send({ content: decorated });
+        sent = true;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxSendRetries) break;
+        await sleep(500 * (attempt + 1));
+      }
+    }
+    if (!sent && lastError) {
+      throw lastError;
+    }
   }
+
+  return {
+    chunkCount: total,
+    textLength: String(content || "").length,
+  };
 }
 
 function pickDailyStartMessage() {
@@ -1339,12 +1363,21 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
     });
 
     if (report.strategicReview) {
-      await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`);
+      const reviewSend = await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`);
       logBotEvent("daily.review_sent", {
         trigger,
         requestedBy,
         runId: report?.runId ?? null,
         reviewLength: report?.strategicReview?.length ?? 0,
+        chunkCount: reviewSend?.chunkCount ?? 1,
+      });
+    } else if (report.strategicReviewError) {
+      await channel.send("전략 리뷰는 모델 응답 지연으로 이번 배치에서 생략됐어요. `/daily`로 다시 요청해주면 재시도할게요.");
+      logBotEvent("daily.review_skipped", {
+        trigger,
+        requestedBy,
+        runId: report?.runId ?? null,
+        reason: report.strategicReviewError,
       });
     }
 

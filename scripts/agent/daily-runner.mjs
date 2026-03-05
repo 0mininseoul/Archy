@@ -1760,6 +1760,25 @@ export function chooseChatModel(messageText) {
   return GEMINI_PRO_MODEL;
 }
 
+function needsStrategicReviewContinuation(text) {
+  const body = String(text || "").trim();
+  if (!body) return true;
+  if (/[0-9]\.\s*$/.test(body)) return true;
+  if (/[:,;(\-*]\s*$/.test(body)) return true;
+
+  const hasActionSection = body.includes("우선순위 액션 3개");
+  if (!hasActionSection) return false;
+
+  const lines = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const thirdAction = lines.find((line) => /^3\.\s*/.test(line));
+  if (!thirdAction || /^3\.\s*$/.test(thirdAction)) return true;
+  return false;
+}
+
 export async function generateDailyStrategicReview({
   metrics,
   amplitudeConversion,
@@ -1819,7 +1838,7 @@ export async function generateDailyStrategicReview({
     JSON.stringify(reviewInput, null, 2),
   ].join("\n");
 
-  return generateGeminiText({
+  const draft = await generateGeminiText({
     model: GEMINI_PRO_MODEL,
     systemInstruction,
     userPrompt,
@@ -1828,6 +1847,37 @@ export async function generateDailyStrategicReview({
     timeoutMs: Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 60000),
     maxRetries: Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 3),
   });
+
+  if (!needsStrategicReviewContinuation(draft)) return draft;
+
+  logDailyEvent("strategic_review.continuation_needed", {
+    reason: "incomplete_tail_detected",
+    draftLength: draft.length,
+  });
+
+  const continuationPrompt = [
+    "직전 전략 리뷰 초안이 중간에서 끊겼다.",
+    "아래 초안을 중복 없이 이어서 완성해라.",
+    "형식은 유지하되, 누락된 마무리 내용만 작성한다.",
+    "특히 '4) 내일 바로 실행할 우선순위 액션 3개'의 3번 액션과 기대효과,",
+    "'5) 데이터 추가 확인 요청'이 필요하면 그것까지 마무리한다.",
+    "",
+    "[초안]",
+    draft,
+  ].join("\n");
+
+  const continuation = await generateGeminiText({
+    model: GEMINI_PRO_MODEL,
+    systemInstruction,
+    userPrompt: continuationPrompt,
+    temperature: 0.2,
+    maxOutputTokens: 1200,
+    timeoutMs: Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 60000),
+    maxRetries: Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 3),
+  });
+
+  if (!continuation.trim()) return draft;
+  return `${draft.trimEnd()}\n${continuation.trimStart()}`.trim();
 }
 
 function compareNotionMetric(currentValue, previousValue) {
