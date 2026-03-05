@@ -826,9 +826,51 @@ function getNotionUserMetricsDatabaseId() {
   });
 }
 
-async function findNotionPageByTitle(notion, databaseId, title) {
-  const result = await notion.databases.query({
-    database_id: databaseId,
+const notionMetricsDataSourceCache = {
+  key: null,
+  dataSourceId: null,
+};
+
+async function resolveNotionMetricsDataSourceId(notion) {
+  const configuredId = getNotionUserMetricsDatabaseId();
+  if (notionMetricsDataSourceCache.key === configuredId && notionMetricsDataSourceCache.dataSourceId) {
+    return notionMetricsDataSourceCache.dataSourceId;
+  }
+
+  // 1) Prefer direct data source id.
+  try {
+    const ds = await notion.dataSources.retrieve({
+      data_source_id: configuredId,
+    });
+    if (ds?.id) {
+      notionMetricsDataSourceCache.key = configuredId;
+      notionMetricsDataSourceCache.dataSourceId = ds.id;
+      return ds.id;
+    }
+  } catch {
+    // Fall through to database lookup.
+  }
+
+  // 2) Fallback: configured id is database id -> use first data source.
+  const database = await notion.databases.retrieve({
+    database_id: configuredId,
+  });
+
+  const firstDataSourceId = database?.data_sources?.[0]?.id;
+  if (!firstDataSourceId) {
+    throw new Error(
+      "NOTION_USER_METRICS_DATABASE_ID must be a data_source id, or a database id that contains at least one data source."
+    );
+  }
+
+  notionMetricsDataSourceCache.key = configuredId;
+  notionMetricsDataSourceCache.dataSourceId = firstDataSourceId;
+  return firstDataSourceId;
+}
+
+async function findNotionPageByTitle(notion, dataSourceId, title) {
+  const result = await notion.dataSources.query({
+    data_source_id: dataSourceId,
     filter: {
       property: "이름",
       title: {
@@ -864,10 +906,10 @@ function buildNotionMetricProperties(label, metrics, conversionRate) {
 
 export async function upsertNotionMetricsRow({ label, metrics, conversionRate }) {
   const notion = getNotionClient();
-  const databaseId = getNotionUserMetricsDatabaseId();
+  const dataSourceId = await resolveNotionMetricsDataSourceId(notion);
   const properties = buildNotionMetricProperties(label, metrics, conversionRate);
 
-  const existing = await findNotionPageByTitle(notion, databaseId, label);
+  const existing = await findNotionPageByTitle(notion, dataSourceId, label);
   if (existing) {
     await notion.pages.update({
       page_id: existing.id,
@@ -877,7 +919,7 @@ export async function upsertNotionMetricsRow({ label, metrics, conversionRate })
   }
 
   const created = await notion.pages.create({
-    parent: { database_id: databaseId },
+    parent: { data_source_id: dataSourceId },
     properties,
   });
 
@@ -886,8 +928,8 @@ export async function upsertNotionMetricsRow({ label, metrics, conversionRate })
 
 export async function getNotionMetricsByLabel(label) {
   const notion = getNotionClient();
-  const databaseId = getNotionUserMetricsDatabaseId();
-  const page = await findNotionPageByTitle(notion, databaseId, label);
+  const dataSourceId = await resolveNotionMetricsDataSourceId(notion);
+  const page = await findNotionPageByTitle(notion, dataSourceId, label);
   if (!page) return null;
 
   const getNumber = (name) => {
@@ -937,18 +979,20 @@ async function readWorkDbTargetPage(notion, targetYmd) {
   if (!collection) return null;
 
   const token = targetYmd.slice(2).replaceAll("-", ""); // 2026-03-04 -> 260304
-  const pages =
-    collection.object === "data_source"
-      ? await notion.dataSources.query({
-          data_source_id: collection.id,
-          page_size: 30,
-          sorts: [{ direction: "descending", timestamp: "created_time" }],
-        })
-      : await notion.databases.query({
-          database_id: collection.id,
-          page_size: 30,
-          sorts: [{ direction: "descending", timestamp: "created_time" }],
-        });
+  let workDataSourceId = null;
+  if (collection.object === "data_source") {
+    workDataSourceId = collection.id;
+  } else if (collection.object === "database") {
+    const db = await notion.databases.retrieve({ database_id: collection.id });
+    workDataSourceId = db?.data_sources?.[0]?.id || null;
+  }
+  if (!workDataSourceId) return null;
+
+  const pages = await notion.dataSources.query({
+    data_source_id: workDataSourceId,
+    page_size: 30,
+    sorts: [{ direction: "descending", timestamp: "created_time" }],
+  });
 
   const extractTitle = (page) => {
     const titleProperty = Object.values(page.properties || {}).find(

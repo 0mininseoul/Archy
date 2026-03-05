@@ -7,6 +7,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  MessageFlags,
 } from "discord.js";
 import cron from "node-cron";
 
@@ -619,7 +620,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === "help") {
       await interaction.reply({
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         content: [
           "Archy 명령:",
           "- `/daily` : 데일리 배치 즉시 실행",
@@ -642,7 +643,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === "daily") {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const report = await runDailyAndPost({ trigger: `slash:${interaction.user.username}` });
       await interaction.editReply(
         `데일리 배치 완료 (${report.dailyLabel})\n채널 ${DAILY_CHANNEL_ID}에 결과를 전송했습니다.`
@@ -656,7 +657,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.editReply("처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
       } else {
         await interaction.reply({
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
           content: "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
         });
       }
