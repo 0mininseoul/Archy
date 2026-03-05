@@ -288,6 +288,15 @@ function truncateForField(value, max = 200) {
   return `${text.slice(0, max)}...`;
 }
 
+function formatHeavyUserNamesOnly(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return "데이터 없음";
+  return list
+    .slice(0, 3)
+    .map((item, idx) => `${idx + 1}. ${item.name || "이름 없음"}`)
+    .join("\n");
+}
+
 function splitMessage(content, limit = 1800) {
   if (!content || content.length <= limit) return [content];
   const chunks = [];
@@ -331,8 +340,9 @@ function buildDailyEmbed(report) {
 }
 
 function buildStatsEmbed({ report, asOfDate }) {
-  const { heavyUserText, amplitudeSourceText } = buildDiscordMetricText(report);
+  const { amplitudeSourceText } = buildDiscordMetricText(report);
   const asOfKst = formatKstDateTime(asOfDate);
+  const heavyUserText = formatHeavyUserNamesOnly(report.heavyUserTop3);
   const previous = report.previous?.notion;
   const fallbackRates = report.previous?.fallbackRates || {};
   const fallbackCounts = report.previous?.fallbackCounts || {};
@@ -351,7 +361,6 @@ function buildStatsEmbed({ report, asOfDate }) {
     .setTitle("📈 Archy 실시간 지표")
     .setDescription("KST 기준 최신 운영 스냅샷")
     .addFields(
-      { name: "기준일", value: report.dailyLabel, inline: true },
       { name: "기준시각", value: asOfKst, inline: true },
       { name: "데이터 상태", value: conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
       { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, prevUserCount), inline: true },
@@ -367,10 +376,10 @@ function buildStatsEmbed({ report, asOfDate }) {
       { name: "🔗 연동율", value: formatRateCard(report.rates.integrationAny, prevIntegration), inline: true },
       { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, prevActivation), inline: true },
       { name: "💳 결제율", value: formatRateCard(report.rates.payment, prevPayment), inline: true },
-      { name: "헤비 유저 TOP3 (누적 녹음)", value: heavyUserText, inline: false }
+      { name: "헤비 유저 TOP3", value: heavyUserText, inline: false }
     )
     .setFooter({
-      text: `집계 대상일: ${report.targetYmd} | 표시 시각: ${asOfKst}`,
+      text: `표시 시각: ${asOfKst}`,
     })
     .setTimestamp(asOfDate instanceof Date ? asOfDate : new Date(asOfDate));
 
@@ -381,6 +390,12 @@ function buildStatsEmbed({ report, asOfDate }) {
       inline: false,
     });
   }
+
+  embed.addFields({
+    name: "참고",
+    value: `표시 시각: ${asOfKst}`,
+    inline: false,
+  });
 
   return embed;
 }
