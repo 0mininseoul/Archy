@@ -70,6 +70,16 @@ function isRetryableGeminiFailure(error, statusCode = null) {
   );
 }
 
+function getGeminiRetryDelayMs(attempt) {
+  const baseMs = Number(process.env.GEMINI_REQUEST_RETRY_BASE_MS || 1500);
+  const capMs = Number(process.env.GEMINI_REQUEST_RETRY_CAP_MS || 12000);
+  const safeBase = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : 1500;
+  const safeCap = Number.isFinite(capMs) && capMs > 0 ? capMs : 12000;
+  const expo = Math.min(safeCap, safeBase * 2 ** Math.max(0, attempt));
+  const jitter = Math.floor(Math.random() * 350);
+  return expo + jitter;
+}
+
 function loadDotenvFile(filepath) {
   if (!fsSync.existsSync(filepath)) return;
 
@@ -1711,13 +1721,15 @@ export async function generateGeminiText({
         const body = await response.text();
         const httpError = new Error(`Gemini API failed (${response.status}): ${body}`);
         if (attempt < retries && isRetryableGeminiFailure(httpError, response.status)) {
+          const retryDelayMs = getGeminiRetryDelayMs(attempt);
           logDailyEvent("gemini.retry", {
             model,
             attempt: attempt + 1,
             maxAttempts: retries + 1,
             statusCode: response.status,
+            retryDelayMs,
           });
-          await sleep(750 * (attempt + 1));
+          await sleep(retryDelayMs);
           continue;
         }
         throw httpError;
@@ -1733,14 +1745,16 @@ export async function generateGeminiText({
       return text || "";
     } catch (error) {
       if (attempt < retries && isRetryableGeminiFailure(error, statusCode)) {
+        const retryDelayMs = getGeminiRetryDelayMs(attempt);
         logDailyEvent("gemini.retry", {
           model,
           attempt: attempt + 1,
           maxAttempts: retries + 1,
           statusCode,
           error: safeErrorMessage(error),
+          retryDelayMs,
         });
-        await sleep(750 * (attempt + 1));
+        await sleep(retryDelayMs);
         continue;
       }
       throw error;
@@ -1828,6 +1842,8 @@ export async function generateDailyStrategicReview({
     userPrompt,
     temperature: 0.25,
     maxOutputTokens: 3072,
+    timeoutMs: Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 60000),
+    maxRetries: Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 3),
   });
 }
 
