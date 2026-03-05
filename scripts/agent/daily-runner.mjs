@@ -1329,9 +1329,7 @@ function getNotionClient() {
 }
 
 function getNotionUserMetricsDatabaseId() {
-  return getEnv("NOTION_USER_METRICS_DATABASE_ID", {
-    fallback: "317bd55c-4778-80bb-9ae8-d597501f7dbe",
-  });
+  return getEnv("NOTION_USER_METRICS_DATABASE_ID");
 }
 
 const notionMetricsDataSourceCache = {
@@ -1360,9 +1358,18 @@ async function resolveNotionMetricsDataSourceId(notion) {
   }
 
   // 2) Fallback: configured id is database id -> use first data source.
-  const database = await notion.databases.retrieve({
-    database_id: configuredId,
-  });
+  let database = null;
+  try {
+    database = await notion.databases.retrieve({
+      database_id: configuredId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `NOTION_USER_METRICS_DATABASE_ID 접근 실패: ${configuredId}. ` +
+        `해당 DB(또는 데이터소스)를 Notion integration에 공유했는지 확인하세요. 원인: ${message}`
+    );
+  }
 
   const firstDataSourceId = database?.data_sources?.[0]?.id;
   if (!firstDataSourceId) {

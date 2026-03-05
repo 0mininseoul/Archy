@@ -1133,19 +1133,44 @@ function formatHeavyUserNamesOnly(items) {
 function splitMessage(content, limit = 1800) {
   if (!content || content.length <= limit) return [content];
   const chunks = [];
-  let start = 0;
-  while (start < content.length) {
-    const end = Math.min(content.length, start + limit);
-    chunks.push(content.slice(start, end));
-    start = end;
+  let remaining = String(content);
+
+  while (remaining.length > limit) {
+    const window = remaining.slice(0, limit);
+    let splitAt = -1;
+
+    // Prefer splitting by paragraph, then line, then whitespace.
+    splitAt = window.lastIndexOf("\n\n");
+    if (splitAt < Math.floor(limit * 0.5)) {
+      splitAt = window.lastIndexOf("\n");
+    }
+    if (splitAt < Math.floor(limit * 0.5)) {
+      splitAt = window.lastIndexOf(" ");
+    }
+    if (splitAt < Math.floor(limit * 0.3)) {
+      splitAt = limit;
+    }
+
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
   }
-  return chunks;
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+  return chunks.filter(Boolean);
 }
 
-async function sendLongMessage(channel, content) {
-  for (const chunk of splitMessage(content)) {
+async function sendLongMessage(channel, content, options = {}) {
+  const { withSequence = false } = options;
+  const chunks = splitMessage(content);
+  const total = chunks.length;
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    const chunk = chunks[i];
     if (!chunk) continue;
-    await channel.send({ content: chunk });
+    const decorated = withSequence && total > 1 ? `(${i + 1}/${total})\n${chunk}` : chunk;
+    await channel.send({ content: decorated });
   }
 }
 
@@ -1601,10 +1626,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === "daily") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const report = await runDailyAndPost();
-      await interaction.editReply(
-        `데일리 배치 완료 (${report.dailyLabel})\n채널 ${DAILY_CHANNEL_ID}에 결과를 전송했습니다.`
-      );
+      await runDailyAndPost();
+      await interaction.deleteReply().catch(() => {});
       return;
     }
   } catch (error) {

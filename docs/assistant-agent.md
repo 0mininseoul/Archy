@@ -56,6 +56,8 @@ npm run agent:discord
 - `/daily` : 데일리 배치 즉시 실행
 - `/stats` : 최신 집계 요약
 - `/help` : 명령 안내
+- 주간(위클리) Notion upsert는 스케줄러(일요일 00:00 KST)에서만 실행되고,
+  `/daily` 수동 실행은 데일리 upsert만 수행합니다.
 - 전략/운영 질의는 봇 멘션으로 입력 (`DISCORD_CHAT_CHANNEL_IDS` 설정 시 채널 제한)
   - 예: `@사업 개고수 에이전트 오늘 데이터 해석해줘`
   - 예: `@사업 개고수 에이전트 경쟁 서비스 최신 동향 웹 조사해줘`
