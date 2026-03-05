@@ -100,6 +100,7 @@ STT 다중 키 라우팅(선택):
 19. `add_active_recording_index.sql`
 20. `add_paid_subscription_fields.sql`
 21. `add_user_recording_stats_view.sql`
+22. `add_agent_memory_tables.sql`
 
 ## API 개요
 
