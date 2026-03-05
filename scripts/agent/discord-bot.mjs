@@ -10,6 +10,8 @@ import {
   MessageFlags,
 } from "discord.js";
 import cron from "node-cron";
+import { google } from "googleapis";
+import { Client as NotionClient } from "@notionhq/client";
 
 import {
   GEMINI_FLASH_MODEL,
@@ -75,6 +77,833 @@ function parseJsonSafe(text) {
   } catch {
     return null;
   }
+}
+
+function shouldUseToolWorkflow(question) {
+  const text = String(question || "").toLowerCase();
+  const keywords = [
+    "웹",
+    "리서치",
+    "조사",
+    "검색",
+    "찾아",
+    "노션",
+    "notion",
+    "데이터베이스",
+    "database",
+    "구글 시트",
+    "google sheet",
+    "spreadsheet",
+    "sheet",
+    "스프레드시트",
+    "tab 추가",
+  ];
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function normalizeUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return `https://${value}`;
+}
+
+function decodeHtmlEntities(text) {
+  return String(text || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function stripHtml(text) {
+  return decodeHtmlEntities(String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+}
+
+function parseSpreadsheetId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match?.[1]) return match[1];
+  return raw;
+}
+
+function toPlainTextRichText(content) {
+  const text = String(content || "").trim();
+  if (!text) return [];
+  return [{ type: "text", text: { content: text.slice(0, 1900) } }];
+}
+
+function markdownToNotionBlocks(markdown) {
+  const text = String(markdown || "").replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  const blocks = [];
+
+  const pushParagraph = (value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+    blocks.push({
+      object: "block",
+      type: "paragraph",
+      paragraph: {
+        rich_text: toPlainTextRichText(trimmed),
+      },
+    });
+  };
+
+  let paragraphBuffer = [];
+  const flushParagraph = () => {
+    if (paragraphBuffer.length === 0) return;
+    pushParagraph(paragraphBuffer.join(" "));
+    paragraphBuffer = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    const h1 = trimmed.match(/^#\s+(.+)/);
+    if (h1) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "heading_1",
+        heading_1: { rich_text: toPlainTextRichText(h1[1]) },
+      });
+      continue;
+    }
+
+    const h2 = trimmed.match(/^##\s+(.+)/);
+    if (h2) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: toPlainTextRichText(h2[1]) },
+      });
+      continue;
+    }
+
+    const h3 = trimmed.match(/^###\s+(.+)/);
+    if (h3) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: toPlainTextRichText(h3[1]) },
+      });
+      continue;
+    }
+
+    const bullet = trimmed.match(/^[-*]\s+(.+)/);
+    if (bullet) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "bulleted_list_item",
+        bulleted_list_item: { rich_text: toPlainTextRichText(bullet[1]) },
+      });
+      continue;
+    }
+
+    const numbered = trimmed.match(/^\d+\.\s+(.+)/);
+    if (numbered) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "numbered_list_item",
+        numbered_list_item: { rich_text: toPlainTextRichText(numbered[1]) },
+      });
+      continue;
+    }
+
+    const quote = trimmed.match(/^>\s+(.+)/);
+    if (quote) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "quote",
+        quote: { rich_text: toPlainTextRichText(quote[1]) },
+      });
+      continue;
+    }
+
+    paragraphBuffer.push(trimmed);
+  }
+
+  flushParagraph();
+  return blocks.slice(0, 100);
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function webSearchViaTavily(query, maxResults = 5) {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return null;
+
+  const response = await fetchWithTimeout("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      max_results: Math.max(1, Math.min(maxResults, 10)),
+      include_answer: false,
+      include_raw_content: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Tavily search failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rows = Array.isArray(data?.results) ? data.results : [];
+  return rows.slice(0, maxResults).map((row) => ({
+    title: String(row?.title || "(제목 없음)").trim(),
+    url: normalizeUrl(row?.url || ""),
+    snippet: String(row?.content || "").trim().slice(0, 300),
+  }));
+}
+
+function extractDuckDuckGoResults(html, maxResults = 5) {
+  const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+
+  const links = [];
+  const snippets = [];
+
+  let linkMatch = null;
+  while ((linkMatch = linkRegex.exec(html)) !== null) {
+    const rawHref = linkMatch[1] || "";
+    const href = rawHref.includes("uddg=")
+      ? decodeURIComponent(rawHref.split("uddg=")[1].split("&")[0] || "")
+      : rawHref;
+    links.push({
+      url: normalizeUrl(href),
+      title: stripHtml(linkMatch[2] || ""),
+    });
+  }
+
+  let snippetMatch = null;
+  while ((snippetMatch = snippetRegex.exec(html)) !== null) {
+    snippets.push(stripHtml(snippetMatch[1] || ""));
+  }
+
+  return links.slice(0, maxResults).map((item, idx) => ({
+    ...item,
+    snippet: snippets[idx] || "",
+  }));
+}
+
+async function webSearchViaDuckDuckGo(query, maxResults = 5) {
+  const url = `https://duckduckgo.com/html/?${new URLSearchParams({ q: query }).toString()}`;
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; ArchyAgent/1.0; +https://www.archynotes.com)",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`DuckDuckGo search failed: ${response.status}`);
+  }
+
+  const html = await response.text();
+  return extractDuckDuckGoResults(html, maxResults);
+}
+
+async function runWebSearch({ query, max_results = 5 }) {
+  const q = String(query || "").trim();
+  if (!q) throw new Error("web_search: query is required");
+
+  const maxResults = Math.max(1, Math.min(Number(max_results) || 5, 10));
+  let results = await webSearchViaTavily(q, maxResults);
+  if (!results) {
+    results = await webSearchViaDuckDuckGo(q, maxResults);
+  }
+
+  return {
+    query: q,
+    results,
+  };
+}
+
+async function runWebRead({ url, max_chars = 5000 }) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error("web_read: url is required");
+  const maxChars = Math.max(500, Math.min(Number(max_chars) || 5000, 20_000));
+
+  const noScheme = normalized.replace(/^https?:\/\//i, "");
+  const jinaUrl = `https://r.jina.ai/http://${noScheme}`;
+
+  let text = "";
+  try {
+    const response = await fetchWithTimeout(jinaUrl, {}, 30_000);
+    if (!response.ok) throw new Error(`r.jina.ai failed: ${response.status}`);
+    text = await response.text();
+  } catch {
+    const fallback = await fetchWithTimeout(normalized, {}, 30_000);
+    if (!fallback.ok) {
+      throw new Error(`web_read fallback failed: ${fallback.status}`);
+    }
+    text = stripHtml(await fallback.text());
+  }
+
+  return {
+    url: normalized,
+    excerpt: String(text || "").trim().slice(0, maxChars),
+  };
+}
+
+let notionClientSingleton = null;
+function getNotionToolClient() {
+  if (notionClientSingleton) return notionClientSingleton;
+  const auth =
+    process.env.NOTION_INTERNAL_INTEGRATION_TOKEN || process.env.NOTION_API_TOKEN || process.env.NOTION_TOKEN;
+  if (!auth) {
+    throw new Error("Notion token is missing. Set NOTION_INTERNAL_INTEGRATION_TOKEN.");
+  }
+  notionClientSingleton = new NotionClient({ auth });
+  return notionClientSingleton;
+}
+
+function buildNotionPropertyByField(field) {
+  const name = String(field?.name || "").trim();
+  const type = String(field?.type || "").trim().toLowerCase();
+  if (!name || !type) return null;
+
+  if (type === "title") return [name, { title: {} }];
+  if (type === "rich_text") return [name, { rich_text: {} }];
+  if (type === "number") return [name, { number: { format: field?.format || "number" } }];
+  if (type === "date") return [name, { date: {} }];
+  if (type === "checkbox") return [name, { checkbox: {} }];
+  if (type === "url") return [name, { url: {} }];
+  if (type === "email") return [name, { email: {} }];
+  if (type === "phone_number") return [name, { phone_number: {} }];
+
+  const options = Array.isArray(field?.options)
+    ? field.options.map((opt) => ({ name: String(opt?.name || opt || "").trim(), color: opt?.color || "default" }))
+    : [];
+  const normalizedOptions = options.filter((opt) => opt.name);
+
+  if (type === "select") return [name, { select: { options: normalizedOptions } }];
+  if (type === "multi_select") return [name, { multi_select: { options: normalizedOptions } }];
+  if (type === "status") return [name, { status: { options: normalizedOptions } }];
+
+  return null;
+}
+
+async function runNotionCreatePage(args = {}) {
+  const notion = getNotionToolClient();
+  const title = String(args.title || "").trim();
+  if (!title) throw new Error("notion_create_page: title is required");
+
+  const parentPageId = String(args.parent_page_id || DEFAULT_NOTION_PARENT_PAGE_ID || "").trim();
+  const parentDataSourceId = String(args.parent_data_source_id || DEFAULT_NOTION_DATA_SOURCE_ID || "").trim();
+  const children = markdownToNotionBlocks(args.content_markdown || "");
+
+  if (parentDataSourceId) {
+    const titlePropertyName = String(args.title_property_name || "Name").trim();
+    const created = await notion.pages.create({
+      parent: { data_source_id: parentDataSourceId },
+      properties: {
+        [titlePropertyName]: {
+          title: toPlainTextRichText(title),
+        },
+      },
+      children,
+    });
+    return { id: created.id, url: created.url, parent: "data_source" };
+  }
+
+  if (!parentPageId) {
+    throw new Error(
+      "notion_create_page: parent_page_id or parent_data_source_id is required (or set NOTION_DEFAULT_PARENT_PAGE_ID)."
+    );
+  }
+
+  const created = await notion.pages.create({
+    parent: { page_id: parentPageId },
+    properties: {
+      title: {
+        title: toPlainTextRichText(title),
+      },
+    },
+    children,
+  });
+
+  return { id: created.id, url: created.url, parent: "page" };
+}
+
+async function runNotionAppendPage(args = {}) {
+  const notion = getNotionToolClient();
+  const pageId = String(args.page_id || "").trim();
+  if (!pageId) throw new Error("notion_append_page: page_id is required");
+  const children = markdownToNotionBlocks(args.content_markdown || "");
+  if (children.length === 0) throw new Error("notion_append_page: content_markdown is required");
+
+  await notion.blocks.children.append({
+    block_id: pageId,
+    children,
+  });
+  return { page_id: pageId, appended_blocks: children.length };
+}
+
+async function runNotionUpdatePageTitle(args = {}) {
+  const notion = getNotionToolClient();
+  const pageId = String(args.page_id || "").trim();
+  const title = String(args.title || "").trim();
+  if (!pageId || !title) throw new Error("notion_update_page_title: page_id and title are required");
+
+  const page = await notion.pages.retrieve({ page_id: pageId });
+  const titleProperty = Object.entries(page?.properties || {}).find(([, prop]) => prop?.type === "title");
+  if (!titleProperty) {
+    throw new Error("notion_update_page_title: title property not found");
+  }
+
+  const [titlePropertyName] = titleProperty;
+  await notion.pages.update({
+    page_id: pageId,
+    properties: {
+      [titlePropertyName]: {
+        title: toPlainTextRichText(title),
+      },
+    },
+  });
+
+  return { page_id: pageId, title };
+}
+
+async function runNotionCreateDatabase(args = {}) {
+  const notion = getNotionToolClient();
+  const title = String(args.title || "").trim();
+  if (!title) throw new Error("notion_create_database: title is required");
+
+  const parentPageId = String(args.parent_page_id || DEFAULT_NOTION_PARENT_PAGE_ID || "").trim();
+  if (!parentPageId) {
+    throw new Error("notion_create_database: parent_page_id is required (or set NOTION_DEFAULT_PARENT_PAGE_ID).");
+  }
+
+  const fields = Array.isArray(args.fields) ? args.fields : [];
+  const properties = {};
+  for (const field of fields) {
+    const entry = buildNotionPropertyByField(field);
+    if (entry) properties[entry[0]] = entry[1];
+  }
+
+  const hasTitle = Object.values(properties).some((prop) => prop && typeof prop === "object" && "title" in prop);
+  if (!hasTitle) {
+    properties.Name = { title: {} };
+  }
+
+  const created = await notion.databases.create({
+    parent: { page_id: parentPageId },
+    title: [{ type: "text", text: { content: title } }],
+    properties,
+  });
+
+  return { id: created.id, url: created.url, title };
+}
+
+async function runNotionUpdateDatabase(args = {}) {
+  const notion = getNotionToolClient();
+  const databaseId = String(args.database_id || "").trim();
+  if (!databaseId) throw new Error("notion_update_database: database_id is required");
+
+  const payload = { database_id: databaseId };
+  const title = String(args.title || "").trim();
+  if (title) {
+    payload.title = [{ type: "text", text: { content: title } }];
+  }
+
+  const addFields = Array.isArray(args.add_fields) ? args.add_fields : [];
+  if (addFields.length > 0) {
+    payload.properties = {};
+    for (const field of addFields) {
+      const entry = buildNotionPropertyByField(field);
+      if (entry) payload.properties[entry[0]] = entry[1];
+    }
+  }
+
+  const updated = await notion.databases.update(payload);
+  return { id: updated.id, url: updated.url || null };
+}
+
+let sheetsClientPromise = null;
+async function getSheetsToolClient() {
+  if (sheetsClientPromise) return sheetsClientPromise;
+  const clientEmail = getEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  const rawKey = getEnv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+  const privateKey = rawKey.replace(/\\n/g, "\n");
+
+  const auth = new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+
+  sheetsClientPromise = auth.authorize().then(() => google.sheets({ version: "v4", auth }));
+  return sheetsClientPromise;
+}
+
+function normalizeSheetValues(values) {
+  if (!Array.isArray(values)) return [[String(values ?? "")]];
+  if (values.length === 0) return [[]];
+  if (Array.isArray(values[0])) {
+    return values.map((row) => row.map((cell) => (cell === null || cell === undefined ? "" : cell)));
+  }
+  return [values.map((cell) => (cell === null || cell === undefined ? "" : cell))];
+}
+
+function resolveSpreadsheetId(input) {
+  const fromInput = parseSpreadsheetId(input);
+  if (fromInput) return fromInput;
+  const fromEnv = parseSpreadsheetId(DEFAULT_SPREADSHEET_ID);
+  if (fromEnv) return fromEnv;
+  throw new Error("spreadsheet_id is required (or set ARCHY_USER_SHEET_ID).");
+}
+
+async function runSheetsAddSheet(args = {}) {
+  const sheets = await getSheetsToolClient();
+  const spreadsheetId = resolveSpreadsheetId(args.spreadsheet_id);
+  const title = String(args.title || "").trim();
+  if (!title) throw new Error("sheets_add_sheet: title is required");
+
+  const response = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title,
+              ...(Number.isInteger(args.index) ? { index: args.index } : {}),
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const added = response.data.replies?.[0]?.addSheet?.properties || null;
+  return { spreadsheet_id: spreadsheetId, title, sheet_id: added?.sheetId ?? null };
+}
+
+async function runSheetsUpdateCells(args = {}) {
+  const sheets = await getSheetsToolClient();
+  const spreadsheetId = resolveSpreadsheetId(args.spreadsheet_id);
+  const range = String(args.range || "").trim();
+  if (!range) throw new Error("sheets_update_cells: range is required");
+
+  const values = normalizeSheetValues(args.values);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: String(args.value_input_option || "USER_ENTERED"),
+    requestBody: { values },
+  });
+  return { spreadsheet_id: spreadsheetId, range, rows: values.length };
+}
+
+async function runSheetsAppendRows(args = {}) {
+  const sheets = await getSheetsToolClient();
+  const spreadsheetId = resolveSpreadsheetId(args.spreadsheet_id);
+  const range = String(args.range || "").trim();
+  if (!range) throw new Error("sheets_append_rows: range is required");
+
+  const values = normalizeSheetValues(args.values);
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: String(args.value_input_option || "USER_ENTERED"),
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values },
+  });
+  return { spreadsheet_id: spreadsheetId, range, rows: values.length };
+}
+
+async function runSheetsRead(args = {}) {
+  const sheets = await getSheetsToolClient();
+  const spreadsheetId = resolveSpreadsheetId(args.spreadsheet_id);
+  const range = String(args.range || "").trim();
+  if (!range) throw new Error("sheets_read: range is required");
+  const maxRows = Math.max(1, Math.min(Number(args.max_rows) || 30, 200));
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
+
+  const values = Array.isArray(response.data.values) ? response.data.values.slice(0, maxRows) : [];
+  return { spreadsheet_id: spreadsheetId, range, values };
+}
+
+const TOOL_DEFINITIONS = [
+  {
+    name: "web_search",
+    description: "웹 검색 결과 목록 조회",
+    args: { query: "string", max_results: "number(optional)" },
+  },
+  {
+    name: "web_read",
+    description: "특정 URL 본문 요약용 텍스트 읽기",
+    args: { url: "string", max_chars: "number(optional)" },
+  },
+  {
+    name: "notion_create_page",
+    description: "노션 페이지 생성 + 본문 작성",
+    args: {
+      title: "string",
+      content_markdown: "string(optional)",
+      parent_page_id: "string(optional)",
+      parent_data_source_id: "string(optional)",
+      title_property_name: "string(optional)",
+    },
+  },
+  {
+    name: "notion_append_page",
+    description: "노션 페이지 본문 추가",
+    args: { page_id: "string", content_markdown: "string" },
+  },
+  {
+    name: "notion_update_page_title",
+    description: "노션 페이지 제목 수정",
+    args: { page_id: "string", title: "string" },
+  },
+  {
+    name: "notion_create_database",
+    description: "노션 데이터베이스 생성",
+    args: {
+      title: "string",
+      parent_page_id: "string(optional)",
+      fields: 'array(optional): [{"name":"Name","type":"title"}]',
+    },
+  },
+  {
+    name: "notion_update_database",
+    description: "노션 데이터베이스 제목/필드 업데이트",
+    args: {
+      database_id: "string",
+      title: "string(optional)",
+      add_fields: "array(optional)",
+    },
+  },
+  {
+    name: "sheets_add_sheet",
+    description: "Google Sheet에 새 탭 추가",
+    args: { spreadsheet_id: "string(optional)", title: "string", index: "number(optional)" },
+  },
+  {
+    name: "sheets_update_cells",
+    description: "Google Sheet 셀 범위 덮어쓰기",
+    args: {
+      spreadsheet_id: "string(optional)",
+      range: "string (예: 시트1!A1:C3)",
+      values: "2d array",
+      value_input_option: "USER_ENTERED|RAW(optional)",
+    },
+  },
+  {
+    name: "sheets_append_rows",
+    description: "Google Sheet 행 추가",
+    args: {
+      spreadsheet_id: "string(optional)",
+      range: "string (예: 시트1!A:C)",
+      values: "2d array",
+      value_input_option: "USER_ENTERED|RAW(optional)",
+    },
+  },
+  {
+    name: "sheets_read",
+    description: "Google Sheet 범위 읽기",
+    args: { spreadsheet_id: "string(optional)", range: "string", max_rows: "number(optional)" },
+  },
+];
+
+function normalizePlannedToolCalls(plan) {
+  const toolCalls = Array.isArray(plan?.tool_calls) ? plan.tool_calls : [];
+  return toolCalls
+    .slice(0, TOOL_MAX_CALLS)
+    .map((call) => {
+      const tool = String(call?.tool || "").trim();
+      const args = call?.args && typeof call.args === "object" ? call.args : {};
+      if (!tool) return null;
+      return { tool, args };
+    })
+    .filter(Boolean);
+}
+
+async function planToolCalls({ question, memoryContext }) {
+  const plannerPrompt = [
+    "사용자 요청을 보고 툴 실행 계획을 JSON으로만 출력해라.",
+    "출력 형식:",
+    '{"needs_tools":true|false,"assistant_brief":"string","tool_calls":[{"tool":"...","args":{}}]}',
+    "규칙:",
+    `1) tool_calls는 최대 ${TOOL_MAX_CALLS}개`,
+    "2) tool은 제공된 목록만 사용",
+    "3) 값이 불확실하면 assistant_brief에 어떤 값이 필요한지 짧게 작성",
+    "4) 웹 조사 요청이면 web_search를 우선 사용하고, 필요하면 web_read를 추가",
+    "5) 노션 페이지/DB 생성·수정 요청은 반드시 notion_* 툴 사용",
+    "6) 구글시트 새 탭/편집 요청은 반드시 sheets_* 툴 사용",
+    "7) JSON 외 텍스트 금지",
+    "",
+    "[기본 설정]",
+    `- 기본 Google Spreadsheet ID: ${DEFAULT_SPREADSHEET_ID || "(미설정)"}`,
+    `- 기본 Notion parent page id: ${DEFAULT_NOTION_PARENT_PAGE_ID || "(미설정)"}`,
+    `- 기본 Notion data source id: ${DEFAULT_NOTION_DATA_SOURCE_ID || "(미설정)"}`,
+    "",
+    "[사용 가능 툴]",
+    JSON.stringify(TOOL_DEFINITIONS, null, 2),
+    "",
+    "[대화 장기 메모 요약]",
+    memoryContext?.summaryText || "(없음)",
+    "",
+    "[사용자 요청]",
+    question,
+  ].join("\n");
+
+  const raw = await generateGeminiText({
+    model: GEMINI_PRO_MODEL,
+    systemInstruction:
+      "너는 JSON 기반 실행계획 생성기다. 요청 수행에 필요한 최소 툴만 선택하고 JSON만 출력한다.",
+    userPrompt: plannerPrompt,
+    temperature: 0.1,
+    maxOutputTokens: 1800,
+  });
+
+  return parseJsonSafe(raw);
+}
+
+async function executePlannedToolCall({ tool, args }) {
+  if (tool === "web_search") return runWebSearch(args);
+  if (tool === "web_read") return runWebRead(args);
+  if (tool === "notion_create_page") return runNotionCreatePage(args);
+  if (tool === "notion_append_page") return runNotionAppendPage(args);
+  if (tool === "notion_update_page_title") return runNotionUpdatePageTitle(args);
+  if (tool === "notion_create_database") return runNotionCreateDatabase(args);
+  if (tool === "notion_update_database") return runNotionUpdateDatabase(args);
+  if (tool === "sheets_add_sheet") return runSheetsAddSheet(args);
+  if (tool === "sheets_update_cells") return runSheetsUpdateCells(args);
+  if (tool === "sheets_append_rows") return runSheetsAppendRows(args);
+  if (tool === "sheets_read") return runSheetsRead(args);
+  throw new Error(`Unsupported tool: ${tool}`);
+}
+
+function compactToolResult(result) {
+  const text = JSON.stringify(result);
+  if (text.length <= 2500) return result;
+  if (Array.isArray(result?.results)) {
+    return {
+      ...result,
+      results: result.results.slice(0, 5),
+      _truncated: true,
+    };
+  }
+  if (typeof result?.excerpt === "string") {
+    return {
+      ...result,
+      excerpt: result.excerpt.slice(0, 2000),
+      _truncated: true,
+    };
+  }
+  return { _truncated: true, preview: text.slice(0, 2000) };
+}
+
+async function buildToolWorkflowResponse({ question, systemInstruction, plan, executions }) {
+  const executionJson = JSON.stringify(executions, null, 2);
+  const responsePrompt = [
+    "아래 사용자 요청과 툴 실행 결과를 바탕으로 최종 답변을 작성해라.",
+    "요구사항:",
+    "1) 실행 완료 항목/실패 항목을 분리해서 말해라.",
+    "2) 생성된 Notion URL, Sheet 범위 등 핵심 결과를 빠짐없이 포함해라.",
+    "3) 실패가 있으면 바로 필요한 추가 정보만 한 줄로 요청해라.",
+    "4) 너무 장황하지 말고 실무 톤으로 작성해라.",
+    "",
+    "[사용자 요청]",
+    question,
+    "",
+    "[플랜]",
+    JSON.stringify(plan, null, 2),
+    "",
+    "[실행 결과]",
+    executionJson,
+  ].join("\n");
+
+  const text = await generateGeminiText({
+    model: GEMINI_PRO_MODEL,
+    systemInstruction,
+    userPrompt: responsePrompt,
+    temperature: 0.2,
+    maxOutputTokens: 1200,
+  });
+
+  if (text?.trim()) return text.trim();
+
+  const successCount = executions.filter((item) => item.ok).length;
+  const failCount = executions.length - successCount;
+  return `요청 작업 실행 결과: 성공 ${successCount}건, 실패 ${failCount}건`;
+}
+
+async function maybeHandleToolWorkflow({ question, memoryContext, systemInstruction }) {
+  if (!shouldUseToolWorkflow(question)) {
+    return { handled: false, response: null };
+  }
+
+  const plan = await planToolCalls({ question, memoryContext });
+  const toolCalls = normalizePlannedToolCalls(plan);
+
+  if (toolCalls.length === 0) {
+    const brief = String(plan?.assistant_brief || "").trim();
+    if (brief) {
+      return { handled: true, response: brief };
+    }
+    return { handled: false, response: null };
+  }
+
+  const executions = [];
+  for (const toolCall of toolCalls) {
+    try {
+      const result = await executePlannedToolCall(toolCall);
+      executions.push({
+        tool: toolCall.tool,
+        args: toolCall.args,
+        ok: true,
+        result: compactToolResult(result),
+      });
+    } catch (error) {
+      executions.push({
+        tool: toolCall.tool,
+        args: toolCall.args,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const response = await buildToolWorkflowResponse({
+    question,
+    systemInstruction,
+    plan: {
+      needs_tools: Boolean(plan?.needs_tools),
+      assistant_brief: plan?.assistant_brief || "",
+      tool_calls: toolCalls,
+    },
+    executions,
+  });
+
+  return { handled: true, response };
 }
 
 function isBusinessCriticalQuestion(question) {
@@ -182,6 +1011,10 @@ const MEMORY_SUMMARY_MIN_INTERVAL_MINUTES = getPositiveInt(
   process.env.ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES,
   180
 );
+const TOOL_MAX_CALLS = getPositiveInt(process.env.ARCHY_TOOL_MAX_CALLS, 5);
+const DEFAULT_SPREADSHEET_ID = process.env.ARCHY_USER_SHEET_ID || "";
+const DEFAULT_NOTION_PARENT_PAGE_ID = process.env.NOTION_DEFAULT_PARENT_PAGE_ID || "";
+const DEFAULT_NOTION_DATA_SOURCE_ID = process.env.NOTION_DEFAULT_DATA_SOURCE_ID || "";
 
 const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName("help").setDescription("사용 가능한 Archy 명령 안내"),
@@ -539,6 +1372,35 @@ async function maybeRefreshConversationSummary({ guildId, channelId, userId }) {
   }
 }
 
+async function persistConversationExchange({ message, question, answer, model }) {
+  try {
+    await saveConversationTurn({
+      guildId: message.guild.id,
+      channelId: message.channelId,
+      userId: message.author.id,
+      userMessage: question,
+      assistantMessage: answer,
+      model,
+    });
+
+    const count = await getConversationMessageCount({
+      guildId: message.guild.id,
+      channelId: message.channelId,
+      userId: message.author.id,
+    });
+
+    if (count >= MEMORY_SUMMARY_MIN_TURNS) {
+      void maybeRefreshConversationSummary({
+        guildId: message.guild.id,
+        channelId: message.channelId,
+        userId: message.author.id,
+      });
+    }
+  } catch (error) {
+    console.warn("Memory persistence failed:", error);
+  }
+}
+
 async function answerAdvisorQuestion(message, question) {
   const model = chooseChatModel(question);
   const quickReport = await getCachedQuickReport();
@@ -553,6 +1415,22 @@ async function answerAdvisorQuestion(message, question) {
   const memoryContext = formatMemoryContext(memory);
 
   const systemInstruction = buildAdvisorSystemInstruction({ question, model });
+
+  const toolWorkflow = await maybeHandleToolWorkflow({
+    question,
+    memoryContext,
+    systemInstruction,
+  });
+  if (toolWorkflow.handled && toolWorkflow.response) {
+    await sendLongMessage(message.channel, toolWorkflow.response);
+    await persistConversationExchange({
+      message,
+      question,
+      answer: toolWorkflow.response,
+      model,
+    });
+    return;
+  }
 
   const prompt = [
     `현재 시각(KST): ${new Date().toISOString()} / KST 날짜: ${toKstYmd(new Date())}`,
@@ -601,33 +1479,7 @@ async function answerAdvisorQuestion(message, question) {
   }
 
   await sendLongMessage(message.channel, answer);
-
-  try {
-    await saveConversationTurn({
-      guildId: message.guild.id,
-      channelId: message.channelId,
-      userId: message.author.id,
-      userMessage: question,
-      assistantMessage: answer,
-      model,
-    });
-
-    const count = await getConversationMessageCount({
-      guildId: message.guild.id,
-      channelId: message.channelId,
-      userId: message.author.id,
-    });
-
-    if (count >= MEMORY_SUMMARY_MIN_TURNS) {
-      void maybeRefreshConversationSummary({
-        guildId: message.guild.id,
-        channelId: message.channelId,
-        userId: message.author.id,
-      });
-    }
-  } catch (error) {
-    console.warn("Memory persistence failed:", error);
-  }
+  await persistConversationExchange({ message, question, answer, model });
 }
 
 function parseLegacyCommand(content) {
@@ -704,7 +1556,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           "- `/daily` : 데일리 배치 즉시 실행",
           "- `/stats` : 최신 핵심 지표 요약",
           "- `/help` : 도움말",
-          "채팅 질의는 봇 멘션으로 입력하세요. 예: `@봇 오늘 가입전환율 해석해줘`",
+          "채팅 질의는 봇 멘션으로 입력하세요.",
+          "웹 조사, 노션 페이지/DB 생성·편집, Google Sheet 탭/셀 편집 요청도 멘션으로 처리할 수 있어요.",
+          "예: `@봇 오늘 가입전환율 해석해줘`",
         ].join("\n"),
       });
       return;

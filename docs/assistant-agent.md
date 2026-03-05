@@ -10,6 +10,7 @@
 4. Discord 리포트 전송 + Gemini Pro 전략 리뷰 자동 생성
 5. 멘션 채팅 질의 응답(기본 Pro 라우팅)
 6. Supabase 기반 대화 메모리(요약 + 사실 메모)로 연속 맥락 유지
+7. 멘션 요청으로 웹 조사 / Notion 페이지·DB 생성·편집 / Google Sheet 탭·셀 편집 실행
 
 ## 핵심 정의 (고정)
 - 제외 테스트 유저 ID:
@@ -57,6 +58,9 @@ npm run agent:discord
 - `/help` : 명령 안내
 - 전략/운영 질의는 봇 멘션으로 입력 (`DISCORD_CHAT_CHANNEL_IDS` 설정 시 채널 제한)
   - 예: `@사업 개고수 에이전트 오늘 데이터 해석해줘`
+  - 예: `@사업 개고수 에이전트 경쟁 서비스 최신 동향 웹 조사해줘`
+  - 예: `@사업 개고수 에이전트 노션에 페이지 만들고 제목은 3월 실험안, 본문은 ...`
+  - 예: `@사업 개고수 에이전트 구글시트에 신규 탭 만들고 A1:C1에 헤더 써줘`
 
 ## 필수 환경변수
 `.env.example`에 추가된 키를 설정하세요.
@@ -66,6 +70,8 @@ npm run agent:discord
 - Notion: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`
 - Amplitude: `AMPLITUDE_DASHBOARD_REST_API_KEY`, `AMPLITUDE_DASHBOARD_REST_SECRET`, `AMPLITUDE_SIGNUP_CONVERSION_CHART_ID`
 - Memory(옵션): `ARCHY_MEMORY_ENABLED`, `ARCHY_MEMORY_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_TURNS`, `ARCHY_MEMORY_SUMMARY_KEEP_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES`
+- Tool 실행 기본값(옵션): `NOTION_DEFAULT_PARENT_PAGE_ID`, `NOTION_DEFAULT_DATA_SOURCE_ID`, `ARCHY_TOOL_MAX_CALLS`
+- Web 조사(옵션): `TAVILY_API_KEY` (미설정 시 DuckDuckGo HTML fallback)
 
 ## 참고
 - 데일리 배치는 기본적으로 `전날(targetYmd)` 데이터를 기준으로 집계합니다.
