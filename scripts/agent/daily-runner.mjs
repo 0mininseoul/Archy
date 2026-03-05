@@ -751,11 +751,28 @@ function extractConversionSeries(payload) {
     // Common pattern: { xValues: [...], series: [{ values: [...] }] }
     if (Array.isArray(root.xValues) && Array.isArray(root.series)) {
       const points = [];
-      for (const series of root.series) {
-        const values = series?.values || series?.data || series?.yValues || series?.points || [];
+      for (const rawSeries of root.series) {
+        const values = Array.isArray(rawSeries)
+          ? rawSeries
+          : rawSeries?.values || rawSeries?.data || rawSeries?.yValues || rawSeries?.points || [];
         for (let i = 0; i < Math.min(root.xValues.length, values.length); i += 1) {
           const ymd = toYmdFromUnknownDate(root.xValues[i]);
           const rate = pickRateFromUnknown(values[i]);
+          if (!ymd || rate === null) continue;
+          points.push({ ymd, rate });
+        }
+      }
+      if (points.length > 0) return points;
+    }
+
+    // Pattern: { xValues: [...], series: { "<label>": [...] } }
+    if (Array.isArray(root.xValues) && root.series && typeof root.series === "object" && !Array.isArray(root.series)) {
+      const points = [];
+      for (const rawSeries of Object.values(root.series)) {
+        if (!Array.isArray(rawSeries)) continue;
+        for (let i = 0; i < Math.min(root.xValues.length, rawSeries.length); i += 1) {
+          const ymd = toYmdFromUnknownDate(root.xValues[i]);
+          const rate = pickRateFromUnknown(rawSeries[i]);
           if (!ymd || rate === null) continue;
           points.push({ ymd, rate });
         }
@@ -845,7 +862,13 @@ function describePayloadShape(payload) {
   if (Array.isArray(payload)) return `array(len=${payload.length})`;
   if (typeof payload === "object") {
     const keys = Object.keys(payload).slice(0, 12).join(", ");
-    return `object(keys=${keys || "-"})`;
+    const dataKeys =
+      payload?.data && typeof payload.data === "object"
+        ? Object.keys(payload.data).slice(0, 12).join(", ")
+        : "";
+    return dataKeys
+      ? `object(keys=${keys || "-"}; dataKeys=${dataKeys || "-"})`
+      : `object(keys=${keys || "-"})`;
   }
   return typeof payload;
 }
