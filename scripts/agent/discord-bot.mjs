@@ -58,6 +58,16 @@ function getPositiveInt(value, fallback) {
   return Math.floor(parsed);
 }
 
+function logBotEvent(event, payload = {}) {
+  const line = {
+    ts: new Date().toISOString(),
+    scope: "discord-bot",
+    event,
+    ...payload,
+  };
+  console.log(JSON.stringify(line));
+}
+
 function truncate(value, max = 400) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
@@ -1284,31 +1294,67 @@ function buildStatsEmbed({ report, asOfDate }) {
   return embed;
 }
 
-async function runDailyAndPost() {
-  if (dailyRunInFlight) return dailyRunInFlight;
+async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {}) {
+  if (dailyRunInFlight) {
+    logBotEvent("daily.already_in_flight", { trigger, requestedBy });
+    return dailyRunInFlight;
+  }
 
   dailyRunInFlight = (async () => {
+    const startedAtMs = Date.now();
+    logBotEvent("daily.start", { trigger, requestedBy });
+
     const channel = await client.channels.fetch(DAILY_CHANNEL_ID);
     if (!channel || !channel.isTextBased()) {
       throw new Error("Daily channel is missing or not text-based");
     }
 
-    await channel.send(pickDailyStartMessage());
+    const kickoffMessage = pickDailyStartMessage();
+    await channel.send(kickoffMessage);
+    logBotEvent("daily.kickoff_message_sent", { trigger, requestedBy, message: kickoffMessage });
+
     const report = await runDailyPipeline({
       runDate: new Date(),
       dryRun: false,
       runWeeklyWhenSunday: true,
       skipStrategicReview: false,
     });
+    logBotEvent("daily.pipeline_done", {
+      trigger,
+      requestedBy,
+      runId: report?.runId ?? null,
+      targetYmd: report?.targetYmd ?? null,
+      durationMs: Date.now() - startedAtMs,
+    });
 
     invalidateQuickReportCache();
 
     const embed = buildDailyEmbed({ report, asOfDate: new Date() });
     await channel.send({ embeds: [embed] });
+    logBotEvent("daily.embed_sent", {
+      trigger,
+      requestedBy,
+      runId: report?.runId ?? null,
+      targetYmd: report?.targetYmd ?? null,
+    });
 
     if (report.strategicReview) {
       await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`);
+      logBotEvent("daily.review_sent", {
+        trigger,
+        requestedBy,
+        runId: report?.runId ?? null,
+        reviewLength: report?.strategicReview?.length ?? 0,
+      });
     }
+
+    logBotEvent("daily.complete", {
+      trigger,
+      requestedBy,
+      runId: report?.runId ?? null,
+      targetYmd: report?.targetYmd ?? null,
+      totalDurationMs: Date.now() - startedAtMs,
+    });
 
     return report;
   })();
@@ -1580,7 +1626,7 @@ client.on(Events.ClientReady, async () => {
       "0 0 * * *",
       async () => {
         try {
-          await runDailyAndPost();
+          await runDailyAndPost({ trigger: "schedule" });
         } catch (error) {
           console.error("Scheduled daily run failed:", error);
         }
@@ -1625,9 +1671,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === "daily") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await runDailyAndPost();
-      await interaction.deleteReply().catch(() => {});
+      await interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        content: "데일리 리포트 보내드릴게요.",
+      });
+
+      runDailyAndPost({
+        trigger: "slash",
+        requestedBy: interaction.user?.id || null,
+      }).catch(async (error) => {
+        console.error("Manual daily run failed:", error);
+        await interaction
+          .editReply("데일리 배치 중 오류가 발생했어요. Railway 로그를 확인해 주세요.")
+          .catch(() => {});
+      });
       return;
     }
   } catch (error) {

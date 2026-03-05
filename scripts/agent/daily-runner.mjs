@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
@@ -24,6 +25,50 @@ let projectContextCache = {
   value: "",
   loadedAtMs: 0,
 };
+
+function safeErrorMessage(error) {
+  if (!error) return "unknown";
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function logDailyEvent(event, payload = {}) {
+  const line = {
+    ts: new Date().toISOString(),
+    scope: "daily-runner",
+    event,
+    ...payload,
+  };
+  console.log(JSON.stringify(line));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableGeminiFailure(error, statusCode = null) {
+  if (statusCode && [408, 429, 500, 502, 503, 504].includes(statusCode)) return true;
+
+  const code = error?.cause?.code || error?.code || "";
+  if (typeof code === "string") {
+    const retryableCodes = new Set([
+      "UND_ERR_HEADERS_TIMEOUT",
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_SOCKET",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "EAI_AGAIN",
+    ]);
+    if (retryableCodes.has(code)) return true;
+  }
+
+  const message = safeErrorMessage(error).toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("headers timeout") ||
+    message.includes("timeout")
+  );
+}
 
 function loadDotenvFile(filepath) {
   if (!fsSync.existsSync(filepath)) return;
@@ -1626,47 +1671,83 @@ export async function generateGeminiText({
   userPrompt,
   temperature = 0.2,
   maxOutputTokens = 2048,
+  timeoutMs = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 90000),
+  maxRetries = Number(process.env.GEMINI_REQUEST_MAX_RETRIES || 1),
 }) {
   const apiKey = getEnv("GEMINI_API_KEY");
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${apiKey}`;
+  const retries = Number.isFinite(maxRetries) && maxRetries >= 0 ? Math.floor(maxRetries) : 1;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemInstruction }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userPrompt }],
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    let statusCode = null;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ],
-      generationConfig: {
-        temperature,
-        maxOutputTokens,
-      },
-    }),
-  });
+        signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userPrompt }],
+            },
+          ],
+          generationConfig: {
+            temperature,
+            maxOutputTokens,
+          },
+        }),
+      });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Gemini API failed (${response.status}): ${body}`);
+      statusCode = response.status;
+      if (!response.ok) {
+        const body = await response.text();
+        const httpError = new Error(`Gemini API failed (${response.status}): ${body}`);
+        if (attempt < retries && isRetryableGeminiFailure(httpError, response.status)) {
+          logDailyEvent("gemini.retry", {
+            model,
+            attempt: attempt + 1,
+            maxAttempts: retries + 1,
+            statusCode: response.status,
+          });
+          await sleep(750 * (attempt + 1));
+          continue;
+        }
+        throw httpError;
+      }
+
+      const data = await response.json();
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      const text = parts
+        .map((part) => part?.text)
+        .filter(Boolean)
+        .join("\n");
+
+      return text || "";
+    } catch (error) {
+      if (attempt < retries && isRetryableGeminiFailure(error, statusCode)) {
+        logDailyEvent("gemini.retry", {
+          model,
+          attempt: attempt + 1,
+          maxAttempts: retries + 1,
+          statusCode,
+          error: safeErrorMessage(error),
+        });
+        await sleep(750 * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const data = await response.json();
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  const text = parts
-    .map((part) => part?.text)
-    .filter(Boolean)
-    .join("\n");
-
-  return text || "";
+  throw new Error("Gemini API request failed: exhausted retries");
 }
 
 export function chooseChatModel(messageText) {
@@ -1792,111 +1873,240 @@ export async function runDailyPipeline({
   runWeeklyWhenSunday = true,
   skipStrategicReview = false,
 } = {}) {
+  const runStartedAtMs = Date.now();
   const runYmd = toKstYmd(runDate);
+  const runId = `daily_${runYmd}_${randomUUID().slice(0, 8)}`;
   const targetYmd = forcedTargetYmd || addDays(runYmd, -1);
   const previousYmd = addDays(targetYmd, -1);
 
-  const snapshot = await fetchSupabaseSnapshot();
-  const metrics = buildMetricsForDate(snapshot, targetYmd);
-  const previousMetrics = buildMetricsForDate(snapshot, previousYmd);
+  logDailyEvent("run.start", {
+    runId,
+    runYmd,
+    targetYmd,
+    dryRun,
+    runWeeklyWhenSunday,
+    skipStrategicReview,
+  });
 
-  let amplitudeConversion = null;
   try {
-    amplitudeConversion = await fetchAmplitudeSignupConversion({
-      targetYmd,
-      previousYmd,
+    const supabaseStartedAt = Date.now();
+    const snapshot = await fetchSupabaseSnapshot();
+    logDailyEvent("step.done", {
+      runId,
+      step: "fetch_supabase_snapshot",
+      durationMs: Date.now() - supabaseStartedAt,
+      users: snapshot?.users?.length ?? 0,
+      recordings: snapshot?.recordings?.length ?? 0,
+      customFormats: snapshot?.customFormats?.length ?? 0,
+      withdrawnUsers: snapshot?.withdrawnUsers?.length ?? 0,
     });
-  } catch (error) {
-    amplitudeConversion = {
-      source: "error",
-      currentRate: null,
-      previousRate: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 
-  const dailyLabel = formatKoreanDayLabel(targetYmd);
-  const previousLabel = formatKoreanDayLabel(previousYmd);
+    const metrics = buildMetricsForDate(snapshot, targetYmd);
+    const previousMetrics = buildMetricsForDate(snapshot, previousYmd);
 
-  let previousNotion = null;
-  let previousNotionError = null;
-  if (!dryRun) {
+    let amplitudeConversion = null;
+    const amplitudeStartedAt = Date.now();
     try {
-      previousNotion = await getNotionMetricsByLabel(previousLabel);
+      amplitudeConversion = await fetchAmplitudeSignupConversion({
+        targetYmd,
+        previousYmd,
+      });
+      logDailyEvent("step.done", {
+        runId,
+        step: "fetch_amplitude_signup_conversion",
+        durationMs: Date.now() - amplitudeStartedAt,
+        source: amplitudeConversion?.source ?? null,
+      });
     } catch (error) {
-      previousNotionError = error instanceof Error ? error.message : String(error);
+      amplitudeConversion = {
+        source: "error",
+        currentRate: null,
+        previousRate: null,
+        error: safeErrorMessage(error),
+      };
+      logDailyEvent("step.error", {
+        runId,
+        step: "fetch_amplitude_signup_conversion",
+        durationMs: Date.now() - amplitudeStartedAt,
+        error: safeErrorMessage(error),
+      });
     }
-  }
 
-  let sheetSync = null;
-  let dailyNotionUpsert = null;
-  let weeklyNotionUpsert = null;
+    const dailyLabel = formatKoreanDayLabel(targetYmd);
+    const previousLabel = formatKoreanDayLabel(previousYmd);
 
-  if (!dryRun) {
-    sheetSync = await syncGoogleUserSheet({ metrics, targetYmd });
-    dailyNotionUpsert = await upsertNotionMetricsRow({
-      label: dailyLabel,
-      metrics,
-      conversionRate: amplitudeConversion.currentRate,
-    });
+    let previousNotion = null;
+    let previousNotionError = null;
+    if (!dryRun) {
+      const previousNotionStartedAt = Date.now();
+      try {
+        previousNotion = await getNotionMetricsByLabel(previousLabel);
+        logDailyEvent("step.done", {
+          runId,
+          step: "get_previous_notion_metrics",
+          durationMs: Date.now() - previousNotionStartedAt,
+          found: Boolean(previousNotion),
+        });
+      } catch (error) {
+        previousNotionError = safeErrorMessage(error);
+        logDailyEvent("step.error", {
+          runId,
+          step: "get_previous_notion_metrics",
+          durationMs: Date.now() - previousNotionStartedAt,
+          error: previousNotionError,
+        });
+      }
+    }
 
-    if (runWeeklyWhenSunday && isSundayKst(runDate)) {
-      const weeklyLabel = formatKoreanDayLabel(runYmd);
-      weeklyNotionUpsert = await upsertNotionMetricsRow({
-        label: weeklyLabel,
+    let sheetSync = null;
+    let dailyNotionUpsert = null;
+    let weeklyNotionUpsert = null;
+
+    if (!dryRun) {
+      const sheetSyncStartedAt = Date.now();
+      sheetSync = await syncGoogleUserSheet({ metrics, targetYmd });
+      logDailyEvent("step.done", {
+        runId,
+        step: "sync_google_sheet",
+        durationMs: Date.now() - sheetSyncStartedAt,
+        insertedRows: sheetSync?.insertedRows ?? 0,
+        updatedRows: sheetSync?.updatedRows ?? 0,
+        removedExcludedRows: sheetSync?.removedExcludedRows ?? 0,
+        removedDuplicateRows: sheetSync?.removedDuplicateRows ?? 0,
+      });
+
+      const dailyNotionStartedAt = Date.now();
+      dailyNotionUpsert = await upsertNotionMetricsRow({
+        label: dailyLabel,
         metrics,
         conversionRate: amplitudeConversion.currentRate,
       });
-    }
-  }
-
-  let workProgress = null;
-  let workProgressError = null;
-  try {
-    workProgress = await getWorkProgressContext(targetYmd);
-  } catch (error) {
-    workProgressError = error instanceof Error ? error.message : String(error);
-    workProgress = {
-      found: false,
-      text: `업무 DB 조회 실패: ${workProgressError}`,
-      completed: [],
-      pending: [],
-    };
-  }
-  const strategicReview = skipStrategicReview
-    ? null
-    : await generateDailyStrategicReview({
-        metrics,
-        amplitudeConversion,
-        previousMetrics,
-        workProgress,
-        targetYmd,
+      logDailyEvent("step.done", {
+        runId,
+        step: "upsert_notion_daily",
+        durationMs: Date.now() - dailyNotionStartedAt,
+        mode: dailyNotionUpsert?.mode ?? null,
       });
 
-  const summary = {
-    runYmd,
-    targetYmd,
-    dailyLabel,
-    counts: metrics.counts,
-    rates: metrics.rates,
-    amplitudeConversion,
-    previous: {
-      label: previousLabel,
-      notion: previousNotion,
-      notionError: previousNotionError,
-      fallbackRates: previousMetrics.rates,
-      fallbackCounts: previousMetrics.counts,
-    },
-    sheetSync,
-    dailyNotionUpsert,
-    weeklyNotionUpsert,
-    heavyUserTop3: metrics.heavyUserTop3,
-    workProgress,
-    workProgressError,
-    strategicReview,
-  };
+      if (runWeeklyWhenSunday && isSundayKst(runDate)) {
+        const weeklyLabel = formatKoreanDayLabel(runYmd);
+        const weeklyNotionStartedAt = Date.now();
+        weeklyNotionUpsert = await upsertNotionMetricsRow({
+          label: weeklyLabel,
+          metrics,
+          conversionRate: amplitudeConversion.currentRate,
+        });
+        logDailyEvent("step.done", {
+          runId,
+          step: "upsert_notion_weekly",
+          durationMs: Date.now() - weeklyNotionStartedAt,
+          mode: weeklyNotionUpsert?.mode ?? null,
+        });
+      }
+    }
 
-  return summary;
+    let workProgress = null;
+    let workProgressError = null;
+    const workProgressStartedAt = Date.now();
+    try {
+      workProgress = await getWorkProgressContext(targetYmd);
+      logDailyEvent("step.done", {
+        runId,
+        step: "load_work_progress",
+        durationMs: Date.now() - workProgressStartedAt,
+        found: Boolean(workProgress?.found),
+        completedCount: workProgress?.completed?.length ?? 0,
+        pendingCount: workProgress?.pending?.length ?? 0,
+      });
+    } catch (error) {
+      workProgressError = safeErrorMessage(error);
+      workProgress = {
+        found: false,
+        text: `업무 DB 조회 실패: ${workProgressError}`,
+        completed: [],
+        pending: [],
+      };
+      logDailyEvent("step.error", {
+        runId,
+        step: "load_work_progress",
+        durationMs: Date.now() - workProgressStartedAt,
+        error: workProgressError,
+      });
+    }
+
+    let strategicReview = null;
+    let strategicReviewError = null;
+    if (!skipStrategicReview) {
+      const strategicReviewStartedAt = Date.now();
+      try {
+        strategicReview = await generateDailyStrategicReview({
+          metrics,
+          amplitudeConversion,
+          previousMetrics,
+          workProgress,
+          targetYmd,
+        });
+        logDailyEvent("step.done", {
+          runId,
+          step: "generate_strategic_review",
+          durationMs: Date.now() - strategicReviewStartedAt,
+          reviewLength: strategicReview?.length ?? 0,
+        });
+      } catch (error) {
+        strategicReviewError = safeErrorMessage(error);
+        strategicReview = null;
+        logDailyEvent("step.error", {
+          runId,
+          step: "generate_strategic_review",
+          durationMs: Date.now() - strategicReviewStartedAt,
+          error: strategicReviewError,
+        });
+      }
+    }
+
+    const summary = {
+      runId,
+      runYmd,
+      targetYmd,
+      dailyLabel,
+      counts: metrics.counts,
+      rates: metrics.rates,
+      amplitudeConversion,
+      previous: {
+        label: previousLabel,
+        notion: previousNotion,
+        notionError: previousNotionError,
+        fallbackRates: previousMetrics.rates,
+        fallbackCounts: previousMetrics.counts,
+      },
+      sheetSync,
+      dailyNotionUpsert,
+      weeklyNotionUpsert,
+      heavyUserTop3: metrics.heavyUserTop3,
+      workProgress,
+      workProgressError,
+      strategicReview,
+      strategicReviewError,
+    };
+
+    logDailyEvent("run.done", {
+      runId,
+      targetYmd,
+      durationMs: Date.now() - runStartedAtMs,
+      strategicReviewGenerated: Boolean(strategicReview),
+      strategicReviewError: strategicReviewError ? String(strategicReviewError).slice(0, 180) : null,
+    });
+
+    return summary;
+  } catch (error) {
+    logDailyEvent("run.error", {
+      runId,
+      targetYmd,
+      durationMs: Date.now() - runStartedAtMs,
+      error: safeErrorMessage(error),
+    });
+    throw error;
+  }
 }
 
 export function buildDiscordMetricText(report) {
