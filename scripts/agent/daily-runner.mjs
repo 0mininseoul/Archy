@@ -36,6 +36,50 @@ const STRATEGIC_REVIEW_ERROR_CODES = Object.freeze({
   VALIDATION_FAILED: "validation_failed",
   UNKNOWN: "unknown",
 });
+const STRATEGIC_REVIEW_RESPONSE_JSON_SCHEMA = Object.freeze({
+  type: "object",
+  properties: {
+    business_state: {
+      type: "string",
+      description: "오늘 데이터와 업무 맥락을 종합한 핵심 결론과 함의",
+    },
+    strengths: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 1,
+      maxItems: 3,
+    },
+    risks: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 1,
+      maxItems: 3,
+    },
+    priority_actions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          action: { type: "string" },
+          expected_effect: { type: "string" },
+          why_now: { type: ["string", "null"] },
+        },
+        required: ["action", "expected_effect"],
+        additionalProperties: false,
+      },
+      minItems: 1,
+      maxItems: 5,
+    },
+    data_check_requests: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 0,
+      maxItems: 3,
+    },
+  },
+  required: ["business_state", "strengths", "risks", "priority_actions", "data_check_requests"],
+  additionalProperties: false,
+});
 const STRATEGIC_CONTEXT_COMPRESSION_PROFILES = Object.freeze({
   full: {
     projectContextChars: 7000,
@@ -1983,6 +2027,8 @@ export async function generateGeminiText({
   temperature = 0.2,
   maxOutputTokens = 2048,
   thinkingLevel = null,
+  responseMimeType = null,
+  responseJsonSchema = null,
   timeoutMs = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 90000),
   maxRetries = Number(process.env.GEMINI_REQUEST_MAX_RETRIES || 1),
   onResponseMeta = null,
@@ -2005,6 +2051,12 @@ export async function generateGeminiText({
         generationConfig.thinkingConfig = {
           thinkingLevel: normalizedThinkingLevel,
         };
+      }
+      if (responseMimeType) {
+        generationConfig.responseMimeType = responseMimeType;
+      }
+      if (responseJsonSchema) {
+        generationConfig.responseJsonSchema = responseJsonSchema;
       }
 
       const response = await fetch(endpoint, {
@@ -2110,6 +2162,8 @@ async function generateStrategicReviewText({
   temperature,
   maxOutputTokens,
   thinkingLevel,
+  responseMimeType = "application/json",
+  responseJsonSchema = STRATEGIC_REVIEW_RESPONSE_JSON_SCHEMA,
   timeoutMs,
   maxRetries,
   stageLabel = "strategic_review",
@@ -2123,6 +2177,8 @@ async function generateStrategicReviewText({
     temperature,
     maxOutputTokens,
     thinkingLevel,
+    responseMimeType,
+    responseJsonSchema,
     timeoutMs,
     maxRetries,
     onResponseMeta: (meta) => {
@@ -2141,6 +2197,7 @@ async function generateStrategicReviewText({
         maxOutputTokens,
         timeoutMs,
         thinkingLevel: normalizeThinkingLevel(thinkingLevel, null),
+        responseMimeType,
       });
     },
   });
@@ -2523,7 +2580,12 @@ export async function generateDailyStrategicReview({
   );
   const proMaxOutputTokens = toPositiveInt(
     process.env.GEMINI_STRATEGIC_REVIEW_PRO_MAX_OUTPUT_TOKENS,
-    3072,
+    5120,
+    { min: 512, max: 8192 }
+  );
+  const proRetryMaxOutputTokens = toPositiveInt(
+    process.env.GEMINI_STRATEGIC_REVIEW_PRO_RETRY_MAX_OUTPUT_TOKENS,
+    Math.max(proMaxOutputTokens, 6144),
     { min: 512, max: 8192 }
   );
   const flashMaxOutputTokens = toPositiveInt(
@@ -2531,7 +2593,7 @@ export async function generateDailyStrategicReview({
     2048,
     { min: 512, max: 8192 }
   );
-  const proTimeoutMs = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS, 70000, {
+  const proTimeoutMs = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS, 90000, {
     min: 10000,
     max: 180000,
   });
@@ -2566,6 +2628,7 @@ export async function generateDailyStrategicReview({
       maxOutputTokens: proMaxOutputTokens,
       timeoutMs: proTimeoutMs,
       thinkingLevel: proThinkingLevel,
+      allowJsonRetryBoost: true,
     },
     {
       id: "pro_compact",
@@ -2574,6 +2637,7 @@ export async function generateDailyStrategicReview({
       maxOutputTokens: proMaxOutputTokens,
       timeoutMs: proTimeoutMs,
       thinkingLevel: proThinkingLevel,
+      allowJsonRetryBoost: true,
     },
     {
       id: "flash_compact",
@@ -2582,6 +2646,7 @@ export async function generateDailyStrategicReview({
       maxOutputTokens: flashMaxOutputTokens,
       timeoutMs: flashTimeoutMs,
       thinkingLevel: flashThinkingLevel,
+      allowJsonRetryBoost: false,
     },
     {
       id: "flash_ultra",
@@ -2590,6 +2655,7 @@ export async function generateDailyStrategicReview({
       maxOutputTokens: flashMaxOutputTokens,
       timeoutMs: 45000,
       thinkingLevel: flashThinkingLevel,
+      allowJsonRetryBoost: false,
     },
   ];
 
@@ -2682,7 +2748,105 @@ export async function generateDailyStrategicReview({
       logDailyEvent("strategic_review.profile_schema_invalid", {
         profileId: profile.id,
         reason: parsed.reason,
+        finishReason: modelResult?.finishReason || null,
+        candidateTokens: candidateTokens ?? null,
       });
+
+      const shouldRetryWithBoost =
+        profile.allowJsonRetryBoost &&
+        profile.model === GEMINI_PRO_MODEL &&
+        parsed.reason === "json_parse_failed" &&
+        modelResult?.finishReason === "MAX_TOKENS" &&
+        profile.maxOutputTokens < proRetryMaxOutputTokens;
+      if (shouldRetryWithBoost) {
+        const retryRemainingMs = deadlineMs - Date.now();
+        if (retryRemainingMs > 1500) {
+          const retryTimeoutMs = Math.max(1000, Math.min(profile.timeoutMs, retryRemainingMs - 500));
+          logDailyEvent("strategic_review.profile_retry_start", {
+            profileId: profile.id,
+            retryKind: "json_parse_after_max_tokens",
+            retryMaxOutputTokens: proRetryMaxOutputTokens,
+            retryTimeoutMs,
+            remainingMs: retryRemainingMs,
+          });
+          try {
+            const retryResult = await generateStrategicReviewText({
+              model: profile.model,
+              systemInstruction,
+              userPrompt,
+              temperature,
+              maxOutputTokens: proRetryMaxOutputTokens,
+              thinkingLevel: profile.thinkingLevel,
+              timeoutMs: retryTimeoutMs,
+              maxRetries,
+              stageLabel: `strategic_review.${profile.id}.retry_boost`,
+              profileId: `${profile.id}_retry`,
+            });
+            const retryCandidateTokens = toFiniteNumber(retryResult?.candidateTokens, null);
+            if (
+              retryResult?.finishReason === "MAX_TOKENS" &&
+              retryCandidateTokens !== null &&
+              retryCandidateTokens < minCandidateTokens
+            ) {
+              maxTokensShortCount += 1;
+              lastFailure = `max_tokens_short_output_retry(${retryCandidateTokens})`;
+              logDailyEvent("strategic_review.profile_short_output", {
+                profileId: `${profile.id}_retry`,
+                finishReason: retryResult.finishReason,
+                candidateTokens: retryCandidateTokens,
+                minCandidateTokens,
+              });
+              continue;
+            }
+
+            const retryParsed = parseStrategicReviewJson(retryResult?.text || "");
+            if (!retryParsed.ok) {
+              schemaInvalidCount += 1;
+              lastFailure = `retry:${retryParsed.reason}`;
+              logDailyEvent("strategic_review.profile_schema_invalid", {
+                profileId: `${profile.id}_retry`,
+                reason: retryParsed.reason,
+                finishReason: retryResult?.finishReason || null,
+                candidateTokens: retryCandidateTokens ?? null,
+              });
+              continue;
+            }
+
+            const retryRendered = renderStrategicReviewMarkdown(retryParsed.value);
+            const retryAnalysis = analyzeStrategicReview(retryRendered);
+            if (retryAnalysis.needsContinuation) {
+              validationFailureCount += 1;
+              lastValidationReasons = retryAnalysis.reasons;
+              lastFailure = `validation_retry:${retryAnalysis.reasons.join(",")}`;
+              logDailyEvent("strategic_review.profile_validation_failed", {
+                profileId: `${profile.id}_retry`,
+                reasons: retryAnalysis.reasons,
+                reviewLength: retryAnalysis.length,
+                actionCount: retryAnalysis.actionCount,
+              });
+              continue;
+            }
+
+            logDailyEvent("strategic_review.profile_success", {
+              profileId: `${profile.id}_retry`,
+              durationMs: Date.now() - startedAtMs,
+              reviewLength: retryRendered.length,
+            });
+            return retryRendered;
+          } catch (error) {
+            const message = safeErrorMessage(error).toLowerCase();
+            if (message.includes("timeout") || message.includes("aborted")) {
+              timeoutCount += 1;
+            }
+            lastFailure = `retry_error:${safeErrorMessage(error)}`;
+            logDailyEvent("strategic_review.profile_error", {
+              profileId: `${profile.id}_retry`,
+              model: profile.model,
+              reason: safeErrorMessage(error).slice(0, 180),
+            });
+          }
+        }
+      }
       continue;
     }
 
