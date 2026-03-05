@@ -19,6 +19,7 @@ import {
   buildDiscordMetricText,
   chooseChatModel,
   generateGeminiText,
+  getWorkProgressContext,
   runDailyPipeline,
   toKstYmd,
 } from "./daily-runner.mjs";
@@ -759,7 +760,7 @@ function normalizePlannedToolCalls(plan) {
     .filter(Boolean);
 }
 
-async function planToolCalls({ question, memoryContext }) {
+async function planToolCalls({ question, memoryContext, workProgressText }) {
   const plannerPrompt = [
     "사용자 요청을 보고 툴 실행 계획을 JSON으로만 출력해라.",
     "출력 형식:",
@@ -783,6 +784,9 @@ async function planToolCalls({ question, memoryContext }) {
     "",
     "[대화 장기 메모 요약]",
     memoryContext?.summaryText || "(없음)",
+    "",
+    "[실시간 업무 진행상황]",
+    workProgressText || "(없음)",
     "",
     "[사용자 요청]",
     question,
@@ -870,12 +874,12 @@ async function buildToolWorkflowResponse({ question, systemInstruction, plan, ex
   return `요청 작업 실행 결과: 성공 ${successCount}건, 실패 ${failCount}건`;
 }
 
-async function maybeHandleToolWorkflow({ question, memoryContext, systemInstruction }) {
+async function maybeHandleToolWorkflow({ question, memoryContext, workProgressText, systemInstruction }) {
   if (!shouldUseToolWorkflow(question)) {
     return { handled: false, response: null };
   }
 
-  const plan = await planToolCalls({ question, memoryContext });
+  const plan = await planToolCalls({ question, memoryContext, workProgressText });
   const toolCalls = normalizePlannedToolCalls(plan);
 
   if (toolCalls.length === 0) {
@@ -1015,6 +1019,7 @@ const CHAT_CHANNEL_IDS = new Set(
 );
 
 const CHAT_REPORT_CACHE_SECONDS = getPositiveInt(process.env.ARCHY_CHAT_REPORT_CACHE_SECONDS, 300);
+const WORK_CONTEXT_CACHE_SECONDS = getPositiveInt(process.env.ARCHY_WORK_CONTEXT_CACHE_SECONDS, 300);
 const MEMORY_RECENT_TURNS = getPositiveInt(process.env.ARCHY_MEMORY_RECENT_TURNS, 12);
 const MEMORY_SUMMARY_MIN_TURNS = getPositiveInt(process.env.ARCHY_MEMORY_SUMMARY_MIN_TURNS, 24);
 const MEMORY_SUMMARY_KEEP_RECENT_TURNS = getPositiveInt(
@@ -1047,9 +1052,14 @@ const client = new Client({
 
 let dailyRunInFlight = null;
 const quickReportCache = new Map();
+const workProgressCache = new Map();
 
 function invalidateQuickReportCache() {
   quickReportCache.clear();
+}
+
+function invalidateWorkProgressCache() {
+  workProgressCache.clear();
 }
 
 async function getCachedQuickReport({ targetYmd = null } = {}) {
@@ -1074,6 +1084,22 @@ async function getCachedQuickReport({ targetYmd = null } = {}) {
   });
 
   return report;
+}
+
+async function getCachedWorkProgress({ targetYmd = null } = {}) {
+  const key = targetYmd || "__today__";
+  const now = Date.now();
+  const cached = workProgressCache.get(key);
+  if (cached?.value && now < cached.expiresAt) {
+    return cached.value;
+  }
+
+  const value = await getWorkProgressContext(targetYmd || toKstYmd(new Date()));
+  workProgressCache.set(key, {
+    value,
+    expiresAt: now + WORK_CONTEXT_CACHE_SECONDS * 1000,
+  });
+  return value;
 }
 
 function formatKstDateTime(input = new Date()) {
@@ -1352,6 +1378,7 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
     });
 
     invalidateQuickReportCache();
+    invalidateWorkProgressCache();
 
     const embed = buildDailyEmbed({ report, asOfDate: new Date() });
     await channel.send({ embeds: [embed] });
@@ -1533,6 +1560,20 @@ async function persistConversationExchange({ message, question, answer, model })
 async function answerAdvisorQuestion(message, question) {
   const model = chooseChatModel(question);
   const quickReport = await getCachedQuickReport();
+  const liveWorkYmd = toKstYmd(new Date());
+  let liveWorkProgress = null;
+  try {
+    liveWorkProgress = await getCachedWorkProgress({ targetYmd: liveWorkYmd });
+  } catch (error) {
+    console.warn("live work progress lookup failed:", error);
+    liveWorkProgress = {
+      found: false,
+      text: `실시간 업무 진행상황 조회 실패: ${error instanceof Error ? error.message : String(error)}`,
+      completed: [],
+      pending: [],
+      ascentum: { edits: [] },
+    };
+  }
 
   const memory = await getConversationMemory({
     guildId: message.guild.id,
@@ -1548,6 +1589,7 @@ async function answerAdvisorQuestion(message, question) {
   const toolWorkflow = await maybeHandleToolWorkflow({
     question,
     memoryContext,
+    workProgressText: liveWorkProgress?.text || "",
     systemInstruction,
   });
   if (toolWorkflow.handled && toolWorkflow.response) {
@@ -1561,6 +1603,55 @@ async function answerAdvisorQuestion(message, question) {
     return;
   }
 
+  if (liveWorkProgress?.found) {
+    const liveEdits = (liveWorkProgress?.ascentum?.edits || [])
+      .slice(0, 3)
+      .map((item) => `${item.type}:${String(item.text || "").slice(0, 40)}`)
+      .join(" | ");
+    void upsertMemoryFacts({
+      guildId: message.guild.id,
+      userId: message.author.id,
+      facts: [
+        {
+          key: "work_progress_target_ymd",
+          value: liveWorkYmd,
+          type: "status",
+          confidence: 0.95,
+        },
+        {
+          key: "work_progress_page_title",
+          value: liveWorkProgress?.page?.title || "(제목 없음)",
+          type: "status",
+          confidence: 0.9,
+        },
+        {
+          key: "work_progress_completed_count",
+          value: String(liveWorkProgress?.completed?.length || 0),
+          type: "status",
+          confidence: 0.9,
+        },
+        {
+          key: "work_progress_pending_count",
+          value: String(liveWorkProgress?.pending?.length || 0),
+          type: "status",
+          confidence: 0.9,
+        },
+        ...(liveEdits
+          ? [
+              {
+                key: "ascentum_recent_edits",
+                value: liveEdits,
+                type: "status",
+                confidence: 0.7,
+              },
+            ]
+          : []),
+      ],
+    }).catch((error) => {
+      console.warn("work progress memory upsert failed:", error);
+    });
+  }
+
   const prompt = [
     `현재 시각(KST): ${new Date().toISOString()} / KST 날짜: ${toKstYmd(new Date())}`,
     "아래 컨텍스트를 바탕으로 질문에 답해라.",
@@ -1571,6 +1662,8 @@ async function answerAdvisorQuestion(message, question) {
     memoryContext.factsText,
     "[최근 대화]",
     memoryContext.turnsText,
+    "[실시간 업무 진행상황]",
+    liveWorkProgress?.text || "업무 진행상황 조회 실패",
     "[최신 데일리 집계 요약(JSON)]",
     JSON.stringify(
       {
@@ -1584,6 +1677,14 @@ async function answerAdvisorQuestion(message, question) {
           completedCount: quickReport.workProgress?.completed?.length || 0,
           pendingCount: quickReport.workProgress?.pending?.length || 0,
           summary: quickReport.workProgress?.text || "",
+        },
+        liveWorkProgress: {
+          targetYmd: liveWorkYmd,
+          found: liveWorkProgress?.found || false,
+          completedCount: liveWorkProgress?.completed?.length || 0,
+          pendingCount: liveWorkProgress?.pending?.length || 0,
+          summary: liveWorkProgress?.text || "",
+          ascentumRecentEditCount: liveWorkProgress?.ascentum?.edits?.length || 0,
         },
       },
       null,

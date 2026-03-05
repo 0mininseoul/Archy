@@ -1370,6 +1370,28 @@ function getNotionUserMetricsDatabaseId() {
   return getEnv("NOTION_USER_METRICS_DATABASE_ID");
 }
 
+function normalizeNotionId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const fromUuid = raw.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (fromUuid) return fromUuid[0].toLowerCase();
+
+  const compact = raw.match(/[0-9a-f]{32}/i);
+  if (compact) {
+    const s = compact[0].toLowerCase();
+    return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+  }
+
+  return raw;
+}
+
+function extractNotionPageTitle(page) {
+  const titleProperty = Object.values(page?.properties || {}).find(
+    (property) => property && typeof property === "object" && property.type === "title"
+  );
+  return titleProperty?.title?.map((segment) => segment.plain_text).join("") || "";
+}
+
 const notionMetricsDataSourceCache = {
   key: null,
   dataSourceId: null,
@@ -1505,40 +1527,55 @@ export async function getNotionMetricsByLabel(label) {
 }
 
 async function readWorkDbTargetPage(notion, targetYmd) {
-  const searchWithObjectType = async (objectType) =>
-    notion.search({
-      query: "업무 DB",
-      filter: { property: "object", value: objectType },
-      page_size: 10,
-    });
+  const resolveWorkDataSourceId = async () => {
+    const configured = normalizeNotionId(getEnv("NOTION_WORK_DB_DATA_SOURCE_ID", { optional: true, fallback: "" }));
+    if (configured) {
+      try {
+        const dataSource = await notion.dataSources.retrieve({ data_source_id: configured });
+        if (dataSource?.id) return dataSource.id;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `NOTION_WORK_DB_DATA_SOURCE_ID 접근 실패: ${configured}. integration 공유 여부 확인 필요. 원인: ${message}`
+        );
+      }
+    }
 
-  let search = null;
-  try {
-    // Newer Notion API object filter prefers "data_source".
-    search = await searchWithObjectType("data_source");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("body failed validation")) throw error;
+    const searchWithObjectType = async (objectType) =>
+      notion.search({
+        query: "업무 DB",
+        filter: { property: "object", value: objectType },
+        page_size: 10,
+      });
 
-    // Backward-compatible fallback for older API behavior.
-    search = await searchWithObjectType("database");
-  }
+    let search = null;
+    try {
+      // Newer Notion API object filter prefers "data_source".
+      search = await searchWithObjectType("data_source");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("body failed validation")) throw error;
 
-  const collection =
-    search?.results?.find((item) => item.object === "data_source") ||
-    search?.results?.find((item) => item.object === "database") ||
-    null;
+      // Backward-compatible fallback for older API behavior.
+      search = await searchWithObjectType("database");
+    }
 
-  if (!collection) return null;
+    const collection =
+      search?.results?.find((item) => item.object === "data_source") ||
+      search?.results?.find((item) => item.object === "database") ||
+      null;
+    if (!collection) return null;
+
+    if (collection.object === "data_source") return collection.id;
+    if (collection.object === "database") {
+      const db = await notion.databases.retrieve({ database_id: collection.id });
+      return db?.data_sources?.[0]?.id || null;
+    }
+    return null;
+  };
 
   const token = targetYmd.slice(2).replaceAll("-", ""); // 2026-03-04 -> 260304
-  let workDataSourceId = null;
-  if (collection.object === "data_source") {
-    workDataSourceId = collection.id;
-  } else if (collection.object === "database") {
-    const db = await notion.databases.retrieve({ database_id: collection.id });
-    workDataSourceId = db?.data_sources?.[0]?.id || null;
-  }
+  const workDataSourceId = await resolveWorkDataSourceId();
   if (!workDataSourceId) return null;
 
   const pages = await notion.dataSources.query({
@@ -1547,21 +1584,13 @@ async function readWorkDbTargetPage(notion, targetYmd) {
     sorts: [{ direction: "descending", timestamp: "created_time" }],
   });
 
-  const extractTitle = (page) => {
-    const titleProperty = Object.values(page.properties || {}).find(
-      (property) => property && typeof property === "object" && property.type === "title"
-    );
-    const text = titleProperty?.title?.map((segment) => segment.plain_text).join("") || "";
-    return text;
-  };
-
   const candidate =
-    pages.results.find((page) => extractTitle(page).includes(token)) ||
+    pages.results.find((page) => extractNotionPageTitle(page).includes(token)) ||
     pages.results[0] ||
     null;
 
   if (!candidate) return null;
-  return { pageId: candidate.id, title: extractTitle(candidate), url: candidate.url };
+  return { pageId: candidate.id, title: extractNotionPageTitle(candidate), url: candidate.url };
 }
 
 async function collectTodoBlocks(notion, blockId, out = []) {
@@ -1589,15 +1618,173 @@ async function collectTodoBlocks(notion, blockId, out = []) {
   return out;
 }
 
+function extractBlockText(block) {
+  if (!block || !block.type) return "";
+
+  const typed = block[block.type];
+  if (typed && Array.isArray(typed.rich_text)) {
+    const richText = typed.rich_text.map((segment) => segment.plain_text).join("").trim();
+    if (richText) return richText;
+  }
+
+  if (block.type === "child_page") return block.child_page?.title || "";
+  if (block.type === "to_do") {
+    return (block.to_do?.rich_text || []).map((segment) => segment.plain_text).join("").trim();
+  }
+  if (block.type === "code") {
+    const codeText = (block.code?.rich_text || []).map((segment) => segment.plain_text).join("").trim();
+    return codeText;
+  }
+  return "";
+}
+
+async function collectRecentEditedBlocks(
+  notion,
+  rootBlockId,
+  { limit = 8, maxBlocks = 400, maxDepth = 6 } = {}
+) {
+  const queue = [{ blockId: rootBlockId, depth: 0 }];
+  const collected = [];
+  let scanned = 0;
+
+  while (queue.length > 0 && scanned < maxBlocks) {
+    const current = queue.shift();
+    if (!current) break;
+
+    let cursor = undefined;
+    while (scanned < maxBlocks) {
+      const result = await notion.blocks.children.list({
+        block_id: current.blockId,
+        start_cursor: cursor,
+        page_size: 100,
+      });
+
+      for (const block of result.results) {
+        scanned += 1;
+        const text = extractBlockText(block);
+        collected.push({
+          id: block.id,
+          type: block.type,
+          text: text || `(텍스트 없음: ${block.type})`,
+          lastEdited: block.last_edited_time || null,
+        });
+
+        if (block.has_children && current.depth < maxDepth && scanned < maxBlocks) {
+          queue.push({ blockId: block.id, depth: current.depth + 1 });
+        }
+        if (scanned >= maxBlocks) break;
+      }
+
+      if (!result.has_more || !result.next_cursor || scanned >= maxBlocks) break;
+      cursor = result.next_cursor;
+    }
+  }
+
+  const seen = new Set();
+  return collected
+    .filter((item) => Boolean(item.lastEdited))
+    .sort((a, b) => new Date(b.lastEdited).getTime() - new Date(a.lastEdited).getTime())
+    .filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+async function resolveAscentumPage(notion) {
+  const configured = normalizeNotionId(getEnv("NOTION_ASCENTUM_PAGE_ID", { optional: true, fallback: "" }));
+  if (configured) {
+    const page = await notion.pages.retrieve({ page_id: configured });
+    return {
+      id: page.id,
+      title: extractNotionPageTitle(page) || "Ascentum",
+      url: page.url || "",
+      lastEdited: page.last_edited_time || null,
+    };
+  }
+
+  const search = await notion.search({
+    query: "Ascentum",
+    filter: { property: "object", value: "page" },
+    page_size: 10,
+  });
+  const candidate =
+    search.results.find((item) => extractNotionPageTitle(item).toLowerCase().includes("ascentum")) ||
+    search.results[0] ||
+    null;
+  if (!candidate) return null;
+
+  return {
+    id: candidate.id,
+    title: extractNotionPageTitle(candidate) || "Ascentum",
+    url: candidate.url || "",
+    lastEdited: candidate.last_edited_time || null,
+  };
+}
+
+async function getAscentumRecentEditContext(notion) {
+  try {
+    const page = await resolveAscentumPage(notion);
+    if (!page) {
+      return {
+        found: false,
+        text: "Ascentum 페이지를 찾지 못했습니다.",
+        edits: [],
+      };
+    }
+
+    const recentEdits = await collectRecentEditedBlocks(notion, page.id, {
+      limit: 8,
+      maxBlocks: 350,
+      maxDepth: 6,
+    });
+
+    const lines = [];
+    lines.push(`Ascentum 페이지: ${page.title}`);
+    if (page.lastEdited) {
+      lines.push(`Ascentum 페이지 최근 수정: ${page.lastEdited}`);
+    }
+    if (recentEdits.length > 0) {
+      lines.push("Ascentum 최근 편집 블록:");
+      lines.push(
+        ...recentEdits.map(
+          (edit, idx) =>
+            `${idx + 1}. [${edit.lastEdited}] (${edit.type}) ${String(edit.text || "").slice(0, 140)}`
+        )
+      );
+    } else {
+      lines.push("Ascentum 최근 편집 블록을 찾지 못했습니다.");
+    }
+
+    return {
+      found: true,
+      page,
+      edits: recentEdits,
+      text: lines.join("\n"),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      found: false,
+      text: `Ascentum 최근 편집 조회 실패: ${message}`,
+      edits: [],
+    };
+  }
+}
+
 export async function getWorkProgressContext(targetYmd) {
   const notion = getNotionClient();
   const page = await readWorkDbTargetPage(notion, targetYmd);
+  const ascentum = await getAscentumRecentEditContext(notion);
   if (!page) {
+    const missingText = ["업무 DB 페이지를 찾지 못했습니다.", "", `[Ascentum 맥락]\n${ascentum.text}`].join("\n");
     return {
       found: false,
-      text: "업무 DB 페이지를 찾지 못했습니다.",
+      text: missingText,
       completed: [],
       pending: [],
+      ascentum,
     };
   }
 
@@ -1621,11 +1808,16 @@ export async function getWorkProgressContext(targetYmd) {
     lines.push(...pending.slice(0, 20).map((item, idx) => `${idx + 1}. ${item}`));
   }
 
+  lines.push("");
+  lines.push("[Ascentum 맥락]");
+  lines.push(ascentum.text);
+
   return {
     found: true,
     page,
     completed,
     pending,
+    ascentum,
     text: lines.join("\n"),
   };
 }
