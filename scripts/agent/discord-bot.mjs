@@ -77,6 +77,8 @@ function logBotEvent(event, payload = {}) {
     scope: "discord-bot",
     event,
     ...payload,
+    level: "info",
+    message: `discord-bot.${event}`,
   };
   console.log(JSON.stringify(line));
 }
@@ -2006,14 +2008,27 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
     });
 
     if (report.strategicReview) {
-      const reviewSend = await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`);
-      logBotEvent("daily.review_sent", {
-        trigger,
-        requestedBy,
-        runId: report?.runId ?? null,
-        reviewLength: report?.strategicReview?.length ?? 0,
-        chunkCount: reviewSend?.chunkCount ?? 1,
-      });
+      try {
+        const reviewSend = await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`, {
+          withSequence: true,
+          traceId: report?.runId ?? null,
+        });
+        logBotEvent("daily.review_sent", {
+          trigger,
+          requestedBy,
+          runId: report?.runId ?? null,
+          reviewLength: report?.strategicReview?.length ?? 0,
+          chunkCount: reviewSend?.chunkCount ?? 1,
+        });
+      } catch (error) {
+        logBotEvent("daily.review_send_error", {
+          trigger,
+          requestedBy,
+          runId: report?.runId ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await channel.send("전략 리뷰 전송 중 일부 메시지가 누락됐어요. `/daily`로 다시 요청해주면 재전송할게요.");
+      }
     } else if (report.strategicReviewError) {
       await channel.send("전략 리뷰는 모델 응답 지연으로 이번 배치에서 생략됐어요. `/daily`로 다시 요청해주면 재시도할게요.");
       logBotEvent("daily.review_skipped", {
@@ -2395,6 +2410,10 @@ async function registerSlashCommands() {
 
 client.on(Events.ClientReady, async () => {
   console.log(`Discord bot ready: ${client.user?.tag}`);
+  logBotEvent("bot.ready", {
+    userTag: client.user?.tag || null,
+    scheduleKst: "00:05",
+  });
 
   if (GUILD_ID) {
     console.log(`Scoped guild: ${GUILD_ID}`);
@@ -2455,6 +2474,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.commandName === "daily") {
+      logBotEvent("daily.command_received", {
+        trigger: "slash",
+        requestedBy: interaction.user?.id || null,
+        guildId: interaction.guildId || null,
+        channelId: interaction.channelId || null,
+      });
       await interaction.reply({
         flags: MessageFlags.Ephemeral,
         content: "데일리 리포트 보내드릴게요.",

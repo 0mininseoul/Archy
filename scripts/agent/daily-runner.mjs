@@ -45,6 +45,8 @@ function logDailyEvent(event, payload = {}) {
     scope: "daily-runner",
     event,
     ...payload,
+    level: "info",
+    message: `daily-runner.${event}`,
   };
   console.log(JSON.stringify(line));
 }
@@ -2047,18 +2049,37 @@ function needsStrategicReviewContinuation(text) {
   if (/[0-9]\.\s*$/.test(body)) return true;
   if (/[:,;(\-*]\s*$/.test(body)) return true;
 
-  const hasActionSection = body.includes("우선순위 액션");
-  if (!hasActionSection) return false;
+  const sectionChecks = [
+    { index: 1, keyword: "사업 상태" },
+    { index: 2, keyword: "잘된 점" },
+    { index: 3, keyword: "리스크" },
+    { index: 4, keyword: "우선순위 액션" },
+  ];
+  const missingRequiredSection = sectionChecks.some(({ index, keyword }) => {
+    const pattern = new RegExp(`(^|\\n)\\s*(?:\\*{1,2})?${index}[\\)\\.]\\s*[^\\n]*${keyword}`);
+    return !pattern.test(body);
+  });
+  if (missingRequiredSection) return true;
 
   const lines = body
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.trim().replace(/^\*{1,2}\s*/, "").replace(/\s*\*{1,2}$/, ""))
     .filter(Boolean);
 
   if (lines.some((line) => /^[1-5]\.\s*$/.test(line))) return true;
 
-  const actionLines = lines.filter((line) => /^[1-5]\.\s+/.test(line));
-  if (actionLines.length === 0 || actionLines.length > 5) return true;
+  const actionHeaderIndex = lines.findIndex(
+    (line) => /^[4][\)\.]\s*/.test(line) && line.includes("우선순위 액션")
+  );
+  if (actionHeaderIndex < 0) return true;
+
+  const restAfterActionHeader = lines.slice(actionHeaderIndex + 1);
+  const nextSectionIndex = restAfterActionHeader.findIndex((line) => /^[5][\)\.]\s*/.test(line));
+  const actionSectionLines =
+    nextSectionIndex >= 0 ? restAfterActionHeader.slice(0, nextSectionIndex) : restAfterActionHeader;
+
+  const actionLines = actionSectionLines.filter((line) => /^[1-5][\)\.]\s+\S/.test(line));
+  if (actionLines.length < 1 || actionLines.length > 5) return true;
 
   return false;
 }
