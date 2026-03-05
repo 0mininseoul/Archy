@@ -65,6 +65,10 @@ npm run agent:discord
   - 예: `@사업 개고수 에이전트 경쟁 서비스 최신 동향 웹 조사해줘`
   - 예: `@사업 개고수 에이전트 노션에 페이지 만들고 제목은 3월 실험안, 본문은 ...`
   - 예: `@사업 개고수 에이전트 구글시트에 신규 탭 만들고 A1:C1에 헤더 써줘`
+- Notion 자동 라우팅 정책:
+  - 일반 Notion 생성 요청은 `ARCHY_NOTION_MAIN_PAGE_URL` 하위에 페이지 생성
+  - 날짜 표현 + 업무 표현(예: `내일 해야 할 업무`) 요청은 `NOTION_WORK_DB_DATA_SOURCE_ID`에 아이템 생성
+  - 날짜를 인식하지 못하면 업무 DB 생성 실패 안내를 반환 (메인 페이지로 폴백하지 않음)
 - `/daily` 실행 UX:
   - 슬래시 호출 직후 에페메랄 확인 응답
   - 실제 리포트/전략리뷰는 데일리 채널(`DISCORD_DAILY_CHANNEL_ID`)로 전송
@@ -77,11 +81,14 @@ npm run agent:discord
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 - Google Sheets 동기화 모드(옵션): `ARCHY_SHEET_SYNC_ALL_USERS` (기본 `true`)
 - Notion: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`
-- 업무 맥락 추적(Notion, 권장): `NOTION_WORK_DB_DATA_SOURCE_ID`, `NOTION_ASCENTUM_PAGE_ID`
+- 업무 맥락 추적(Notion): `NOTION_WORK_DB_DATA_SOURCE_ID`, `NOTION_ASCENTUM_PAGE_ID`
+  - `NOTION_WORK_DB_DATA_SOURCE_ID`는 날짜성 업무 요청 자동 생성 기능에 필수
 - Amplitude: `AMPLITUDE_DASHBOARD_REST_API_KEY`, `AMPLITUDE_DASHBOARD_REST_SECRET`, `AMPLITUDE_SIGNUP_CONVERSION_CHART_ID`
 - Memory(옵션): `ARCHY_MEMORY_ENABLED`, `ARCHY_MEMORY_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_TURNS`, `ARCHY_MEMORY_SUMMARY_KEEP_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES`
 - 멘션 업무맥락 캐시(옵션): `ARCHY_WORK_CONTEXT_CACHE_SECONDS`
 - Tool 실행 기본값(옵션): `NOTION_DEFAULT_PARENT_PAGE_ID`, `NOTION_DEFAULT_DATA_SOURCE_ID`, `ARCHY_TOOL_MAX_CALLS`
+- Notion 자동 라우팅(옵션): `ARCHY_NOTION_MAIN_PAGE_URL`, `ARCHY_NOTION_MAIN_PAGE_ALIASES`
+- Tool planner/summary 타임아웃(옵션): `ARCHY_TOOL_PLANNER_TIMEOUT_MS`, `ARCHY_TOOL_PLANNER_MAX_RETRIES`, `ARCHY_TOOL_SUMMARY_TIMEOUT_MS`, `ARCHY_TOOL_SUMMARY_MAX_RETRIES`
 - Web 조사(옵션): `TAVILY_API_KEY` (미설정 시 DuckDuckGo HTML fallback)
 
 ## 참고
@@ -95,6 +102,7 @@ npm run agent:discord
   - 데일리 리포트는 정상 전송
   - 전략 리뷰는 생략 안내 메시지를 전송
 - 긴 전략 리뷰는 Discord 길이 제한(2000자) 대응을 위해 자동 분할 전송합니다.
+- 멘션 응답도 길이 제한(2000자)을 고려해 자동 분할 전송하며, `reply.chunk.sent/fail` 로그로 추적합니다.
 - 업무 맥락은 멘션 응답 시 실시간으로 Notion에서 조회되고, 요약값은 Supabase `agent_memory_facts`에도 저장됩니다.
 - Railway 로그에는 `scope=daily-runner|discord-bot` JSON 구조 로그가 남아 run/step 단위 추적이 가능합니다.
 - 슬래시 명령 반영이 늦으면 봇 재초대(Scopes: `bot`, `applications.commands`) 후 확인하세요.

@@ -10,6 +10,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import cron from "node-cron";
+import { randomUUID } from "node:crypto";
 import { google } from "googleapis";
 import { Client as NotionClient } from "@notionhq/client";
 
@@ -56,6 +57,13 @@ function getPositiveInt(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   if (parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function getNonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < 0) return fallback;
   return Math.floor(parsed);
 }
 
@@ -112,6 +120,11 @@ function shouldUseToolWorkflow(question) {
     "sheet",
     "스프레드시트",
     "tab 추가",
+    "할 일",
+    "할일",
+    "todo",
+    "업무",
+    "작업",
   ];
   return keywords.some((keyword) => text.includes(keyword));
 }
@@ -142,6 +155,181 @@ function parseSpreadsheetId(input) {
   const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if (match?.[1]) return match[1];
   return raw;
+}
+
+function normalizeNotionId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const fromUuid = raw.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (fromUuid) return fromUuid[0].toLowerCase();
+
+  const compact = raw.match(/[0-9a-f]{32}/i);
+  if (compact) {
+    const s = compact[0].toLowerCase();
+    return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+  }
+
+  return raw;
+}
+
+function kstNowParts(input = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  })
+    .formatToParts(input)
+    .reduce((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: weekdayMap[parts.weekday] ?? 0,
+  };
+}
+
+function isValidDateParts(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function formatYmd(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function addDaysYmd(ymd, deltaDays) {
+  const [y, m, d] = String(ymd)
+    .split("-")
+    .map((n) => Number(n));
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return formatYmd(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+}
+
+function detectTaskKeyword(question) {
+  const text = String(question || "").toLowerCase();
+  const taskKeywords = ["해야", "해야 할", "할 일", "할일", "업무", "작업", "todo"];
+  return taskKeywords.some((keyword) => text.includes(keyword));
+}
+
+function isNotionCreationRequest(question) {
+  const text = String(question || "");
+  const lowered = text.toLowerCase();
+  const hasCreateVerb = ["만들", "생성", "올려", "등록", "추가", "작성", "정리"].some((keyword) =>
+    lowered.includes(keyword)
+  );
+  const hasNotionTarget =
+    lowered.includes("노션") ||
+    lowered.includes("notion") ||
+    [...NOTION_MAIN_PAGE_ALIASES].some((alias) => alias && lowered.includes(alias));
+  const looksLikeDatedTask = detectTaskKeyword(text) && detectDateExpression(text);
+  return hasCreateVerb && (hasNotionTarget || looksLikeDatedTask);
+}
+
+function detectDateExpression(question) {
+  const text = String(question || "");
+  const lowered = text.toLowerCase();
+  if (
+    lowered.includes("오늘") ||
+    lowered.includes("내일") ||
+    lowered.includes("모레") ||
+    lowered.includes("이번주") ||
+    lowered.includes("다음주")
+  ) {
+    return true;
+  }
+
+  const patterns = [
+    /\d{4}\s*[.\-/년]\s*\d{1,2}\s*[.\-/월]\s*\d{1,2}\s*일?/i,
+    /\d{1,2}\s*월\s*\d{1,2}\s*일/i,
+    /(?:^|[^0-9])\d{1,2}\s*\/\s*\d{1,2}(?!\d)/,
+  ];
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function parseDueDateFromQuestion(question, now = new Date()) {
+  const text = String(question || "");
+  const lowered = text.toLowerCase();
+  const nowKst = kstNowParts(now);
+  const todayYmd = formatYmd(nowKst.year, nowKst.month, nowKst.day);
+
+  if (lowered.includes("오늘")) return { ymd: todayYmd, source: "today" };
+  if (lowered.includes("내일")) return { ymd: addDaysYmd(todayYmd, 1), source: "tomorrow" };
+  if (lowered.includes("모레")) return { ymd: addDaysYmd(todayYmd, 2), source: "day_after_tomorrow" };
+  if (lowered.includes("이번주")) {
+    const daysUntilSunday = (7 - nowKst.weekday) % 7;
+    return { ymd: addDaysYmd(todayYmd, daysUntilSunday), source: "this_week" };
+  }
+  if (lowered.includes("다음주")) {
+    const daysUntilSunday = (7 - nowKst.weekday) % 7;
+    return { ymd: addDaysYmd(todayYmd, daysUntilSunday + 7), source: "next_week" };
+  }
+
+  const explicitYmdPatterns = [/(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?/i];
+  for (const pattern of explicitYmdPatterns) {
+    const matched = text.match(pattern);
+    if (!matched) continue;
+    const year = Number(matched[1]);
+    const month = Number(matched[2]);
+    const day = Number(matched[3]);
+    if (!isValidDateParts(year, month, day)) return null;
+    return { ymd: formatYmd(year, month, day), source: "explicit_ymd" };
+  }
+
+  const explicitMonthDayPatterns = [
+    /(\d{1,2})\s*월\s*(\d{1,2})\s*일/i,
+    /(?:^|[^0-9])(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/,
+  ];
+  for (const pattern of explicitMonthDayPatterns) {
+    const matched = text.match(pattern);
+    if (!matched) continue;
+    const month = Number(matched[1]);
+    const day = Number(matched[2]);
+    const year = nowKst.year;
+    if (!isValidDateParts(year, month, day)) return null;
+    return { ymd: formatYmd(year, month, day), source: "explicit_md" };
+  }
+
+  return null;
+}
+
+function extractTitleFromQuestion(question, fallback = "업무 항목") {
+  const text = String(question || "").trim();
+  if (!text) return fallback;
+
+  const explicitTitle = text.match(/제목(?:은|:)?\s*([^\n,]+)/i);
+  if (explicitTitle?.[1]) return explicitTitle[1].trim().slice(0, 120);
+
+  const taskTail = text.match(/(?:할\s*일|업무|작업|todo)\s*[:：]\s*(.+)$/i);
+  if (taskTail?.[1]) return taskTail[1].trim().slice(0, 120);
+
+  return text
+    .replace(/노션|notion|페이지|문서|만들어줘|만들어 줘|생성해줘|생성해 줘|올려줘|올려 줘/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || fallback;
 }
 
 function toPlainTextRichText(content) {
@@ -420,6 +608,31 @@ function buildNotionPropertyByField(field) {
   return null;
 }
 
+function pickDatePropertyName(properties = {}) {
+  const entries = Object.entries(properties || {});
+  const preferred = ["날짜", "일자", "마감", "마감일", "due date", "due", "date"];
+  const preferredEntry = entries.find(([name, prop]) => {
+    if (prop?.type !== "date") return false;
+    const lowered = String(name).toLowerCase();
+    return preferred.some((keyword) => lowered.includes(keyword));
+  });
+  if (preferredEntry) return preferredEntry[0];
+  const fallback = entries.find(([, prop]) => prop?.type === "date");
+  return fallback?.[0] || null;
+}
+
+function pickStatusDefault(statusProperty) {
+  const options = statusProperty?.status?.options || statusProperty?.select?.options || [];
+  if (!Array.isArray(options) || options.length === 0) return null;
+
+  const preferredNames = ["Not started", "Todo", "To do", "미착수", "대기", "백로그"];
+  const found = options.find((option) =>
+    preferredNames.some((keyword) => String(option?.name || "").toLowerCase() === keyword.toLowerCase())
+  );
+  if (found?.name) return found.name;
+  return String(options[0]?.name || "").trim() || null;
+}
+
 async function runNotionCreatePage(args = {}) {
   const notion = getNotionToolClient();
   const title = String(args.title || "").trim();
@@ -460,6 +673,70 @@ async function runNotionCreatePage(args = {}) {
   });
 
   return { id: created.id, url: created.url, parent: "page" };
+}
+
+async function runNotionCreateWorkItem(args = {}) {
+  const notion = getNotionToolClient();
+  const dataSourceId = normalizeNotionId(
+    String(args.parent_data_source_id || process.env.NOTION_WORK_DB_DATA_SOURCE_ID || "").trim()
+  );
+  if (!dataSourceId) {
+    throw new Error("workdb_create_item: NOTION_WORK_DB_DATA_SOURCE_ID is required.");
+  }
+
+  const title = String(args.title || "").trim();
+  if (!title) throw new Error("workdb_create_item: title is required");
+
+  const dueDate = String(args.due_date || "").trim();
+  if (!dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    throw new Error("workdb_create_item: due_date(YYYY-MM-DD) is required");
+  }
+
+  const dataSource = await notion.dataSources.retrieve({ data_source_id: dataSourceId });
+  const properties = dataSource?.properties || {};
+  const titleEntry = Object.entries(properties).find(([, prop]) => prop?.type === "title");
+  const titlePropertyName = titleEntry?.[0] || null;
+  const datePropertyName = pickDatePropertyName(properties);
+
+  if (!titlePropertyName) {
+    throw new Error("workdb_create_item: title property not found in 업무 DB schema.");
+  }
+  if (!datePropertyName) {
+    throw new Error("workdb_create_item: date property not found in 업무 DB schema.");
+  }
+
+  const pageProperties = {
+    [titlePropertyName]: { title: toPlainTextRichText(title) },
+    [datePropertyName]: { date: { start: dueDate } },
+  };
+
+  const statusEntry = Object.entries(properties).find(([, prop]) => prop?.type === "status" || prop?.type === "select");
+  if (statusEntry) {
+    const [statusPropertyName, statusProperty] = statusEntry;
+    const defaultStatus = pickStatusDefault(statusProperty);
+    if (defaultStatus) {
+      if (statusProperty?.type === "status") {
+        pageProperties[statusPropertyName] = { status: { name: defaultStatus } };
+      } else if (statusProperty?.type === "select") {
+        pageProperties[statusPropertyName] = { select: { name: defaultStatus } };
+      }
+    }
+  }
+
+  const created = await notion.pages.create({
+    parent: { data_source_id: dataSourceId },
+    properties: pageProperties,
+  });
+
+  return {
+    id: created.id,
+    url: created.url,
+    data_source_id: dataSourceId,
+    due_date: dueDate,
+    title,
+    title_property: titlePropertyName,
+    date_property: datePropertyName,
+  };
 }
 
 async function runNotionAppendPage(args = {}) {
@@ -688,6 +965,15 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "notion_create_work_item",
+    description: "업무 DB에 날짜 기반 업무 아이템 생성",
+    args: {
+      title: "string",
+      due_date: "YYYY-MM-DD",
+      parent_data_source_id: "string(optional)",
+    },
+  },
+  {
     name: "notion_append_page",
     description: "노션 페이지 본문 추가",
     args: { page_id: "string", content_markdown: "string" },
@@ -760,6 +1046,235 @@ function normalizePlannedToolCalls(plan) {
     .filter(Boolean);
 }
 
+function resolveMainNotionPageId() {
+  const fromMainUrl = normalizeNotionId(NOTION_MAIN_PAGE_URL);
+  if (fromMainUrl) return fromMainUrl;
+
+  const fromLegacyDefault = normalizeNotionId(DEFAULT_NOTION_PARENT_PAGE_ID);
+  if (fromLegacyDefault) return fromLegacyDefault;
+
+  throw new Error("ARCHY_NOTION_MAIN_PAGE_URL is invalid. Set a valid Notion page URL or page ID.");
+}
+
+function classifyNotionTargetRoute(question) {
+  const text = String(question || "");
+  const lowered = text.toLowerCase();
+  const aliasMatched = [...NOTION_MAIN_PAGE_ALIASES].some((alias) => alias && lowered.includes(alias));
+  const hasTask = detectTaskKeyword(text);
+  const hasDate = detectDateExpression(text);
+
+  if (hasTask && hasDate) {
+    const parsed = parseDueDateFromQuestion(text);
+    if (!parsed?.ymd) {
+      return {
+        route: "workdb_error",
+        aliasMatched,
+        reason: "dated_task_without_parseable_date",
+        errorMessage: "날짜를 인식하지 못했습니다. 예: 2026-03-10, 3월 10일, 내일, 이번주",
+      };
+    }
+    return {
+      route: "workdb",
+      aliasMatched,
+      reason: "dated_task",
+      dueDate: parsed.ymd,
+      dateSource: parsed.source,
+    };
+  }
+
+  return {
+    route: "main_page",
+    aliasMatched,
+    reason: aliasMatched ? "main_page_alias" : "default_main_page",
+  };
+}
+
+function applyNotionAutoRouting({ question, toolCalls, traceId }) {
+  const hasNotionCreate = toolCalls.some(
+    (call) =>
+      call.tool === "notion_create_page" ||
+      call.tool === "notion_create_database" ||
+      call.tool === "notion_create_work_item"
+  );
+  if (!hasNotionCreate) {
+    if (isNotionCreationRequest(question)) {
+      return applyNotionAutoRouting({
+        question,
+        toolCalls: [{ tool: "notion_create_page", args: { title: extractTitleFromQuestion(question, "새 노션 페이지") } }],
+        traceId,
+      });
+    }
+    return { toolCalls, route: null };
+  }
+
+  const route = classifyNotionTargetRoute(question);
+  const nextToolCalls = [];
+
+  if (route.route === "workdb_error") {
+    logBotEvent("notion.route.selected", {
+      traceId,
+      route: route.route,
+      reason: route.reason,
+      aliasMatched: route.aliasMatched,
+    });
+    return {
+      error: `업무 DB 생성 요청으로 해석했지만 ${route.errorMessage}`,
+      toolCalls: [],
+      route,
+    };
+  }
+
+  if (route.route === "workdb" && !String(process.env.NOTION_WORK_DB_DATA_SOURCE_ID || "").trim()) {
+    return {
+      error: "업무 DB 생성 요청으로 해석했지만 NOTION_WORK_DB_DATA_SOURCE_ID 설정이 없습니다.",
+      toolCalls: [],
+      route,
+    };
+  }
+
+  let mainPageId = null;
+  const ensureMainPageId = () => {
+    if (!mainPageId) {
+      mainPageId = resolveMainNotionPageId();
+    }
+    return mainPageId;
+  };
+
+  for (const call of toolCalls) {
+    if (call.tool === "notion_create_work_item") {
+      if (route.route === "workdb") {
+        nextToolCalls.push({
+          tool: "notion_create_work_item",
+          args: {
+            ...call.args,
+            title: String(call.args?.title || "").trim() || extractTitleFromQuestion(question, "업무 항목"),
+            due_date: String(call.args?.due_date || route.dueDate || "").trim(),
+            parent_data_source_id:
+              String(call.args?.parent_data_source_id || process.env.NOTION_WORK_DB_DATA_SOURCE_ID || "").trim(),
+          },
+        });
+      } else {
+        nextToolCalls.push({
+          tool: "notion_create_page",
+          args: {
+            title: String(call.args?.title || "").trim() || extractTitleFromQuestion(question, "새 노션 페이지"),
+            content_markdown: String(call.args?.content_markdown || "").trim(),
+            parent_page_id: ensureMainPageId(),
+          },
+        });
+      }
+      continue;
+    }
+
+    if (call.tool === "notion_create_page") {
+      if (route.route === "workdb") {
+        const title = String(call.args?.title || "").trim() || extractTitleFromQuestion(question, "업무 항목");
+        nextToolCalls.push({
+          tool: "notion_create_work_item",
+          args: {
+            title,
+            due_date: route.dueDate,
+            parent_data_source_id: process.env.NOTION_WORK_DB_DATA_SOURCE_ID || "",
+          },
+        });
+        continue;
+      }
+
+      nextToolCalls.push({
+        tool: "notion_create_page",
+        args: {
+          ...call.args,
+          title: String(call.args?.title || "").trim() || extractTitleFromQuestion(question, "새 노션 페이지"),
+          parent_page_id: ensureMainPageId(),
+          parent_data_source_id: "",
+        },
+      });
+      continue;
+    }
+
+    if (call.tool === "notion_create_database") {
+      nextToolCalls.push({
+        tool: "notion_create_database",
+        args: {
+          ...call.args,
+          parent_page_id: ensureMainPageId(),
+        },
+      });
+      continue;
+    }
+
+    nextToolCalls.push(call);
+  }
+
+  logBotEvent("notion.route.selected", {
+    traceId,
+    route: route.route,
+    reason: route.reason,
+    aliasMatched: route.aliasMatched,
+    dueDate: route.dueDate || null,
+  });
+
+  return { toolCalls: nextToolCalls, route };
+}
+
+function summarizeSingleToolExecution(item) {
+  if (!item?.ok) {
+    return `- [실패] ${item.tool}: ${item.error || "알 수 없는 오류"}`;
+  }
+
+  const result = item.result || {};
+  if (item.tool === "notion_create_page") {
+    return `- [성공] 노션 페이지 생성: ${result.url || result.id || "(url 없음)"}`;
+  }
+  if (item.tool === "notion_create_work_item") {
+    return `- [성공] 업무 DB 아이템 생성: ${result.url || result.id || "(url 없음)"} (마감 ${result.due_date || "-"})`;
+  }
+  if (item.tool === "notion_create_database") {
+    return `- [성공] 노션 데이터베이스 생성: ${result.url || result.id || "(url 없음)"}`;
+  }
+  if (item.tool === "notion_append_page") {
+    return `- [성공] 노션 페이지 본문 추가: ${result.page_id || "-"}`;
+  }
+  if (item.tool === "notion_update_page_title") {
+    return `- [성공] 노션 페이지 제목 수정: ${result.page_id || "-"}`;
+  }
+  if (item.tool === "sheets_update_cells" || item.tool === "sheets_append_rows" || item.tool === "sheets_read") {
+    return `- [성공] ${item.tool}: ${result.range || "-"}`;
+  }
+  if (item.tool === "sheets_add_sheet") {
+    return `- [성공] 시트 탭 생성: ${result.title || "-"}`;
+  }
+  if (item.tool === "web_search") {
+    const count = Array.isArray(result.results) ? result.results.length : 0;
+    return `- [성공] 웹 검색: 결과 ${count}건`;
+  }
+  if (item.tool === "web_read") {
+    return `- [성공] 웹 본문 읽기: ${result.url || "-"}`;
+  }
+  return `- [성공] ${item.tool}`;
+}
+
+function inferFollowupLineFromFailures(executions) {
+  const failed = executions.filter((item) => !item.ok);
+  if (failed.length === 0) return null;
+  const errorText = failed.map((item) => String(item.error || "")).join(" ").toLowerCase();
+
+  if (errorText.includes("notion_work_db_data_source_id")) {
+    return "추가 확인: NOTION_WORK_DB_DATA_SOURCE_ID 환경변수와 Notion integration 공유 권한을 확인해 주세요.";
+  }
+  if (errorText.includes("date property not found")) {
+    return "추가 확인: 업무 DB에 날짜(Date) 타입 속성이 있는지 확인해 주세요.";
+  }
+  if (errorText.includes("title property not found")) {
+    return "추가 확인: 업무 DB에 제목(Title) 타입 속성이 있는지 확인해 주세요.";
+  }
+  if (errorText.includes("날짜를 인식하지")) {
+    return "추가 확인: 날짜를 명확히 적어 주세요. 예: 2026-03-10, 3월 10일, 내일";
+  }
+
+  return "추가 확인: 실패 항목의 오류 메시지를 확인한 뒤 같은 요청을 다시 보내 주세요.";
+}
+
 async function planToolCalls({ question, memoryContext, workProgressText }) {
   const plannerPrompt = [
     "사용자 요청을 보고 툴 실행 계획을 JSON으로만 출력해라.",
@@ -772,12 +1287,15 @@ async function planToolCalls({ question, memoryContext, workProgressText }) {
     "4) 웹 조사 요청이면 web_search를 우선 사용하고, 필요하면 web_read를 추가",
     "5) 노션 페이지/DB 생성·수정 요청은 반드시 notion_* 툴 사용",
     "6) 구글시트 새 탭/편집 요청은 반드시 sheets_* 툴 사용",
-    "7) JSON 외 텍스트 금지",
+    "7) 날짜+업무 요청이면 notion_create_work_item을 우선 사용",
+    "8) JSON 외 텍스트 금지",
     "",
     "[기본 설정]",
     `- 기본 Google Spreadsheet ID: ${DEFAULT_SPREADSHEET_ID || "(미설정)"}`,
     `- 기본 Notion parent page id: ${DEFAULT_NOTION_PARENT_PAGE_ID || "(미설정)"}`,
     `- 기본 Notion data source id: ${DEFAULT_NOTION_DATA_SOURCE_ID || "(미설정)"}`,
+    `- 메인 Notion 페이지 URL: ${NOTION_MAIN_PAGE_URL || "(미설정)"}`,
+    `- 업무 DB data source id: ${process.env.NOTION_WORK_DB_DATA_SOURCE_ID || "(미설정)"}`,
     "",
     "[사용 가능 툴]",
     JSON.stringify(TOOL_DEFINITIONS, null, 2),
@@ -793,12 +1311,14 @@ async function planToolCalls({ question, memoryContext, workProgressText }) {
   ].join("\n");
 
   const raw = await generateGeminiText({
-    model: GEMINI_PRO_MODEL,
+    model: GEMINI_FLASH_MODEL,
     systemInstruction:
       "너는 JSON 기반 실행계획 생성기다. 요청 수행에 필요한 최소 툴만 선택하고 JSON만 출력한다.",
     userPrompt: plannerPrompt,
     temperature: 0.1,
     maxOutputTokens: 1800,
+    timeoutMs: TOOL_PLANNER_TIMEOUT_MS,
+    maxRetries: TOOL_PLANNER_MAX_RETRIES,
   });
 
   return parseJsonSafe(raw);
@@ -808,6 +1328,7 @@ async function executePlannedToolCall({ tool, args }) {
   if (tool === "web_search") return runWebSearch(args);
   if (tool === "web_read") return runWebRead(args);
   if (tool === "notion_create_page") return runNotionCreatePage(args);
+  if (tool === "notion_create_work_item") return runNotionCreateWorkItem(args);
   if (tool === "notion_append_page") return runNotionAppendPage(args);
   if (tool === "notion_update_page_title") return runNotionUpdatePageTitle(args);
   if (tool === "notion_create_database") return runNotionCreateDatabase(args);
@@ -839,48 +1360,79 @@ function compactToolResult(result) {
   return { _truncated: true, preview: text.slice(0, 2000) };
 }
 
-async function buildToolWorkflowResponse({ question, systemInstruction, plan, executions }) {
-  const executionJson = JSON.stringify(executions, null, 2);
-  const responsePrompt = [
-    "아래 사용자 요청과 툴 실행 결과를 바탕으로 최종 답변을 작성해라.",
-    "요구사항:",
-    "1) 실행 완료 항목/실패 항목을 분리해서 말해라.",
-    "2) 생성된 Notion URL, Sheet 범위 등 핵심 결과를 빠짐없이 포함해라.",
-    "3) 실패가 있으면 바로 필요한 추가 정보만 한 줄로 요청해라.",
-    "4) 너무 장황하지 말고 실무 톤으로 작성해라.",
+async function buildToolWorkflowResponse({ question, plan, executions }) {
+  const successCount = executions.filter((item) => item.ok).length;
+  const failCount = executions.length - successCount;
+  const lines = [
+    `요청 작업 실행 결과: 성공 ${successCount}건, 실패 ${failCount}건`,
+    "",
+    "실행 항목",
+    ...executions.map(summarizeSingleToolExecution),
+  ];
+
+  const followup = inferFollowupLineFromFailures(executions);
+  if (followup) {
+    lines.push("", followup);
+  }
+
+  const addendumPrompt = [
+    "아래 결과 요약을 2~4문장으로 부연해라.",
+    "반드시 사실만 요약하고, 실행되지 않은 작업을 꾸며내지 마라.",
+    "실패 항목이 있으면 마지막 문장에 재시도 방법을 한 줄로 안내해라.",
     "",
     "[사용자 요청]",
     question,
     "",
-    "[플랜]",
-    JSON.stringify(plan, null, 2),
+    "[실행 계획]",
+    JSON.stringify(plan),
     "",
-    "[실행 결과]",
-    executionJson,
+    "[고정 요약]",
+    lines.join("\n"),
   ].join("\n");
 
-  const text = await generateGeminiText({
-    model: GEMINI_PRO_MODEL,
-    systemInstruction,
-    userPrompt: responsePrompt,
-    temperature: 0.2,
-    maxOutputTokens: 1200,
-  });
+  try {
+    const addendum = await generateGeminiText({
+      model: GEMINI_FLASH_MODEL,
+      systemInstruction: "너는 실행 결과 요약기다. 사실만 간결하게 작성한다.",
+      userPrompt: addendumPrompt,
+      temperature: 0.1,
+      maxOutputTokens: 220,
+      timeoutMs: TOOL_SUMMARY_TIMEOUT_MS,
+      maxRetries: TOOL_SUMMARY_MAX_RETRIES,
+    });
+    if (addendum?.trim()) {
+      lines.push("", addendum.trim());
+    }
+  } catch {
+    // Keep deterministic response when LLM addendum fails.
+  }
 
-  if (text?.trim()) return text.trim();
-
-  const successCount = executions.filter((item) => item.ok).length;
-  const failCount = executions.length - successCount;
-  return `요청 작업 실행 결과: 성공 ${successCount}건, 실패 ${failCount}건`;
+  return lines.join("\n");
 }
 
-async function maybeHandleToolWorkflow({ question, memoryContext, workProgressText, systemInstruction }) {
+async function maybeHandleToolWorkflow({ question, memoryContext, workProgressText, traceId }) {
   if (!shouldUseToolWorkflow(question)) {
     return { handled: false, response: null };
   }
 
+  logBotEvent("tool.plan.start", { traceId });
   const plan = await planToolCalls({ question, memoryContext, workProgressText });
-  const toolCalls = normalizePlannedToolCalls(plan);
+  const normalized = normalizePlannedToolCalls(plan);
+  const routed = applyNotionAutoRouting({
+    question,
+    toolCalls: normalized,
+    traceId,
+  });
+  const toolCalls = routed.toolCalls;
+  logBotEvent("tool.plan.done", {
+    traceId,
+    toolCallCount: toolCalls.length,
+    needsTools: Boolean(plan?.needs_tools),
+  });
+
+  if (routed.error) {
+    return { handled: true, response: routed.error };
+  }
 
   if (toolCalls.length === 0) {
     const brief = String(plan?.assistant_brief || "").trim();
@@ -891,9 +1443,33 @@ async function maybeHandleToolWorkflow({ question, memoryContext, workProgressTe
   }
 
   const executions = [];
-  for (const toolCall of toolCalls) {
+  for (let i = 0; i < toolCalls.length; i += 1) {
+    const toolCall = toolCalls[i];
+    logBotEvent("tool.exec.start", {
+      traceId,
+      index: i + 1,
+      total: toolCalls.length,
+      tool: toolCall.tool,
+    });
     try {
       const result = await executePlannedToolCall(toolCall);
+      logBotEvent("tool.exec.done", {
+        traceId,
+        index: i + 1,
+        total: toolCalls.length,
+        tool: toolCall.tool,
+        ok: true,
+      });
+      if (toolCall.tool === "notion_create_page") {
+        logBotEvent("notion.create.success", { traceId, url: result?.url || null });
+      }
+      if (toolCall.tool === "notion_create_work_item") {
+        logBotEvent("workdb.create.success", {
+          traceId,
+          url: result?.url || null,
+          dueDate: result?.due_date || null,
+        });
+      }
       executions.push({
         tool: toolCall.tool,
         args: toolCall.args,
@@ -901,18 +1477,32 @@ async function maybeHandleToolWorkflow({ question, memoryContext, workProgressTe
         result: compactToolResult(result),
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logBotEvent("tool.exec.done", {
+        traceId,
+        index: i + 1,
+        total: toolCalls.length,
+        tool: toolCall.tool,
+        ok: false,
+        error: errorMessage,
+      });
+      if (toolCall.tool === "notion_create_page") {
+        logBotEvent("notion.create.fail", { traceId, error: errorMessage });
+      }
+      if (toolCall.tool === "notion_create_work_item") {
+        logBotEvent("workdb.create.fail", { traceId, error: errorMessage });
+      }
       executions.push({
         tool: toolCall.tool,
         args: toolCall.args,
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
     }
   }
 
   const response = await buildToolWorkflowResponse({
     question,
-    systemInstruction,
     plan: {
       needs_tools: Boolean(plan?.needs_tools),
       assistant_brief: plan?.assistant_brief || "",
@@ -1031,9 +1621,22 @@ const MEMORY_SUMMARY_MIN_INTERVAL_MINUTES = getPositiveInt(
   180
 );
 const TOOL_MAX_CALLS = getPositiveInt(process.env.ARCHY_TOOL_MAX_CALLS, 5);
+const TOOL_PLANNER_TIMEOUT_MS = getPositiveInt(process.env.ARCHY_TOOL_PLANNER_TIMEOUT_MS, 45_000);
+const TOOL_PLANNER_MAX_RETRIES = getNonNegativeInt(process.env.ARCHY_TOOL_PLANNER_MAX_RETRIES, 1);
+const TOOL_SUMMARY_TIMEOUT_MS = getPositiveInt(process.env.ARCHY_TOOL_SUMMARY_TIMEOUT_MS, 30_000);
+const TOOL_SUMMARY_MAX_RETRIES = getNonNegativeInt(process.env.ARCHY_TOOL_SUMMARY_MAX_RETRIES, 1);
 const DEFAULT_SPREADSHEET_ID = process.env.ARCHY_USER_SHEET_ID || "";
 const DEFAULT_NOTION_PARENT_PAGE_ID = process.env.NOTION_DEFAULT_PARENT_PAGE_ID || "";
 const DEFAULT_NOTION_DATA_SOURCE_ID = process.env.NOTION_DEFAULT_DATA_SOURCE_ID || "";
+const NOTION_MAIN_PAGE_URL =
+  process.env.ARCHY_NOTION_MAIN_PAGE_URL ||
+  "https://www.notion.so/0-min/Archy-AI-2e9bd55c477880bda196c1fbf4f74ca7?source=copy_link";
+const NOTION_MAIN_PAGE_ALIASES = new Set(
+  String(process.env.ARCHY_NOTION_MAIN_PAGE_ALIASES || "아키 페이지,archy 페이지,메인 페이지")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
 
 const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName("help").setDescription("사용 가능한 Archy 명령 안내"),
@@ -1202,7 +1805,7 @@ function splitMessage(content, limit = 1800) {
 }
 
 async function sendLongMessage(channel, content, options = {}) {
-  const { withSequence = false, maxSendRetries = 2 } = options;
+  const { withSequence = false, maxSendRetries = 2, traceId = null } = options;
   const chunks = splitMessage(content);
   const total = chunks.length;
 
@@ -1215,9 +1818,22 @@ async function sendLongMessage(channel, content, options = {}) {
     for (let attempt = 0; attempt <= maxSendRetries; attempt += 1) {
       try {
         await channel.send({ content: decorated });
+        logBotEvent("reply.chunk.sent", {
+          traceId,
+          chunkIndex: i + 1,
+          chunkCount: total,
+          chunkLength: decorated.length,
+        });
         sent = true;
         break;
       } catch (error) {
+        logBotEvent("reply.chunk.fail", {
+          traceId,
+          chunkIndex: i + 1,
+          chunkCount: total,
+          attempt: attempt + 1,
+          error: error instanceof Error ? error.message : String(error),
+        });
         lastError = error;
         if (attempt >= maxSendRetries) break;
         await sleep(500 * (attempt + 1));
@@ -1557,23 +2173,16 @@ async function persistConversationExchange({ message, question, answer, model })
   }
 }
 
-async function answerAdvisorQuestion(message, question) {
+async function answerAdvisorQuestion(message, question, { traceId = null } = {}) {
   const model = chooseChatModel(question);
-  const quickReport = await getCachedQuickReport();
-  const liveWorkYmd = toKstYmd(new Date());
-  let liveWorkProgress = null;
-  try {
-    liveWorkProgress = await getCachedWorkProgress({ targetYmd: liveWorkYmd });
-  } catch (error) {
-    console.warn("live work progress lookup failed:", error);
-    liveWorkProgress = {
-      found: false,
-      text: `실시간 업무 진행상황 조회 실패: ${error instanceof Error ? error.message : String(error)}`,
-      completed: [],
-      pending: [],
-      ascentum: { edits: [] },
-    };
-  }
+  const toolCandidate = shouldUseToolWorkflow(question);
+  const businessCritical = isBusinessCriticalQuestion(question);
+  logBotEvent("mention.classified", {
+    traceId,
+    model,
+    toolCandidate,
+    businessCritical,
+  });
 
   const memory = await getConversationMemory({
     guildId: message.guild.id,
@@ -1586,21 +2195,62 @@ async function answerAdvisorQuestion(message, question) {
 
   const systemInstruction = buildAdvisorSystemInstruction({ question, model });
 
-  const toolWorkflow = await maybeHandleToolWorkflow({
-    question,
-    memoryContext,
-    workProgressText: liveWorkProgress?.text || "",
-    systemInstruction,
-  });
-  if (toolWorkflow.handled && toolWorkflow.response) {
-    await sendLongMessage(message.channel, toolWorkflow.response);
-    await persistConversationExchange({
-      message,
+  if (toolCandidate) {
+    const toolWorkflow = await maybeHandleToolWorkflow({
       question,
-      answer: toolWorkflow.response,
-      model,
+      memoryContext,
+      workProgressText: "",
+      traceId,
     });
-    return;
+    if (toolWorkflow.handled && toolWorkflow.response) {
+      await sendLongMessage(message.channel, toolWorkflow.response, { traceId });
+      await persistConversationExchange({
+        message,
+        question,
+        answer: toolWorkflow.response,
+        model,
+      });
+      return;
+    }
+  }
+
+  const liveWorkYmd = toKstYmd(new Date());
+  const shouldLoadOperationalContext = businessCritical;
+  let quickReport = {
+    targetYmd: liveWorkYmd,
+    counts: {},
+    rates: {},
+    amplitudeConversion: {},
+    heavyUserTop3: [],
+    workProgress: {
+      found: false,
+      completed: [],
+      pending: [],
+      text: "업무 진행상황 미조회",
+    },
+  };
+  let liveWorkProgress = {
+    found: false,
+    text: "실시간 업무 진행상황 미조회",
+    completed: [],
+    pending: [],
+    ascentum: { edits: [] },
+  };
+
+  if (shouldLoadOperationalContext) {
+    quickReport = await getCachedQuickReport();
+    try {
+      liveWorkProgress = await getCachedWorkProgress({ targetYmd: liveWorkYmd });
+    } catch (error) {
+      console.warn("live work progress lookup failed:", error);
+      liveWorkProgress = {
+        found: false,
+        text: `실시간 업무 진행상황 조회 실패: ${error instanceof Error ? error.message : String(error)}`,
+        completed: [],
+        pending: [],
+        ascentum: { edits: [] },
+      };
+    }
   }
 
   if (liveWorkProgress?.found) {
@@ -1708,7 +2358,7 @@ async function answerAdvisorQuestion(message, question) {
     return;
   }
 
-  await sendLongMessage(message.channel, answer);
+  await sendLongMessage(message.channel, answer, { traceId });
   await persistConversationExchange({ message, question, answer, model });
 }
 
@@ -1837,6 +2487,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
+  let traceId = null;
   try {
     if (!message.guild || message.author.bot) return;
     if (GUILD_ID && message.guild.id !== GUILD_ID) return;
@@ -1863,8 +2514,22 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    await answerAdvisorQuestion(message, question);
+    traceId = randomUUID();
+    logBotEvent("mention.received", {
+      traceId,
+      guildId: message.guild.id,
+      channelId: message.channelId,
+      userId: message.author.id,
+      questionLength: question.length,
+      questionPreview: truncate(question, 120),
+    });
+
+    await answerAdvisorQuestion(message, question, { traceId });
   } catch (error) {
+    logBotEvent("mention.error", {
+      traceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     console.error("Message handler error:", error);
     try {
       await message.reply("처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
