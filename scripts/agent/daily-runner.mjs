@@ -29,6 +29,7 @@ const STRATEGIC_CONTEXT_FALLBACK_FILES = [
 ];
 const STRATEGIC_REVIEW_MIN_LENGTH = 450;
 const STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS = 3;
+const THINKING_LEVELS = new Set(["minimal", "low", "medium", "high"]);
 
 let projectContextCache = {
   value: "",
@@ -39,6 +40,16 @@ function safeErrorMessage(error) {
   if (!error) return "unknown";
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function normalizeThinkingLevel(value, fallback = null) {
+  if (!value && fallback) return normalizeThinkingLevel(fallback, null);
+  if (!value) return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (!THINKING_LEVELS.has(normalized)) {
+    return fallback ? normalizeThinkingLevel(fallback, null) : null;
+  }
+  return normalized;
 }
 
 function logDailyEvent(event, payload = {}) {
@@ -1886,6 +1897,7 @@ export async function generateGeminiText({
   userPrompt,
   temperature = 0.2,
   maxOutputTokens = 2048,
+  thinkingLevel = null,
   timeoutMs = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 90000),
   maxRetries = Number(process.env.GEMINI_REQUEST_MAX_RETRIES || 1),
   onResponseMeta = null,
@@ -1895,10 +1907,21 @@ export async function generateGeminiText({
     model
   )}:generateContent?key=${apiKey}`;
   const retries = Number.isFinite(maxRetries) && maxRetries >= 0 ? Math.floor(maxRetries) : 1;
+  const normalizedThinkingLevel = normalizeThinkingLevel(thinkingLevel, null);
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     let statusCode = null;
     try {
+      const generationConfig = {
+        temperature,
+        maxOutputTokens,
+      };
+      if (normalizedThinkingLevel) {
+        generationConfig.thinkingConfig = {
+          thinkingLevel: normalizedThinkingLevel,
+        };
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -1915,10 +1938,7 @@ export async function generateGeminiText({
               parts: [{ text: userPrompt }],
             },
           ],
-          generationConfig: {
-            temperature,
-            maxOutputTokens,
-          },
+          generationConfig,
         }),
       });
 
@@ -2003,21 +2023,25 @@ async function generateStrategicReviewText({
   userPrompt,
   temperature,
   maxOutputTokens,
+  thinkingLevel,
   stageLabel = "strategic_review",
 }) {
   const timeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 120000);
   const maxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 1);
 
   try {
-    return await generateGeminiText({
+    let primaryMeta = null;
+    const primaryText = await generateGeminiText({
       model: GEMINI_PRO_MODEL,
       systemInstruction,
       userPrompt,
       temperature,
       maxOutputTokens,
+      thinkingLevel,
       timeoutMs,
       maxRetries,
       onResponseMeta: (meta) => {
+        primaryMeta = meta;
         logDailyEvent("strategic_review.gemini_response", {
           stage: stageLabel,
           model: meta.model,
@@ -2030,6 +2054,11 @@ async function generateStrategicReviewText({
         });
       },
     });
+    return {
+      text: primaryText,
+      model: GEMINI_PRO_MODEL,
+      finishReason: primaryMeta?.finishReason ?? null,
+    };
   } catch (primaryError) {
     if (!isRetryableGeminiFailure(primaryError)) throw primaryError;
 
@@ -2047,15 +2076,18 @@ async function generateStrategicReviewText({
     });
 
     try {
+      let fallbackMeta = null;
       const fallbackText = await generateGeminiText({
         model: GEMINI_FLASH_MODEL,
         systemInstruction,
         userPrompt,
         temperature,
         maxOutputTokens: fallbackMaxOutputTokens,
+        thinkingLevel,
         timeoutMs: fallbackTimeoutMs,
         maxRetries: fallbackMaxRetries,
         onResponseMeta: (meta) => {
+          fallbackMeta = meta;
           logDailyEvent("strategic_review.gemini_response", {
             stage: `${stageLabel}.fallback`,
             model: meta.model,
@@ -2074,7 +2106,11 @@ async function generateStrategicReviewText({
         toModel: GEMINI_FLASH_MODEL,
         outputLength: fallbackText?.length ?? 0,
       });
-      return fallbackText;
+      return {
+        text: fallbackText,
+        model: GEMINI_FLASH_MODEL,
+        finishReason: fallbackMeta?.finishReason ?? null,
+      };
     } catch (fallbackError) {
       logDailyEvent("strategic_review.fallback_error", {
         fromModel: GEMINI_PRO_MODEL,
@@ -2159,6 +2195,28 @@ export async function generateDailyStrategicReview({
   workProgress,
   targetYmd,
 }) {
+  const primaryThinkingLevel = normalizeThinkingLevel(
+    process.env.GEMINI_STRATEGIC_REVIEW_THINKING_LEVEL,
+    "high"
+  );
+  const maxTokensDownshiftThinkingLevel = normalizeThinkingLevel(
+    process.env.GEMINI_STRATEGIC_REVIEW_MAX_TOKENS_DOWNSHIFT_LEVEL,
+    "medium"
+  );
+  let strategicThinkingLevel = primaryThinkingLevel;
+
+  const maybeDownshiftThinkingLevel = (stage, finishReason) => {
+    if (finishReason !== "MAX_TOKENS") return;
+    if (strategicThinkingLevel === maxTokensDownshiftThinkingLevel) return;
+    logDailyEvent("strategic_review.thinking_downshift", {
+      stage,
+      reason: finishReason,
+      fromThinkingLevel: strategicThinkingLevel,
+      toThinkingLevel: maxTokensDownshiftThinkingLevel,
+    });
+    strategicThinkingLevel = maxTokensDownshiftThinkingLevel;
+  };
+
   const projectContext = await loadProjectContext();
 
   const reviewInput = {
@@ -2176,7 +2234,13 @@ export async function generateDailyStrategicReview({
       heavyUsers: metrics.heavyUserTop3,
       signupConversionRate: amplitudeConversion.currentRate,
     },
-    previous: previousMetrics,
+    previous: {
+      targetYmd: previousMetrics?.targetYmd ?? null,
+      dailyLabel: previousMetrics?.dailyLabel ?? null,
+      counts: previousMetrics?.counts ?? {},
+      rates: previousMetrics?.rates ?? {},
+      heavyUserTop3: previousMetrics?.heavyUserTop3 ?? [],
+    },
     workProgress: {
       completedCount: workProgress.completed.length,
       pendingCount: workProgress.pending.length,
@@ -2214,15 +2278,17 @@ export async function generateDailyStrategicReview({
     JSON.stringify(reviewInput, null, 2),
   ].join("\n");
 
-  const draft = await generateStrategicReviewText({
+  const draftResult = await generateStrategicReviewText({
     systemInstruction,
     userPrompt,
     temperature: 0.25,
     maxOutputTokens: 1800,
+    thinkingLevel: strategicThinkingLevel,
     stageLabel: "strategic_review.draft",
   });
+  maybeDownshiftThinkingLevel("strategic_review.draft", draftResult.finishReason);
 
-  let review = draft;
+  let review = draftResult.text || "";
   let analysis = analyzeStrategicReview(review);
 
   for (let attempt = 1; attempt <= STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS; attempt += 1) {
@@ -2246,13 +2312,19 @@ export async function generateDailyStrategicReview({
       review,
     ].join("\n");
 
-    const continuation = await generateStrategicReviewText({
+    const continuationResult = await generateStrategicReviewText({
       systemInstruction,
       userPrompt: continuationPrompt,
       temperature: 0.2,
       maxOutputTokens: 1000,
+      thinkingLevel: strategicThinkingLevel,
       stageLabel: `strategic_review.continuation.${attempt}`,
     });
+    maybeDownshiftThinkingLevel(
+      `strategic_review.continuation.${attempt}`,
+      continuationResult.finishReason
+    );
+    const continuation = continuationResult.text || "";
 
     if (!continuation.trim()) {
       break;
