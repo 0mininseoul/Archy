@@ -22,6 +22,7 @@ test("parseStrategicReviewJson parses fenced JSON payload", () => {
           {
             action: "연동 실패 케이스 상위 3개 원인 점검",
             expected_effect: "연동율 단기 개선과 병목 제거",
+            why_now: "최근 3일 연동율 정체로 개선 지연 시 활성화율 하락 리스크가 커집니다.",
           },
         ],
         data_check_requests: [],
@@ -35,6 +36,10 @@ test("parseStrategicReviewJson parses fenced JSON payload", () => {
   const parsed = parseStrategicReviewJson(raw);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.value.priorityActions.length, 1);
+  assert.equal(
+    parsed.value.priorityActions[0].whyNow,
+    "최근 3일 연동율 정체로 개선 지연 시 활성화율 하락 리스크가 커집니다."
+  );
 });
 
 test("parseStrategicReviewJson rejects invalid schema", () => {
@@ -65,6 +70,7 @@ test("renderStrategicReviewMarkdown satisfies section/action validation", () => 
       {
         action: "연동 중단 이벤트 원인 분석 자동화",
         expectedEffect: "연동율 개선과 활성화율 동반 상승",
+        whyNow: "현재 병목 구간이 연동 단계에 집중되어 즉시 원인 파악이 필요합니다.",
       },
       {
         action: "온보딩 직후 연동 유도 메시지 A/B 테스트",
@@ -79,6 +85,7 @@ test("renderStrategicReviewMarkdown satisfies section/action validation", () => 
   const analysis = analyzeStrategicReview(rendered);
   assert.equal(analysis.needsContinuation, false);
   assert.ok(rendered.includes("4) 내일 바로 실행할 우선순위 액션"));
+  assert.ok(rendered.includes("왜 지금"));
 });
 
 test("buildStrategicReviewInput keeps compressed limits", () => {
@@ -133,5 +140,5 @@ test("buildStrategicReviewInput keeps compressed limits", () => {
   assert.equal(input.input.workProgress.completedTop.length, 5);
   assert.equal(input.input.workProgress.pendingTop.length, 8);
   assert.equal(input.input.workProgress.recentEditsTop.length, 4);
-  assert.ok(input.projectContext.length <= 2603);
+  assert.ok(input.projectContext.length <= 3203);
 });

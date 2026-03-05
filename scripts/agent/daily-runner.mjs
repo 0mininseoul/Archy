@@ -38,25 +38,28 @@ const STRATEGIC_REVIEW_ERROR_CODES = Object.freeze({
 });
 const STRATEGIC_CONTEXT_COMPRESSION_PROFILES = Object.freeze({
   full: {
-    projectContextChars: 6000,
+    projectContextChars: 7000,
     completedLimit: 5,
     pendingLimit: 8,
     editLimit: 4,
     editChars: 140,
+    workSummaryChars: 2000,
   },
   compact: {
-    projectContextChars: 2600,
+    projectContextChars: 3200,
     completedLimit: 5,
     pendingLimit: 8,
     editLimit: 4,
     editChars: 120,
+    workSummaryChars: 1200,
   },
   ultra: {
-    projectContextChars: 1600,
+    projectContextChars: 2000,
     completedLimit: 5,
     pendingLimit: 8,
     editLimit: 4,
     editChars: 100,
+    workSummaryChars: 800,
   },
 });
 
@@ -2232,6 +2235,7 @@ function buildStrategicReviewInput({
       completedTop: completed.slice(0, profile.completedLimit),
       pendingTop: pending.slice(0, profile.pendingLimit),
       recentEditsTop: compactEdits,
+      summary: clipText(workProgress?.text || "", profile.workSummaryChars),
     },
   };
 
@@ -2253,19 +2257,24 @@ function buildStrategicReviewPrompt({ strategicInput }) {
     "[출력 규칙]",
     "아래 스키마의 JSON 객체만 출력해라. 코드펜스/설명문 금지.",
     "{",
-    '  "business_state": "string (2~3문장)",',
-    '  "strengths": ["string", "... 최대 2개"],',
-    '  "risks": ["string", "... 최대 2개"],',
+    '  "business_state": "string (2~5문장, 핵심 결론 + 근거 + 함의 + 우선순위 판단)",',
+    '  "strengths": ["string", "... 최대 3개, 형식: 핵심포인트: 근거/해석"],',
+    '  "risks": ["string", "... 최대 3개, 형식: 리스크명: 영향/근거"],',
     '  "priority_actions": [',
-    '    { "action": "string", "expected_effect": "string" }',
+    '    { "action": "string", "expected_effect": "string", "why_now": "string (optional)" }',
     "  ],",
-    '  "data_check_requests": ["string", "... 최대 2개"]',
+    '  "data_check_requests": ["string", "... 최대 3개"]',
     "}",
     "제약:",
     "- priority_actions는 1~5개",
-    "- strengths/risks는 각 1~2개",
-    "- data_check_requests는 0~2개",
-    "- 과장 표현/추측 금지, 수치 근거 중심으로 압축 작성",
+    "- strengths/risks는 각 1~3개",
+    "- data_check_requests는 0~3개",
+    "- 과장 표현/추측 금지, 수치 근거 중심으로 명확하게 작성",
+    "- 지나친 단문 압축 금지: 각 항목은 핵심 판단 + 근거를 함께 제시",
+    "- 단순 나열 금지: 최소 2개 이상 지표를 서로 연결해 원인-결과 형태로 설명",
+    "- 업무 진행상황(summary/완료/미완료/최근편집)에서 최소 1개 이상을 근거로 반영",
+    "- 가능하면 완료/미완료 작업의 고유 작업명(또는 최근 편집 키워드)을 1개 이상 직접 언급",
+    "- 상투적 표현(예: '지속 개선 필요')만 단독 사용 금지, 반드시 오늘 데이터 근거를 붙일 것",
   ];
   return lines.join("\n");
 }
@@ -2294,13 +2303,15 @@ function normalizeStringArray(value, { min = 0, max = 5 } = {}) {
 function normalizePriorityActions(value) {
   const list = Array.isArray(value) ? value : [];
   const normalized = list
-    .map((item) => {
+  .map((item) => {
       const action = String(item?.action || "").trim();
       const expectedEffect = String(item?.expected_effect || item?.expectedEffect || "").trim();
       if (!action || !expectedEffect) return null;
+      const whyNow = String(item?.why_now || item?.whyNow || "").trim();
       return {
         action,
         expectedEffect,
+        whyNow: whyNow || null,
       };
     })
     .filter(Boolean)
@@ -2327,12 +2338,12 @@ function parseStrategicReviewJson(rawText) {
     return { ok: false, reason: "missing_business_state", candidate };
   }
 
-  const strengths = normalizeStringArray(parsed?.strengths, { min: 1, max: 2 });
+  const strengths = normalizeStringArray(parsed?.strengths, { min: 1, max: 3 });
   if (!strengths) {
     return { ok: false, reason: "invalid_strengths", candidate };
   }
 
-  const risks = normalizeStringArray(parsed?.risks, { min: 1, max: 2 });
+  const risks = normalizeStringArray(parsed?.risks, { min: 1, max: 3 });
   if (!risks) {
     return { ok: false, reason: "invalid_risks", candidate };
   }
@@ -2345,7 +2356,7 @@ function parseStrategicReviewJson(rawText) {
   const dataCheckRequests =
     normalizeStringArray(parsed?.data_check_requests || parsed?.dataCheckRequests, {
       min: 0,
-      max: 2,
+      max: 3,
     }) || [];
 
   return {
@@ -2365,25 +2376,47 @@ function renderStrategicReviewMarkdown(data) {
   const risks = data?.risks || [];
   const priorityActions = data?.priorityActions || [];
   const dataCheckRequests = data?.dataCheckRequests || [];
+  const emphasizeLead = (text) => {
+    const body = String(text || "").trim();
+    if (!body) return "-";
+    const colonIndex = body.indexOf(":");
+    if (colonIndex > 0 && colonIndex <= 24) {
+      const head = body.slice(0, colonIndex).trim();
+      const tail = body.slice(colonIndex + 1).trim();
+      if (!tail) return `**${head}**`;
+      return `**${head}**: ${tail}`;
+    }
+    const commaIndex = body.indexOf(",");
+    if (commaIndex > 0 && commaIndex <= 20) {
+      const head = body.slice(0, commaIndex).trim();
+      const tail = body.slice(commaIndex + 1).trim();
+      if (!tail) return `**${head}**`;
+      return `**${head}**, ${tail}`;
+    }
+    if (body.length <= 30) return `**${body}**`;
+    return body;
+  };
 
   const lines = [
-    "1) 오늘의 사업 상태 진단",
-    data?.businessState || "-",
+    "**1) Archy 오늘 상태 진단**",
+    `**핵심 결론:** ${String(data?.businessState || "-").trim()}`,
     "",
-    "2) 잘된 점",
-    ...strengths.map((item) => `- ${item}`),
+    "**2) 잘된 점**",
+    ...strengths.map((item) => `- ${emphasizeLead(item)}`),
     "",
-    "3) 리스크/병목",
-    ...risks.map((item) => `- ${item}`),
+    "**3) 리스크/병목**",
+    ...risks.map((item) => `- ${emphasizeLead(item)}`),
     "",
-    "4) 내일 바로 실행할 우선순위 액션",
-    ...priorityActions.map(
-      (item, idx) => `${idx + 1}. ${item.action} (기대효과: ${item.expectedEffect})`
-    ),
+    "**4) 내일 바로 실행할 우선순위 액션**",
+    ...priorityActions.flatMap((item, idx) => {
+      const actionLine = `${idx + 1}. **${item.action}** (기대효과: ${item.expectedEffect})`;
+      if (!item?.whyNow) return [actionLine];
+      return [actionLine, `   - **왜 지금:** ${item.whyNow}`];
+    }),
     "",
-    "5) 데이터 추가 확인 요청",
+    "**5) 데이터 추가 확인 요청**",
     ...(dataCheckRequests.length > 0
-      ? dataCheckRequests.map((item) => `- ${item}`)
+      ? dataCheckRequests.map((item) => `- ${emphasizeLead(item)}`)
       : ["- 현재 추가 확인 요청 없음"]),
   ];
 
@@ -2411,11 +2444,12 @@ function analyzeStrategicReview(text) {
       actionCount: 0,
     };
   }
-  if (/[0-9]\.\s*$/.test(body)) reasons.push("ends_with_numbered_prefix");
-  if (/[:,;(\-*]\s*$/.test(body)) reasons.push("ends_with_incomplete_tail");
+  const tailCheckBody = body.replace(/\*{1,2}/g, "").trim();
+  if (/[0-9]\.\s*$/.test(tailCheckBody)) reasons.push("ends_with_numbered_prefix");
+  if (/[:,;(\-]\s*$/.test(tailCheckBody)) reasons.push("ends_with_incomplete_tail");
 
   const sectionChecks = [
-    { index: 1, keyword: "사업 상태" },
+    { index: 1, keyword: "상태 진단" },
     { index: 2, keyword: "잘된 점" },
     { index: 3, keyword: "리스크" },
     { index: 4, keyword: "우선순위 액션" },
