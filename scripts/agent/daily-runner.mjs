@@ -27,6 +27,8 @@ const STRATEGIC_CONTEXT_FALLBACK_FILES = [
   "docs/SERVICE_FLOW.md",
   "docs/assistant-agent.md",
 ];
+const STRATEGIC_REVIEW_MIN_LENGTH = 450;
+const STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS = 3;
 
 let projectContextCache = {
   value: "",
@@ -1886,6 +1888,7 @@ export async function generateGeminiText({
   maxOutputTokens = 2048,
   timeoutMs = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 90000),
   maxRetries = Number(process.env.GEMINI_REQUEST_MAX_RETRIES || 1),
+  onResponseMeta = null,
 }) {
   const apiKey = getEnv("GEMINI_API_KEY");
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -1944,6 +1947,21 @@ export async function generateGeminiText({
         .map((part) => part?.text)
         .filter(Boolean)
         .join("\n");
+      const finishReason = data?.candidates?.[0]?.finishReason || null;
+      const usageMetadata = data?.usageMetadata || null;
+      if (typeof onResponseMeta === "function") {
+        try {
+          onResponseMeta({
+            model,
+            attempt: attempt + 1,
+            finishReason,
+            usageMetadata,
+            textLength: (text || "").length,
+          });
+        } catch {
+          // Never fail the request because of logging callbacks.
+        }
+      }
 
       return text || "";
     } catch (error) {
@@ -1985,6 +2003,7 @@ async function generateStrategicReviewText({
   userPrompt,
   temperature,
   maxOutputTokens,
+  stageLabel = "strategic_review",
 }) {
   const timeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 120000);
   const maxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 1);
@@ -1998,6 +2017,18 @@ async function generateStrategicReviewText({
       maxOutputTokens,
       timeoutMs,
       maxRetries,
+      onResponseMeta: (meta) => {
+        logDailyEvent("strategic_review.gemini_response", {
+          stage: stageLabel,
+          model: meta.model,
+          attempt: meta.attempt,
+          finishReason: meta.finishReason,
+          promptTokens: meta?.usageMetadata?.promptTokenCount ?? null,
+          candidateTokens: meta?.usageMetadata?.candidatesTokenCount ?? null,
+          totalTokens: meta?.usageMetadata?.totalTokenCount ?? null,
+          textLength: meta.textLength,
+        });
+      },
     });
   } catch (primaryError) {
     if (!isRetryableGeminiFailure(primaryError)) throw primaryError;
@@ -2024,6 +2055,18 @@ async function generateStrategicReviewText({
         maxOutputTokens: fallbackMaxOutputTokens,
         timeoutMs: fallbackTimeoutMs,
         maxRetries: fallbackMaxRetries,
+        onResponseMeta: (meta) => {
+          logDailyEvent("strategic_review.gemini_response", {
+            stage: `${stageLabel}.fallback`,
+            model: meta.model,
+            attempt: meta.attempt,
+            finishReason: meta.finishReason,
+            promptTokens: meta?.usageMetadata?.promptTokenCount ?? null,
+            candidateTokens: meta?.usageMetadata?.candidatesTokenCount ?? null,
+            totalTokens: meta?.usageMetadata?.totalTokenCount ?? null,
+            textLength: meta.textLength,
+          });
+        },
       });
 
       logDailyEvent("strategic_review.fallback_done", {
@@ -2043,11 +2086,21 @@ async function generateStrategicReviewText({
   }
 }
 
-function needsStrategicReviewContinuation(text) {
+function analyzeStrategicReview(text) {
   const body = String(text || "").trim();
-  if (!body) return true;
-  if (/[0-9]\.\s*$/.test(body)) return true;
-  if (/[:,;(\-*]\s*$/.test(body)) return true;
+  const reasons = [];
+
+  if (!body) {
+    reasons.push("empty");
+    return {
+      needsContinuation: true,
+      reasons,
+      length: 0,
+      actionCount: 0,
+    };
+  }
+  if (/[0-9]\.\s*$/.test(body)) reasons.push("ends_with_numbered_prefix");
+  if (/[:,;(\-*]\s*$/.test(body)) reasons.push("ends_with_incomplete_tail");
 
   const sectionChecks = [
     { index: 1, keyword: "사업 상태" },
@@ -2055,23 +2108,32 @@ function needsStrategicReviewContinuation(text) {
     { index: 3, keyword: "리스크" },
     { index: 4, keyword: "우선순위 액션" },
   ];
-  const missingRequiredSection = sectionChecks.some(({ index, keyword }) => {
+  for (const { index, keyword } of sectionChecks) {
     const pattern = new RegExp(`(^|\\n)\\s*(?:\\*{1,2})?${index}[\\)\\.]\\s*[^\\n]*${keyword}`);
-    return !pattern.test(body);
-  });
-  if (missingRequiredSection) return true;
+    if (!pattern.test(body)) {
+      reasons.push(`missing_section_${index}`);
+    }
+  }
 
   const lines = body
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/^\*{1,2}\s*/, "").replace(/\s*\*{1,2}$/, ""))
     .filter(Boolean);
 
-  if (lines.some((line) => /^[1-5]\.\s*$/.test(line))) return true;
+  if (lines.some((line) => /^[1-5]\.\s*$/.test(line))) reasons.push("incomplete_numbered_line");
 
   const actionHeaderIndex = lines.findIndex(
     (line) => /^[4][\)\.]\s*/.test(line) && line.includes("우선순위 액션")
   );
-  if (actionHeaderIndex < 0) return true;
+  if (actionHeaderIndex < 0) {
+    reasons.push("missing_action_header");
+    return {
+      needsContinuation: true,
+      reasons,
+      length: body.length,
+      actionCount: 0,
+    };
+  }
 
   const restAfterActionHeader = lines.slice(actionHeaderIndex + 1);
   const nextSectionIndex = restAfterActionHeader.findIndex((line) => /^[5][\)\.]\s*/.test(line));
@@ -2079,9 +2141,15 @@ function needsStrategicReviewContinuation(text) {
     nextSectionIndex >= 0 ? restAfterActionHeader.slice(0, nextSectionIndex) : restAfterActionHeader;
 
   const actionLines = actionSectionLines.filter((line) => /^[1-5][\)\.]\s+\S/.test(line));
-  if (actionLines.length < 1 || actionLines.length > 5) return true;
+  if (actionLines.length < 1 || actionLines.length > 5) reasons.push("invalid_action_count");
+  if (body.length < STRATEGIC_REVIEW_MIN_LENGTH) reasons.push("below_min_length");
 
-  return false;
+  return {
+    needsContinuation: reasons.length > 0,
+    reasons,
+    length: body.length,
+    actionCount: actionLines.length,
+  };
 }
 
 export async function generateDailyStrategicReview({
@@ -2151,34 +2219,59 @@ export async function generateDailyStrategicReview({
     userPrompt,
     temperature: 0.25,
     maxOutputTokens: 1800,
+    stageLabel: "strategic_review.draft",
   });
 
-  if (!needsStrategicReviewContinuation(draft)) return draft;
+  let review = draft;
+  let analysis = analyzeStrategicReview(review);
 
-  logDailyEvent("strategic_review.continuation_needed", {
-    reason: "incomplete_tail_detected",
-    draftLength: draft.length,
-  });
+  for (let attempt = 1; attempt <= STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS; attempt += 1) {
+    if (!analysis.needsContinuation) break;
 
-  const continuationPrompt = [
-    "직전 전략 리뷰 초안이 중간에서 끊겼다.",
-    "아래 초안을 중복 없이 이어서 완성해라.",
-    "형식은 유지하되, 누락된 마무리 내용만 압축해서 작성한다.",
-    "특히 '4) 우선순위 액션(1~5개)'과 '5) 데이터 추가 확인 요청'이 누락되면 채워라.",
-    "",
-    "[초안]",
-    draft,
-  ].join("\n");
+    logDailyEvent("strategic_review.continuation_needed", {
+      attempt,
+      reasons: analysis.reasons,
+      reviewLength: analysis.length,
+      actionCount: analysis.actionCount,
+    });
 
-  const continuation = await generateStrategicReviewText({
-    systemInstruction,
-    userPrompt: continuationPrompt,
-    temperature: 0.2,
-    maxOutputTokens: 800,
-  });
+    const continuationPrompt = [
+      "직전 전략 리뷰가 불완전하다.",
+      "아래 초안을 중복 없이 이어서 완성해라.",
+      "요구 형식(1~5번)은 유지하고, 누락된 섹션/액션을 채워라.",
+      "특히 '2) 잘된 점', '3) 리스크/병목', '4) 우선순위 액션(1~5개)'가 누락되지 않게 마무리하라.",
+      "출력은 압축형으로 유지한다.",
+      "",
+      "[초안]",
+      review,
+    ].join("\n");
 
-  if (!continuation.trim()) return draft;
-  return `${draft.trimEnd()}\n${continuation.trimStart()}`.trim();
+    const continuation = await generateStrategicReviewText({
+      systemInstruction,
+      userPrompt: continuationPrompt,
+      temperature: 0.2,
+      maxOutputTokens: 1000,
+      stageLabel: `strategic_review.continuation.${attempt}`,
+    });
+
+    if (!continuation.trim()) {
+      break;
+    }
+    review = `${review.trimEnd()}\n${continuation.trimStart()}`.trim();
+    analysis = analyzeStrategicReview(review);
+  }
+
+  if (analysis.needsContinuation) {
+    logDailyEvent("strategic_review.validation_failed", {
+      reasons: analysis.reasons,
+      reviewLength: analysis.length,
+      actionCount: analysis.actionCount,
+      minLength: STRATEGIC_REVIEW_MIN_LENGTH,
+    });
+    throw new Error(`Strategic review validation failed: ${analysis.reasons.join(",")}`);
+  }
+
+  return review;
 }
 
 function compareNotionMetric(currentValue, previousValue) {
