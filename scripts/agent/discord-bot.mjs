@@ -2407,7 +2407,7 @@ client.on(Events.ClientReady, async () => {
   }
 
   cron.schedule(
-      "0 0 * * *",
+      "5 0 * * *",
       async () => {
         try {
           await runDailyAndPost({ trigger: "schedule" });
@@ -2420,7 +2420,7 @@ client.on(Events.ClientReady, async () => {
     }
   );
 
-  console.log("Scheduled daily pipeline at 00:00 Asia/Seoul");
+  console.log("Scheduled daily pipeline at 00:05 Asia/Seoul");
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

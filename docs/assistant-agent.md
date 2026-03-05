@@ -4,7 +4,7 @@
 `scripts/agent/discord-bot.mjs`는 Railway에서 상시 실행되는 Discord 하이브리드 봇(슬래시 + 멘션)입니다.
 
 역할:
-1. 매일 00:00 (Asia/Seoul) 데일리 배치 실행
+1. 매일 00:05 (Asia/Seoul) 데일리 배치 실행
 2. Supabase + Amplitude 기반 지표 집계
 3. Google Sheet / Notion 멱등 업데이트 (`있으면 update, 없으면 insert`)
 4. Discord 리포트 전송 + Gemini Pro 전략 리뷰 자동 생성
@@ -21,7 +21,7 @@
 - 가입전환율: Amplitude 차트(`signup_completed / visitor`) 값 사용
 - 활성화율: 가입자 대비 최근 30일 내 1회 이상 녹음한 유저 비율
 - 결제율: 가입자 대비 `users.is_paid_user = true` 유저 비율
-- 배치 시간대: `Asia/Seoul 00:00`
+- 배치 시간대: `Asia/Seoul 00:05`
 
 ## 결제 데이터 기록
 Polar 웹훅에서 아래 필드를 `users`에 기록합니다.
@@ -58,7 +58,7 @@ npm run agent:discord
 - `/stats` : 최신 집계 요약
 - `/help` : 명령 안내
 - 위클리 Notion upsert는 **실행 시각(KST)이 일요일**일 때 수행됩니다.
-  - 스케줄러(일요일 00:00 KST) 실행 시: 데일리 + 위클리 upsert
+  - 스케줄러(일요일 00:05 KST) 실행 시: 데일리 + 위클리 upsert
   - `/daily` 수동 실행도 일요일에 실행하면: 데일리 + 위클리 upsert
 - 전략/운영 질의는 봇 멘션으로 입력 (`DISCORD_CHAT_CHANNEL_IDS` 설정 시 채널 제한)
   - 예: `@사업 개고수 에이전트 오늘 데이터 해석해줘`
@@ -76,7 +76,7 @@ npm run agent:discord
 ## 필수 환경변수
 `.env.example`에 추가된 키를 설정하세요.
 - Gemini: `GEMINI_API_KEY`
-- Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`
+- Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_RETRIES`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS`
 - Discord: `DISCORD_BOT_TOKEN`, `DISCORD_DAILY_CHANNEL_ID`, `DISCORD_GUILD_ID`
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 - Google Sheets 동기화 모드(옵션): `ARCHY_SHEET_SYNC_ALL_USERS` (기본 `true`)
@@ -98,7 +98,10 @@ npm run agent:discord
   - 시트에 이미 있는 유저는 최신 Supabase 상태(O/X 포함)로 행 업데이트
   - `users` 컬럼 전체를 읽어 시트 헤더와 매핑하며, 미매핑 컬럼은 기존 시트 값을 보존합니다.
 - 주간(Notion 위클리)은 실행 시각이 일요일일 때 실행일 라벨(예: `3/8(일)`)로 upsert합니다.
-- 전략 리뷰가 Gemini 혼잡(503/timeout)으로 생성 실패하면:
+- 전략 리뷰의 프로젝트 맥락은 `docs/STRATEGIC_REVIEW_CONTEXT.md`를 우선 주입합니다(없으면 기존 문서 묶음으로 폴백).
+- 전략 리뷰 출력은 과도한 장문을 피하도록 압축 지시가 적용되어 있으며, 액션 항목은 상황에 따라 `1~5개`를 유동적으로 제안합니다.
+- 전략 리뷰는 기본적으로 Gemini Pro로 생성하고, timeout/혼잡 등 재시도 가능한 실패가 나면 Flash 모델로 1회 폴백을 시도합니다.
+- Pro+Flash 모두 실패하면:
   - 데일리 리포트는 정상 전송
   - 전략 리뷰는 생략 안내 메시지를 전송
 - 긴 전략 리뷰는 Discord 길이 제한(2000자) 대응을 위해 자동 분할 전송합니다.

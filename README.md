@@ -147,6 +147,7 @@ npx tsc --noEmit
 ```
 
 Assistant Agent(Discord + Daily Ops) 설정은 [docs/assistant-agent.md](docs/assistant-agent.md) 참고.
+전략 리뷰용 주입 맥락은 [docs/STRATEGIC_REVIEW_CONTEXT.md](docs/STRATEGIC_REVIEW_CONTEXT.md)에서 관리합니다.
 
 ## 문서
 

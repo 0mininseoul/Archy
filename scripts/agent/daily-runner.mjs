@@ -9,7 +9,7 @@ import { google } from "googleapis";
 import { Client as NotionClient } from "@notionhq/client";
 
 export const KST_TIMEZONE = "Asia/Seoul";
-export const GEMINI_FLASH_MODEL = "gemini-3.1-flash-lite-preview";
+export const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
 export const GEMINI_PRO_MODEL = "gemini-3.1-pro-preview";
 export const FIXED_EXCLUDED_USER_IDS = [
   "2018416a-14dc-4087-91aa-24cf68451366",
@@ -20,6 +20,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const PROJECT_CONTEXT_CACHE_MS = 60 * 60 * 1000;
+const STRATEGIC_CONTEXT_PRIMARY_FILE = "docs/STRATEGIC_REVIEW_CONTEXT.md";
+const STRATEGIC_CONTEXT_FALLBACK_FILES = [
+  "docs/prd.md",
+  "docs/FEATURE_SPEC.md",
+  "docs/SERVICE_FLOW.md",
+  "docs/assistant-agent.md",
+];
 
 let projectContextCache = {
   value: "",
@@ -1828,20 +1835,39 @@ async function loadProjectContext() {
     return projectContextCache.value;
   }
 
-  const files = ["docs/prd.md", "docs/FEATURE_SPEC.md", "docs/SERVICE_FLOW.md", "docs/assistant-agent.md"];
-  const chunks = [];
+  try {
+    const primaryPath = path.join(REPO_ROOT, STRATEGIC_CONTEXT_PRIMARY_FILE);
+    const primaryContent = (await fs.readFile(primaryPath, "utf8")).trim();
+    if (primaryContent) {
+      const merged = `## ${STRATEGIC_CONTEXT_PRIMARY_FILE}\n${primaryContent.slice(0, 8000)}`;
+      projectContextCache = {
+        value: merged,
+        loadedAtMs: now,
+      };
+      return merged;
+    }
+  } catch {
+    // Fallback to legacy multi-document context loading.
+  }
 
-  for (const relativePath of files) {
+  const chunks = [];
+  let budget = 8000;
+  for (const relativePath of STRATEGIC_CONTEXT_FALLBACK_FILES) {
+    if (budget <= 0) break;
     try {
       const absolutePath = path.join(REPO_ROOT, relativePath);
       const content = await fs.readFile(absolutePath, "utf8");
-      chunks.push(`## ${relativePath}\n${content.slice(0, 4000)}`);
+      const snippet = content.trim().slice(0, 1800);
+      if (!snippet) continue;
+      const chunk = `## ${relativePath}\n${snippet}`;
+      chunks.push(chunk.slice(0, budget));
+      budget -= chunk.length + 2;
     } catch {
       // Keep going with available files.
     }
   }
 
-  const merged = chunks.join("\n\n");
+  const merged = chunks.join("\n\n") || "프로젝트 맥락 문서를 찾지 못했습니다.";
   projectContextCache = {
     value: merged,
     loadedAtMs: now,
@@ -1952,13 +1978,76 @@ export function chooseChatModel(messageText) {
   return GEMINI_PRO_MODEL;
 }
 
+async function generateStrategicReviewText({
+  systemInstruction,
+  userPrompt,
+  temperature,
+  maxOutputTokens,
+}) {
+  const timeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 120000);
+  const maxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 1);
+
+  try {
+    return await generateGeminiText({
+      model: GEMINI_PRO_MODEL,
+      systemInstruction,
+      userPrompt,
+      temperature,
+      maxOutputTokens,
+      timeoutMs,
+      maxRetries,
+    });
+  } catch (primaryError) {
+    if (!isRetryableGeminiFailure(primaryError)) throw primaryError;
+
+    const fallbackTimeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_TIMEOUT_MS || timeoutMs);
+    const fallbackMaxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_RETRIES || 0);
+    const fallbackMaxOutputTokens = Math.max(
+      256,
+      Math.min(maxOutputTokens, Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS || 1600))
+    );
+
+    logDailyEvent("strategic_review.fallback_start", {
+      fromModel: GEMINI_PRO_MODEL,
+      toModel: GEMINI_FLASH_MODEL,
+      reason: safeErrorMessage(primaryError).slice(0, 180),
+    });
+
+    try {
+      const fallbackText = await generateGeminiText({
+        model: GEMINI_FLASH_MODEL,
+        systemInstruction,
+        userPrompt,
+        temperature,
+        maxOutputTokens: fallbackMaxOutputTokens,
+        timeoutMs: fallbackTimeoutMs,
+        maxRetries: fallbackMaxRetries,
+      });
+
+      logDailyEvent("strategic_review.fallback_done", {
+        fromModel: GEMINI_PRO_MODEL,
+        toModel: GEMINI_FLASH_MODEL,
+        outputLength: fallbackText?.length ?? 0,
+      });
+      return fallbackText;
+    } catch (fallbackError) {
+      logDailyEvent("strategic_review.fallback_error", {
+        fromModel: GEMINI_PRO_MODEL,
+        toModel: GEMINI_FLASH_MODEL,
+        reason: safeErrorMessage(fallbackError).slice(0, 180),
+      });
+      throw fallbackError;
+    }
+  }
+}
+
 function needsStrategicReviewContinuation(text) {
   const body = String(text || "").trim();
   if (!body) return true;
   if (/[0-9]\.\s*$/.test(body)) return true;
   if (/[:,;(\-*]\s*$/.test(body)) return true;
 
-  const hasActionSection = body.includes("우선순위 액션 3개");
+  const hasActionSection = body.includes("우선순위 액션");
   if (!hasActionSection) return false;
 
   const lines = body
@@ -1966,8 +2055,11 @@ function needsStrategicReviewContinuation(text) {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const thirdAction = lines.find((line) => /^3\.\s*/.test(line));
-  if (!thirdAction || /^3\.\s*$/.test(thirdAction)) return true;
+  if (lines.some((line) => /^[1-5]\.\s*$/.test(line))) return true;
+
+  const actionLines = lines.filter((line) => /^[1-5]\.\s+/.test(line));
+  if (actionLines.length === 0 || actionLines.length > 5) return true;
+
   return false;
 }
 
@@ -2009,6 +2101,8 @@ export async function generateDailyStrategicReview({
     "너는 Archy 서비스의 전략 자문 에이전트다.",
     "톤은 친근하고 캐주얼하게 유지하되, 내용은 숫자 기반으로 정확하고 빠짐없이 작성한다.",
     "핵심 결론을 먼저 말하고, 근거/가정/리스크/우선순위 액션을 명확히 구분한다.",
+    "출력은 전반적으로 압축해서 작성하고, 불필요한 서론/중복/수식어는 제거한다.",
+    "각 항목은 핵심 문장 위주로 1~3줄 내에서 짧게 쓴다.",
     "문맥상 자연스러울 때만 가벼운 표현(예: ㅋㅋ)을 0~1회 사용한다.",
     "중요한 업무 항목은 생략하지 않는다.",
     "출력은 한국어로 작성한다.",
@@ -2016,12 +2110,13 @@ export async function generateDailyStrategicReview({
 
   const userPrompt = [
     "아래 프로젝트 맥락, 업무 진행상황, 데일리 지표를 종합해 오늘의 리뷰를 작성해줘.",
+    "전체 분량은 600~1100자 범위로 압축하고, 각 섹션은 군더더기 없이 핵심만 써라.",
     "요구 형식:",
-    "1) 오늘의 사업 상태 진단 (3~5줄)",
-    "2) 잘된 점 (최대 3개)",
-    "3) 리스크/병목 (최대 3개)",
-    "4) 내일 바로 실행할 우선순위 액션 3개 (각 액션에 기대효과 1줄)",
-    "5) 데이터 추가 확인 요청이 필요한 항목 (있으면만)",
+    "1) 오늘의 사업 상태 진단 (2~3줄)",
+    "2) 잘된 점 (최대 2개, 각 1줄)",
+    "3) 리스크/병목 (최대 2개, 각 1줄)",
+    "4) 내일 바로 실행할 우선순위 액션 (1~5개, 필요한 만큼만. 각 액션 + 기대효과를 1줄)",
+    "5) 데이터 추가 확인 요청이 필요한 항목 (있으면만, 최대 2개)",
     "\n[프로젝트 맥락]\n",
     projectContext,
     "\n[업무 진행상황]\n",
@@ -2030,14 +2125,11 @@ export async function generateDailyStrategicReview({
     JSON.stringify(reviewInput, null, 2),
   ].join("\n");
 
-  const draft = await generateGeminiText({
-    model: GEMINI_PRO_MODEL,
+  const draft = await generateStrategicReviewText({
     systemInstruction,
     userPrompt,
     temperature: 0.25,
-    maxOutputTokens: 3072,
-    timeoutMs: Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 60000),
-    maxRetries: Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 3),
+    maxOutputTokens: 1800,
   });
 
   if (!needsStrategicReviewContinuation(draft)) return draft;
@@ -2050,22 +2142,18 @@ export async function generateDailyStrategicReview({
   const continuationPrompt = [
     "직전 전략 리뷰 초안이 중간에서 끊겼다.",
     "아래 초안을 중복 없이 이어서 완성해라.",
-    "형식은 유지하되, 누락된 마무리 내용만 작성한다.",
-    "특히 '4) 내일 바로 실행할 우선순위 액션 3개'의 3번 액션과 기대효과,",
-    "'5) 데이터 추가 확인 요청'이 필요하면 그것까지 마무리한다.",
+    "형식은 유지하되, 누락된 마무리 내용만 압축해서 작성한다.",
+    "특히 '4) 우선순위 액션(1~5개)'과 '5) 데이터 추가 확인 요청'이 누락되면 채워라.",
     "",
     "[초안]",
     draft,
   ].join("\n");
 
-  const continuation = await generateGeminiText({
-    model: GEMINI_PRO_MODEL,
+  const continuation = await generateStrategicReviewText({
     systemInstruction,
     userPrompt: continuationPrompt,
     temperature: 0.2,
-    maxOutputTokens: 1200,
-    timeoutMs: Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 60000),
-    maxRetries: Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 3),
+    maxOutputTokens: 800,
   });
 
   if (!continuation.trim()) return draft;
