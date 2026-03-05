@@ -1160,72 +1160,97 @@ function pickDailyStartMessage() {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-function buildDailyEmbed(report) {
-  const { overviewText, heavyUserText } = buildDiscordMetricText(report);
+function buildMetricComparisonContext(report) {
+  const previous = report.previous?.notion;
+  const fallbackRates = report.previous?.fallbackRates || {};
+  const fallbackCounts = report.previous?.fallbackCounts || {};
 
-  return new EmbedBuilder()
+  return {
+    prevUserCount: previous?.totalSignups ?? fallbackCounts.totalSignups ?? null,
+    prevOnboarding: previous?.onboardingRate ?? fallbackRates.onboarding ?? null,
+    prevPwa: previous?.pwaRate ?? fallbackRates.pwa ?? null,
+    prevIntegration: previous?.integrationRate ?? fallbackRates.integrationAny ?? null,
+    prevActivation: previous?.activationRate ?? fallbackRates.activation30d ?? null,
+    prevPayment: previous?.paymentRate ?? fallbackRates.payment ?? null,
+    prevConversion: previous?.conversionRate ?? report.amplitudeConversion?.previousRate ?? null,
+    conversionMissing: report.amplitudeConversion?.currentRate === null,
+  };
+}
+
+function buildDailyEmbed({ report, asOfDate }) {
+  const { amplitudeSourceText } = buildDiscordMetricText(report);
+  const asOfKst = formatKstDateTime(asOfDate);
+  const heavyUserText = formatHeavyUserNamesOnly(report.heavyUserTop3);
+  const ctx = buildMetricComparisonContext(report);
+
+  const embed = new EmbedBuilder()
     .setColor(0x1f8b4c)
     .setTitle(`📊 Archy 데일리 리포트 · ${report.dailyLabel}`)
-    .setDescription("Supabase + Amplitude + Notion 기반 자동 집계")
+    .setDescription("KST 기준 데일리 운영 스냅샷")
     .addFields(
+      { name: "🗓️ 집계기준", value: `${report.dailyLabel} (${report.targetYmd})`, inline: true },
+      { name: "🕒 기준시각", value: asOfKst, inline: true },
+      { name: "🧭 데이터 상태", value: ctx.conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
+      { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, ctx.prevUserCount), inline: true },
       {
-        name: "핵심 지표",
-        value: overviewText,
+        name: "🔁 가입전환율",
+        value: ctx.conversionMissing
+          ? "미조회\n전일 비교: -"
+          : formatRateCard(report.amplitudeConversion.currentRate, ctx.prevConversion),
+        inline: true,
       },
-      {
-        name: "헤비 유저 TOP3 (누적 녹음)",
-        value: heavyUserText,
-      }
+      { name: "✅ 온보딩율", value: formatRateCard(report.rates.onboarding, ctx.prevOnboarding), inline: true },
+      { name: "📲 PWA 설치율", value: formatRateCard(report.rates.pwa, ctx.prevPwa), inline: true },
+      { name: "🔗 연동율", value: formatRateCard(report.rates.integrationAny, ctx.prevIntegration), inline: true },
+      { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, ctx.prevActivation), inline: true },
+      { name: "💳 결제율", value: formatRateCard(report.rates.payment, ctx.prevPayment), inline: true },
+      { name: "🏆 헤비 유저 TOP3", value: heavyUserText, inline: false }
     )
-    .setFooter({
-      text: `집계일: ${report.targetYmd} | 실행일: ${report.runYmd} (KST)`,
-    })
-    .setTimestamp(new Date());
+    .setTimestamp(asOfDate instanceof Date ? asOfDate : new Date(asOfDate));
+
+  if (ctx.conversionMissing) {
+    embed.addFields({
+      name: "🧪 가입전환율 진단",
+      value: truncateForField(amplitudeSourceText || "원인 미상", 900),
+      inline: false,
+    });
+  }
+
+  return embed;
 }
 
 function buildStatsEmbed({ report, asOfDate }) {
   const { amplitudeSourceText } = buildDiscordMetricText(report);
   const asOfKst = formatKstDateTime(asOfDate);
   const heavyUserText = formatHeavyUserNamesOnly(report.heavyUserTop3);
-  const previous = report.previous?.notion;
-  const fallbackRates = report.previous?.fallbackRates || {};
-  const fallbackCounts = report.previous?.fallbackCounts || {};
-
-  const prevUserCount = previous?.totalSignups ?? fallbackCounts.totalSignups ?? null;
-  const prevOnboarding = previous?.onboardingRate ?? fallbackRates.onboarding ?? null;
-  const prevPwa = previous?.pwaRate ?? fallbackRates.pwa ?? null;
-  const prevIntegration = previous?.integrationRate ?? fallbackRates.integrationAny ?? null;
-  const prevActivation = previous?.activationRate ?? fallbackRates.activation30d ?? null;
-  const prevPayment = previous?.paymentRate ?? fallbackRates.payment ?? null;
-  const prevConversion = previous?.conversionRate ?? report.amplitudeConversion?.previousRate ?? null;
-  const conversionMissing = report.amplitudeConversion?.currentRate === null;
+  const ctx = buildMetricComparisonContext(report);
 
   const embed = new EmbedBuilder()
     .setColor(0x17a2d4)
     .setTitle("📈 Archy 실시간 지표")
     .setDescription("KST 기준 최신 운영 스냅샷")
     .addFields(
-      { name: "기준시각", value: asOfKst, inline: true },
-      { name: "데이터 상태", value: conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
-      { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, prevUserCount), inline: true },
+      { name: "🕒 기준시각", value: asOfKst, inline: true },
+      { name: "🧭 데이터 상태", value: ctx.conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
+      { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, ctx.prevUserCount), inline: true },
       {
         name: "🔁 가입전환율",
-        value: conversionMissing
+        value: ctx.conversionMissing
           ? "미조회\n전일 비교: -"
-          : formatRateCard(report.amplitudeConversion.currentRate, prevConversion),
+          : formatRateCard(report.amplitudeConversion.currentRate, ctx.prevConversion),
         inline: true,
       },
-      { name: "✅ 온보딩율", value: formatRateCard(report.rates.onboarding, prevOnboarding), inline: true },
-      { name: "📲 PWA 설치율", value: formatRateCard(report.rates.pwa, prevPwa), inline: true },
-      { name: "🔗 연동율", value: formatRateCard(report.rates.integrationAny, prevIntegration), inline: true },
-      { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, prevActivation), inline: true },
-      { name: "💳 결제율", value: formatRateCard(report.rates.payment, prevPayment), inline: true },
-      { name: "헤비 유저 TOP3", value: heavyUserText, inline: false }
+      { name: "✅ 온보딩율", value: formatRateCard(report.rates.onboarding, ctx.prevOnboarding), inline: true },
+      { name: "📲 PWA 설치율", value: formatRateCard(report.rates.pwa, ctx.prevPwa), inline: true },
+      { name: "🔗 연동율", value: formatRateCard(report.rates.integrationAny, ctx.prevIntegration), inline: true },
+      { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, ctx.prevActivation), inline: true },
+      { name: "💳 결제율", value: formatRateCard(report.rates.payment, ctx.prevPayment), inline: true },
+      { name: "🏆 헤비 유저 TOP3", value: heavyUserText, inline: false }
     );
 
-  if (conversionMissing) {
+  if (ctx.conversionMissing) {
     embed.addFields({
-      name: "가입전환율 진단",
+      name: "🧪 가입전환율 진단",
       value: truncateForField(amplitudeSourceText || "원인 미상", 900),
       inline: false,
     });
@@ -1253,7 +1278,7 @@ async function runDailyAndPost() {
 
     invalidateQuickReportCache();
 
-    const embed = buildDailyEmbed(report);
+    const embed = buildDailyEmbed({ report, asOfDate: new Date() });
     await channel.send({ embeds: [embed] });
 
     if (report.strategicReview) {
