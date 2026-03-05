@@ -377,11 +377,7 @@ function buildStatsEmbed({ report, asOfDate }) {
       { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, prevActivation), inline: true },
       { name: "💳 결제율", value: formatRateCard(report.rates.payment, prevPayment), inline: true },
       { name: "헤비 유저 TOP3", value: heavyUserText, inline: false }
-    )
-    .setFooter({
-      text: `표시 시각: ${asOfKst}`,
-    })
-    .setTimestamp(asOfDate instanceof Date ? asOfDate : new Date(asOfDate));
+    );
 
   if (conversionMissing) {
     embed.addFields({
@@ -390,12 +386,6 @@ function buildStatsEmbed({ report, asOfDate }) {
       inline: false,
     });
   }
-
-  embed.addFields({
-    name: "참고",
-    value: `표시 시각: ${asOfKst}`,
-    inline: false,
-  });
 
   return embed;
 }

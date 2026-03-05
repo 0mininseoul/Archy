@@ -671,6 +671,14 @@ function toYmdFromUnknownDate(value) {
     if (date) return toKstYmd(date);
   }
 
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const ymd = toYmdFromUnknownDate(item);
+      if (ymd) return ymd;
+    }
+    return null;
+  }
+
   if (typeof value === "object") {
     const candidates = [
       value.date,
@@ -868,6 +876,268 @@ function extractConversionSeries(payload) {
   return [];
 }
 
+function extractFirstNumberDeep(value, depth = 0) {
+  if (depth > 6) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, "").trim());
+    if (!Number.isNaN(parsed)) return parsed;
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+
+  const preferredKeys = [
+    "count",
+    "value",
+    "raw",
+    "users",
+    "numUsers",
+    "propsum",
+    "cumulative",
+    "total",
+  ];
+  for (const key of preferredKeys) {
+    if (!(key in value)) continue;
+    const parsed = extractFirstNumberDeep(value[key], depth + 1);
+    if (parsed !== null) return parsed;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const parsed = extractFirstNumberDeep(item, depth + 1);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  }
+
+  for (const nested of Object.values(value)) {
+    const parsed = extractFirstNumberDeep(nested, depth + 1);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function toStepCounts(candidate) {
+  if (!candidate) return [];
+  if (Array.isArray(candidate)) {
+    if (candidate.every((item) => typeof item === "number" && Number.isFinite(item))) {
+      return [...candidate];
+    }
+
+    const counts = [];
+    for (const item of candidate) {
+      const parsed = extractFirstNumberDeep(item);
+      if (parsed !== null) counts.push(parsed);
+    }
+    return counts;
+  }
+  return [];
+}
+
+function conversionRateFromStepCounts(counts) {
+  if (!Array.isArray(counts) || counts.length < 2) return null;
+  const first = counts[0];
+  const last = counts[counts.length - 1];
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first <= 0) return null;
+  return normalizeRateValue(last / first);
+}
+
+function extractConversionSeriesFromFunnelPayload(payload) {
+  const points = [];
+  const aggregateRates = [];
+  const visited = new Set();
+
+  const candidatesFromObject = (obj) => {
+    if (!obj || typeof obj !== "object") return [];
+    const keys = [
+      "cumulativeRaw",
+      "cumulative",
+      "events",
+      "propsum",
+      "dayPropsum",
+      "stepByStep",
+      "steps",
+    ];
+
+    const out = [];
+    for (const key of keys) {
+      if (!(key in obj)) continue;
+      out.push(...toStepCounts(obj[key]));
+      if (out.length >= 2) break;
+    }
+    return out;
+  };
+
+  const normalizeDayBuckets = (rawBuckets) => {
+    if (!rawBuckets) return [];
+    if (Array.isArray(rawBuckets)) return rawBuckets;
+    if (typeof rawBuckets === "object") {
+      return Object.entries(rawBuckets).map(([bucketKey, bucketValue]) => ({
+        __bucketKey: bucketKey,
+        __bucketValue: bucketValue,
+      }));
+    }
+    return [];
+  };
+
+  const stepCountsFromUnknown = (value, depth = 0) => {
+    if (!value || depth > 6) return [];
+
+    if (Array.isArray(value)) {
+      const values = [...value];
+      if (values.length > 0 && toYmdFromUnknownDate(values[0])) {
+        values.shift();
+      }
+
+      const counts = [];
+      for (const item of values) {
+        const parsed = extractFirstNumberDeep(item);
+        if (parsed !== null) counts.push(parsed);
+      }
+      return counts;
+    }
+
+    if (typeof value === "object") {
+      const fromObject = candidatesFromObject(value);
+      if (fromObject.length >= 2) return fromObject;
+      for (const nested of Object.values(value)) {
+        const parsedNested = stepCountsFromUnknown(nested, depth + 1);
+        if (parsedNested.length >= 2) return parsedNested;
+      }
+    }
+
+    return [];
+  };
+
+  const walk = (node, depth = 0) => {
+    if (!node || depth > 8) return;
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+
+    const dayBuckets = normalizeDayBuckets(node.dayFunnels || node.dailyFunnels || node.days || null);
+
+    if (dayBuckets.length > 0) {
+      for (const bucket of dayBuckets) {
+        const rawBucket =
+          bucket && typeof bucket === "object" && "__bucketValue" in bucket ? bucket.__bucketValue : bucket;
+        const bucketKey =
+          bucket && typeof bucket === "object" && "__bucketKey" in bucket ? bucket.__bucketKey : null;
+        if (!rawBucket) continue;
+
+        const ymd =
+          toYmdFromUnknownDate(rawBucket) ||
+          toYmdFromUnknownDate(bucketKey) ||
+          toYmdFromUnknownDate(rawBucket?.day) ||
+          toYmdFromUnknownDate(rawBucket?.date) ||
+          toYmdFromUnknownDate(rawBucket?.time) ||
+          toYmdFromUnknownDate(rawBucket?.timestamp);
+
+        const directRate =
+          pickRateFromUnknown(
+            rawBucket?.conversionRate ??
+              rawBucket?.conversion_rate ??
+              rawBucket?.conversion ??
+              rawBucket?.ratio ??
+              rawBucket?.rate ??
+              rawBucket?.percent ??
+              rawBucket?.value
+          ) ?? null;
+
+        const derivedRate = conversionRateFromStepCounts(stepCountsFromUnknown(rawBucket));
+        const rate = directRate ?? derivedRate;
+        if (ymd && rate !== null) {
+          points.push({ ymd, rate });
+        }
+      }
+    }
+
+    const aggregateRate = conversionRateFromStepCounts(candidatesFromObject(node));
+    if (aggregateRate !== null) {
+      aggregateRates.push(aggregateRate);
+    }
+
+    for (const value of Object.values(node)) {
+      walk(value, depth + 1);
+    }
+  };
+
+  walk(payload, 0);
+
+  if (points.length > 0) return { points, aggregateRate: null };
+  if (aggregateRates.length > 0) return { points: [], aggregateRate: aggregateRates[0] };
+  return { points: [], aggregateRate: null };
+}
+
+function selectRatesByTargetDate(points, targetYmd, previousYmd) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return {
+      currentRate: null,
+      previousRate: null,
+      effectiveYmd: null,
+      previousEffectiveYmd: null,
+    };
+  }
+
+  const byDate = new Map();
+  for (const point of points) {
+    if (!point?.ymd || point?.rate === null || point?.rate === undefined) continue;
+    byDate.set(point.ymd, point.rate);
+  }
+
+  const currentRate = byDate.get(targetYmd) ?? null;
+  const previousRate = byDate.get(previousYmd) ?? null;
+
+  if (currentRate !== null) {
+    return {
+      currentRate,
+      previousRate,
+      effectiveYmd: targetYmd,
+      previousEffectiveYmd: previousYmd,
+    };
+  }
+
+  const sorted = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b));
+  if (sorted.length === 0) {
+    return {
+      currentRate: null,
+      previousRate: null,
+      effectiveYmd: null,
+      previousEffectiveYmd: null,
+    };
+  }
+
+  let effectiveIndex = -1;
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (sorted[i][0] <= targetYmd) effectiveIndex = i;
+  }
+  if (effectiveIndex < 0) {
+    effectiveIndex = sorted.length - 1;
+  }
+
+  const [effectiveYmd, effectiveRate] = sorted[effectiveIndex];
+  const previousFromSequence = effectiveIndex > 0 ? sorted[effectiveIndex - 1] : null;
+  let previousEffectiveYmd = previousFromSequence ? previousFromSequence[0] : null;
+  let previousFallbackRate = previousFromSequence ? previousFromSequence[1] : null;
+
+  if (previousRate !== null && previousYmd && previousYmd < effectiveYmd) {
+    previousEffectiveYmd = previousYmd;
+    previousFallbackRate = previousRate;
+  }
+
+  return {
+    currentRate: effectiveRate ?? null,
+    previousRate: previousFallbackRate,
+    effectiveYmd,
+    previousEffectiveYmd: previousEffectiveYmd ?? previousYmd,
+  };
+}
+
 function describePayloadShape(payload) {
   if (payload === null || payload === undefined) return "empty";
   if (Array.isArray(payload)) return `array(len=${payload.length})`;
@@ -951,6 +1221,26 @@ export async function fetchAmplitudeSignupConversion({ targetYmd, previousYmd })
 
   const points = extractConversionSeries(payload);
   if (points.length === 0) {
+    const funnelDerived = extractConversionSeriesFromFunnelPayload(payload);
+    if (funnelDerived.points.length > 0) {
+      const selected = selectRatesByTargetDate(funnelDerived.points, targetYmd, previousYmd);
+      return {
+        source: customApiUrl ? "custom_api_funnel_derived" : "dashboard_funnel_derived",
+        currentRate: selected.currentRate,
+        previousRate: selected.previousRate,
+        effectiveYmd: selected.effectiveYmd,
+        previousEffectiveYmd: selected.previousEffectiveYmd,
+      };
+    }
+
+    if (funnelDerived.aggregateRate !== null) {
+      return {
+        source: customApiUrl ? "custom_api_funnel_aggregate" : "dashboard_funnel_aggregate",
+        currentRate: funnelDerived.aggregateRate,
+        previousRate: null,
+      };
+    }
+
     return {
       source: customApiUrl ? "custom_api_unparsed" : "dashboard_unparsed",
       currentRate: null,
@@ -959,15 +1249,14 @@ export async function fetchAmplitudeSignupConversion({ targetYmd, previousYmd })
     };
   }
 
-  const byDate = new Map();
-  for (const point of points) {
-    byDate.set(point.ymd, point.rate);
-  }
+  const selected = selectRatesByTargetDate(points, targetYmd, previousYmd);
 
   return {
     source: customApiUrl ? "custom_api" : "dashboard_api",
-    currentRate: byDate.get(targetYmd) ?? null,
-    previousRate: byDate.get(previousYmd) ?? null,
+    currentRate: selected.currentRate,
+    previousRate: selected.previousRate,
+    effectiveYmd: selected.effectiveYmd,
+    previousEffectiveYmd: selected.previousEffectiveYmd,
   };
 }
 
@@ -1410,6 +1699,10 @@ function describeAmplitudeSource(amplitudeConversion) {
   const map = {
     dashboard_api: "Amplitude Dashboard API",
     custom_api: "커스텀 API",
+    dashboard_funnel_derived: "Amplitude Funnel 응답(일별 추정)",
+    custom_api_funnel_derived: "커스텀 Funnel 응답(일별 추정)",
+    dashboard_funnel_aggregate: "Amplitude Funnel 응답(집계 추정)",
+    custom_api_funnel_aggregate: "커스텀 Funnel 응답(집계 추정)",
     static_env: "환경변수 고정값",
     not_configured: "미설정(차트 ID 없음)",
     dashboard_unparsed: "Dashboard 응답 파싱 실패(포맷 불일치)",
@@ -1421,6 +1714,8 @@ function describeAmplitudeSource(amplitudeConversion) {
   const diagnostics = [
     amplitudeConversion?.error ? `error=${String(amplitudeConversion.error).slice(0, 120)}` : null,
     amplitudeConversion?.rawShape ? `shape=${amplitudeConversion.rawShape}` : null,
+    amplitudeConversion?.effectiveYmd ? `effectiveYmd=${amplitudeConversion.effectiveYmd}` : null,
+    amplitudeConversion?.previousEffectiveYmd ? `previousYmd=${amplitudeConversion.previousEffectiveYmd}` : null,
   ]
     .filter(Boolean)
     .join(" / ");
