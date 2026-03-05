@@ -250,36 +250,12 @@ function getSupabaseAdminClient() {
 
 async function fetchSupabaseSnapshot() {
   const supabase = getSupabaseAdminClient();
-  const selectWithPayment =
-    "id,email,name,google_id,created_at,is_onboarded,pwa_installed_at,notion_access_token,google_access_token,slack_access_token,is_paid_user,paid_ever,promo_code_id,promo_expires_at";
-  const selectWithoutPayment =
-    "id,email,name,google_id,created_at,is_onboarded,pwa_installed_at,notion_access_token,google_access_token,slack_access_token,promo_code_id,promo_expires_at";
-
-  const [initialUsersRes, recordingsRes, formatsRes, withdrawnRes] = await Promise.all([
-    supabase.from("users").select(selectWithPayment),
+  const [usersRes, recordingsRes, formatsRes, withdrawnRes] = await Promise.all([
+    supabase.from("users").select("*"),
     supabase.from("recordings").select("id,user_id,created_at,status"),
     supabase.from("custom_formats").select("id,user_id,created_at"),
     supabase.from("withdrawn_users").select("id,original_user_id,name,withdrawn_at"),
   ]);
-
-  let usersRes = initialUsersRes;
-  if (
-    usersRes.error &&
-    typeof usersRes.error?.message === "string" &&
-    usersRes.error.message.includes("is_paid_user")
-  ) {
-    const fallback = await supabase.from("users").select(selectWithoutPayment);
-    usersRes = fallback.error
-      ? fallback
-      : {
-          data: (fallback.data || []).map((user) => ({
-            ...user,
-            is_paid_user: false,
-            paid_ever: false,
-          })),
-          error: null,
-        };
-  }
 
   if (usersRes.error) throw usersRes.error;
   if (recordingsRes.error) throw recordingsRes.error;
@@ -514,10 +490,10 @@ function rowsAreEquivalent(currentRow, nextRow, width) {
   return true;
 }
 
-function buildSheetRowForUser(user, header, derivedUserState) {
+function buildSheetRowForUser(user, header, derivedUserState, currentRow = []) {
   const state = derivedUserState.get(user.id);
 
-  return header.map((column) => {
+  return header.map((column, index) => {
     const metricPrefix = resolveHeaderMetricKey(column);
     if (metricPrefix) {
       if (metricPrefix === "온보딩") return state?.isOnboarded ? "O" : "X";
@@ -533,8 +509,8 @@ function buildSheetRowForUser(user, header, derivedUserState) {
     if (column === "이름") return toRowValue(user.name);
     if (column === "이메일 주소") return toRowValue(user.email);
     if (column === "가입일") return formatSheetTimestamp(user.created_at);
-
-    return toRowValue(user[column]);
+    if (Object.hasOwn(user, column)) return toRowValue(user[column]);
+    return normalizeSheetCell(currentRow?.[index]);
   });
 }
 
@@ -665,11 +641,17 @@ export async function syncGoogleUserSheet({
   }
 
   const sourceUsers = syncAllUsers ? metrics.users : metrics.usersOnTargetDate;
+  const sampleUser = sourceUsers[0] || {};
+  const nonMappedHeaders = refreshedHeader.filter((column) => {
+    if (resolveHeaderMetricKey(column)) return false;
+    if (column === "이름" || column === "이메일 주소" || column === "가입일") return false;
+    return !Object.hasOwn(sampleUser, column);
+  });
   const usersToUpdate = [];
   for (const user of sourceUsers) {
     const existingRow = existingRowsById.get(user.id);
     if (!existingRow) continue;
-    const rowValues = buildSheetRowForUser(user, refreshedHeader, metrics.derivedUserState);
+    const rowValues = buildSheetRowForUser(user, refreshedHeader, metrics.derivedUserState, existingRow.row);
     if (!rowsAreEquivalent(existingRow.row, rowValues, refreshedHeader.length)) {
       usersToUpdate.push({
         rowNumber: existingRow.rowNumber,
@@ -752,6 +734,7 @@ export async function syncGoogleUserSheet({
     removedDuplicateRows: rowsToDelete.filter((r) => r.reason === "duplicate").length,
     skippedExistingRows: sourceUsers.length - rows.length,
     syncMode: syncAllUsers ? "all_users" : "daily_new_users",
+    nonMappedHeaders,
   };
 }
 
@@ -1989,6 +1972,8 @@ export async function runDailyPipeline({
         updatedRows: sheetSync?.updatedRows ?? 0,
         removedExcludedRows: sheetSync?.removedExcludedRows ?? 0,
         removedDuplicateRows: sheetSync?.removedDuplicateRows ?? 0,
+        nonMappedHeaderCount: sheetSync?.nonMappedHeaders?.length ?? 0,
+        nonMappedHeadersPreview: (sheetSync?.nonMappedHeaders || []).slice(0, 8),
       });
 
       const dailyNotionStartedAt = Date.now();
