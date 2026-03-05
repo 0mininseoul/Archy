@@ -413,18 +413,8 @@ async function runDailyAndPost({ trigger = "schedule" } = {}) {
     await channel.send({ embeds: [embed] });
 
     if (report.strategicReview) {
-      await sendLongMessage(channel, `🧠 오늘의 전략 리뷰\n\n${report.strategicReview}`);
+      await sendLongMessage(channel, `**🧠 오늘의 전략 리뷰**\n\n${report.strategicReview}`);
     }
-
-    const syncSummary = [
-      `- Google Sheet 삽입: ${report.sheetSync?.insertedRows ?? 0}`,
-      `- Google Sheet 제외행 삭제: ${report.sheetSync?.removedExcludedRows ?? 0}`,
-      `- Google Sheet 중복행 삭제: ${report.sheetSync?.removedDuplicateRows ?? 0}`,
-      `- Notion(데일리): ${report.dailyNotionUpsert?.mode || "-"}`,
-      `- Notion(위클리): ${report.weeklyNotionUpsert?.mode || "skip"}`,
-      `- 가입전환율 데이터 소스: ${report.amplitudeConversion?.source || "-"}`,
-    ].join("\n");
-    await channel.send(`배치 완료\n${syncSummary}`);
 
     return report;
   })();
