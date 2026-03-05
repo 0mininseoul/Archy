@@ -805,6 +805,13 @@ function extractConversionSeries(payload) {
 
     // Pattern: [{ date, value }]
     if (Array.isArray(root)) {
+      // If array items themselves contain chart structures, recurse first.
+      for (const item of root) {
+        if (!item || typeof item !== "object") continue;
+        const nested = tryExtract(item);
+        if (nested.length > 0) return nested;
+      }
+
       const points = [];
       for (const item of root) {
         if (!item || typeof item !== "object") continue;
@@ -831,6 +838,7 @@ function extractConversionSeries(payload) {
   const roots = [
     payload,
     payload?.data,
+    payload?.data?.[0],
     payload?.data?.series,
     payload?.data?.rows,
     payload?.data?.result,
@@ -844,6 +852,9 @@ function extractConversionSeries(payload) {
   if (payload && typeof payload === "object") {
     for (const value of Object.values(payload)) {
       roots.push(value);
+      if (Array.isArray(value) && value.length > 0) {
+        roots.push(value[0]);
+      }
     }
   }
 
@@ -866,9 +877,12 @@ function describePayloadShape(payload) {
       payload?.data && typeof payload.data === "object"
         ? Object.keys(payload.data).slice(0, 12).join(", ")
         : "";
-    return dataKeys
-      ? `object(keys=${keys || "-"}; dataKeys=${dataKeys || "-"})`
-      : `object(keys=${keys || "-"})`;
+    const data0Shape =
+      Array.isArray(payload?.data) && payload.data.length > 0 ? describePayloadShape(payload.data[0]) : "";
+    const pieces = [`keys=${keys || "-"}`];
+    if (dataKeys) pieces.push(`dataKeys=${dataKeys || "-"}`);
+    if (data0Shape) pieces.push(`data0=${data0Shape}`);
+    return `object(${pieces.join("; ")})`;
   }
   return typeof payload;
 }
@@ -1449,10 +1463,12 @@ export async function runDailyPipeline({
 
   let previousNotion = null;
   let previousNotionError = null;
-  try {
-    previousNotion = await getNotionMetricsByLabel(previousLabel);
-  } catch (error) {
-    previousNotionError = error instanceof Error ? error.message : String(error);
+  if (!dryRun) {
+    try {
+      previousNotion = await getNotionMetricsByLabel(previousLabel);
+    } catch (error) {
+      previousNotionError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   let sheetSync = null;
