@@ -1962,6 +1962,24 @@ function buildStatsEmbed({ report, asOfDate }) {
   return embed;
 }
 
+function buildStrategicReviewSkipMessage(errorCode, errorMessage) {
+  const code = String(errorCode || "unknown");
+  const safeReason = String(errorMessage || "").slice(0, 220);
+  if (code === "max_tokens_repeated") {
+    return `전략 리뷰는 모델 출력이 반복적으로 짧게 종료되어(토큰 상한 반복) 이번 배치에서 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+  }
+  if (code === "schema_invalid") {
+    return `전략 리뷰는 모델 응답 형식이 요구 스키마를 충족하지 못해 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+  }
+  if (code === "timeout_exhausted") {
+    return `전략 리뷰는 지연 재시도(최대 300초)까지 진행했지만 제한시간을 초과해 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+  }
+  if (code === "validation_failed") {
+    return `전략 리뷰는 형식/품질 검증을 통과하지 못해 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+  }
+  return `전략 리뷰는 내부 생성 오류로 이번 배치에서 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+}
+
 async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {}) {
   if (dailyRunInFlight) {
     logBotEvent("daily.already_in_flight", { trigger, requestedBy });
@@ -2030,11 +2048,14 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
         await channel.send("전략 리뷰 전송 중 일부 메시지가 누락됐어요. `/daily`로 다시 요청해주면 재전송할게요.");
       }
     } else if (report.strategicReviewError) {
-      await channel.send("전략 리뷰는 모델 응답 지연으로 이번 배치에서 생략됐어요. `/daily`로 다시 요청해주면 재시도할게요.");
+      await channel.send(
+        buildStrategicReviewSkipMessage(report?.strategicReviewErrorCode, report?.strategicReviewError)
+      );
       logBotEvent("daily.review_skipped", {
         trigger,
         requestedBy,
         runId: report?.runId ?? null,
+        errorCode: report?.strategicReviewErrorCode ?? null,
         reason: report.strategicReviewError,
       });
     }

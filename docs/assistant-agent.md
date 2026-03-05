@@ -76,7 +76,7 @@ npm run agent:discord
 ## 필수 환경변수
 `.env.example`에 추가된 키를 설정하세요.
 - Gemini: `GEMINI_API_KEY`
-- Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_RETRIES`, `GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS`
+- Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_SLA_MS`, `GEMINI_STRATEGIC_REVIEW_TEMPERATURE`, `GEMINI_STRATEGIC_REVIEW_PRO_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_FLASH_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FLASH_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_PRO`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_FLASH`, `GEMINI_STRATEGIC_REVIEW_MIN_CANDIDATE_TOKENS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`
 - Discord: `DISCORD_BOT_TOKEN`, `DISCORD_DAILY_CHANNEL_ID`, `DISCORD_GUILD_ID`
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 - Google Sheets 동기화 모드(옵션): `ARCHY_SHEET_SYNC_ALL_USERS` (기본 `true`)
@@ -100,12 +100,12 @@ npm run agent:discord
 - 주간(Notion 위클리)은 실행 시각이 일요일일 때 실행일 라벨(예: `3/8(일)`)로 upsert합니다.
 - 전략 리뷰의 프로젝트 맥락은 `docs/STRATEGIC_REVIEW_CONTEXT.md`를 우선 주입합니다(없으면 기존 문서 묶음으로 폴백).
 - 전략 리뷰 출력은 과도한 장문을 피하도록 압축 지시가 적용되어 있으며, 액션 항목은 상황에 따라 `1~5개`를 유동적으로 제안합니다.
-- 전략 리뷰는 기본적으로 Gemini Pro로 생성하고, timeout/혼잡 등 재시도 가능한 실패가 나면 Flash 모델로 1회 폴백을 시도합니다.
-- 전략 리뷰 생성 중 `finishReason=MAX_TOKENS`가 감지되면 이어쓰기/폴백 단계의 thinking level을 `medium`으로 자동 다운시프트합니다.
+- 전략 리뷰는 `Pro(full) -> Pro(compact) -> Flash(compact) -> Flash(ultra)` 프로파일 순서로 재생성하며, 최대 `300초` SLA 내에서 시도합니다.
+- 전략 리뷰 생성은 구조화 JSON 응답을 먼저 받고, 내부 렌더러로 최종 Markdown 형식을 고정해 섹션 누락을 방지합니다.
 - 생성된 리뷰가 형식/길이 검증(필수 섹션, 액션 개수, 최소 길이)을 통과하지 못하면 불완전 텍스트를 보내지 않고 생략 처리합니다.
 - Pro+Flash 모두 실패하면:
   - 데일리 리포트는 정상 전송
-  - 전략 리뷰는 생략 안내 메시지를 전송
+  - 전략 리뷰는 오류코드(`max_tokens_repeated`, `schema_invalid`, `timeout_exhausted`, `validation_failed`, `unknown`)와 함께 생략 안내 메시지를 전송
 - 긴 전략 리뷰는 Discord 길이 제한(2000자) 대응을 위해 자동 분할 전송합니다.
 - 멘션 응답도 길이 제한(2000자)을 고려해 자동 분할 전송하며, `reply.chunk.sent/fail` 로그로 추적합니다.
 - 업무 맥락은 멘션 응답 시 실시간으로 Notion에서 조회되고, 요약값은 Supabase `agent_memory_facts`에도 저장됩니다.

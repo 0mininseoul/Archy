@@ -28,8 +28,37 @@ const STRATEGIC_CONTEXT_FALLBACK_FILES = [
   "docs/assistant-agent.md",
 ];
 const STRATEGIC_REVIEW_MIN_LENGTH = 450;
-const STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS = 3;
 const THINKING_LEVELS = new Set(["minimal", "low", "medium", "high"]);
+const STRATEGIC_REVIEW_ERROR_CODES = Object.freeze({
+  MAX_TOKENS_REPEATED: "max_tokens_repeated",
+  SCHEMA_INVALID: "schema_invalid",
+  TIMEOUT_EXHAUSTED: "timeout_exhausted",
+  VALIDATION_FAILED: "validation_failed",
+  UNKNOWN: "unknown",
+});
+const STRATEGIC_CONTEXT_COMPRESSION_PROFILES = Object.freeze({
+  full: {
+    projectContextChars: 6000,
+    completedLimit: 5,
+    pendingLimit: 8,
+    editLimit: 4,
+    editChars: 140,
+  },
+  compact: {
+    projectContextChars: 2600,
+    completedLimit: 5,
+    pendingLimit: 8,
+    editLimit: 4,
+    editChars: 120,
+  },
+  ultra: {
+    projectContextChars: 1600,
+    completedLimit: 5,
+    pendingLimit: 8,
+    editLimit: 4,
+    editChars: 100,
+  },
+});
 
 let projectContextCache = {
   value: "",
@@ -40,6 +69,59 @@ function safeErrorMessage(error) {
   if (!error) return "unknown";
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function toFiniteNumber(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed;
+}
+
+function toPositiveInt(value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Math.floor(toFiniteNumber(value, NaN));
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
+function clipText(text, maxChars) {
+  const body = String(text || "").trim();
+  if (!body) return "";
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return body;
+  if (body.length <= maxChars) return body;
+  return `${body.slice(0, maxChars)}...`;
+}
+
+function getThoughtTokens(usageMetadata) {
+  if (!usageMetadata || typeof usageMetadata !== "object") return null;
+  const direct = toFiniteNumber(
+    usageMetadata.thoughtsTokenCount ?? usageMetadata.thoughtTokenCount,
+    NaN
+  );
+  if (Number.isFinite(direct)) return direct;
+
+  const prompt = toFiniteNumber(usageMetadata.promptTokenCount, NaN);
+  const candidate = toFiniteNumber(usageMetadata.candidatesTokenCount, NaN);
+  const total = toFiniteNumber(usageMetadata.totalTokenCount, NaN);
+  if (!Number.isFinite(prompt) || !Number.isFinite(candidate) || !Number.isFinite(total)) return null;
+  const estimated = total - prompt - candidate;
+  return estimated > 0 ? estimated : 0;
+}
+
+function createStrategicReviewError(code, message, extras = {}) {
+  const error = new Error(message);
+  error.name = "StrategicReviewError";
+  error.code = Object.values(STRATEGIC_REVIEW_ERROR_CODES).includes(code)
+    ? code
+    : STRATEGIC_REVIEW_ERROR_CODES.UNKNOWN;
+  Object.assign(error, extras);
+  return error;
+}
+
+export function getStrategicReviewErrorCode(error) {
+  const code = error?.code;
+  if (Object.values(STRATEGIC_REVIEW_ERROR_CODES).includes(code)) return code;
+  return STRATEGIC_REVIEW_ERROR_CODES.UNKNOWN;
 }
 
 function normalizeThinkingLevel(value, fallback = null) {
@@ -2019,108 +2101,302 @@ export function chooseChatModel(messageText) {
 }
 
 async function generateStrategicReviewText({
+  model,
   systemInstruction,
   userPrompt,
   temperature,
   maxOutputTokens,
   thinkingLevel,
+  timeoutMs,
+  maxRetries,
   stageLabel = "strategic_review",
+  profileId = "unknown",
 }) {
-  const timeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_TIMEOUT_MS || 120000);
-  const maxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES || 1);
-
-  try {
-    let primaryMeta = null;
-    const primaryText = await generateGeminiText({
-      model: GEMINI_PRO_MODEL,
-      systemInstruction,
-      userPrompt,
-      temperature,
-      maxOutputTokens,
-      thinkingLevel,
-      timeoutMs,
-      maxRetries,
-      onResponseMeta: (meta) => {
-        primaryMeta = meta;
-        logDailyEvent("strategic_review.gemini_response", {
-          stage: stageLabel,
-          model: meta.model,
-          attempt: meta.attempt,
-          finishReason: meta.finishReason,
-          promptTokens: meta?.usageMetadata?.promptTokenCount ?? null,
-          candidateTokens: meta?.usageMetadata?.candidatesTokenCount ?? null,
-          totalTokens: meta?.usageMetadata?.totalTokenCount ?? null,
-          textLength: meta.textLength,
-        });
-      },
-    });
-    return {
-      text: primaryText,
-      model: GEMINI_PRO_MODEL,
-      finishReason: primaryMeta?.finishReason ?? null,
-    };
-  } catch (primaryError) {
-    if (!isRetryableGeminiFailure(primaryError)) throw primaryError;
-
-    const fallbackTimeoutMs = Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_TIMEOUT_MS || timeoutMs);
-    const fallbackMaxRetries = Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_RETRIES || 0);
-    const fallbackMaxOutputTokens = Math.max(
-      256,
-      Math.min(maxOutputTokens, Number(process.env.GEMINI_STRATEGIC_REVIEW_FALLBACK_MAX_OUTPUT_TOKENS || 1600))
-    );
-
-    logDailyEvent("strategic_review.fallback_start", {
-      fromModel: GEMINI_PRO_MODEL,
-      toModel: GEMINI_FLASH_MODEL,
-      reason: safeErrorMessage(primaryError).slice(0, 180),
-    });
-
-    try {
-      let fallbackMeta = null;
-      const fallbackText = await generateGeminiText({
-        model: GEMINI_FLASH_MODEL,
-        systemInstruction,
-        userPrompt,
-        temperature,
-        maxOutputTokens: fallbackMaxOutputTokens,
-        thinkingLevel,
-        timeoutMs: fallbackTimeoutMs,
-        maxRetries: fallbackMaxRetries,
-        onResponseMeta: (meta) => {
-          fallbackMeta = meta;
-          logDailyEvent("strategic_review.gemini_response", {
-            stage: `${stageLabel}.fallback`,
-            model: meta.model,
-            attempt: meta.attempt,
-            finishReason: meta.finishReason,
-            promptTokens: meta?.usageMetadata?.promptTokenCount ?? null,
-            candidateTokens: meta?.usageMetadata?.candidatesTokenCount ?? null,
-            totalTokens: meta?.usageMetadata?.totalTokenCount ?? null,
-            textLength: meta.textLength,
-          });
-        },
+  let responseMeta = null;
+  const text = await generateGeminiText({
+    model,
+    systemInstruction,
+    userPrompt,
+    temperature,
+    maxOutputTokens,
+    thinkingLevel,
+    timeoutMs,
+    maxRetries,
+    onResponseMeta: (meta) => {
+      responseMeta = meta;
+      logDailyEvent("strategic_review.gemini_response", {
+        stage: stageLabel,
+        profileId,
+        model: meta.model,
+        attempt: meta.attempt,
+        finishReason: meta.finishReason,
+        promptTokens: meta?.usageMetadata?.promptTokenCount ?? null,
+        candidateTokens: meta?.usageMetadata?.candidatesTokenCount ?? null,
+        thoughtTokens: getThoughtTokens(meta?.usageMetadata),
+        totalTokens: meta?.usageMetadata?.totalTokenCount ?? null,
+        textLength: meta.textLength,
+        maxOutputTokens,
+        timeoutMs,
+        thinkingLevel: normalizeThinkingLevel(thinkingLevel, null),
       });
+    },
+  });
 
-      logDailyEvent("strategic_review.fallback_done", {
-        fromModel: GEMINI_PRO_MODEL,
-        toModel: GEMINI_FLASH_MODEL,
-        outputLength: fallbackText?.length ?? 0,
-      });
-      return {
-        text: fallbackText,
-        model: GEMINI_FLASH_MODEL,
-        finishReason: fallbackMeta?.finishReason ?? null,
-      };
-    } catch (fallbackError) {
-      logDailyEvent("strategic_review.fallback_error", {
-        fromModel: GEMINI_PRO_MODEL,
-        toModel: GEMINI_FLASH_MODEL,
-        reason: safeErrorMessage(fallbackError).slice(0, 180),
-      });
-      throw fallbackError;
-    }
-  }
+  const usageMetadata = responseMeta?.usageMetadata || null;
+  return {
+    text: text || "",
+    model,
+    finishReason: responseMeta?.finishReason ?? null,
+    usageMetadata,
+    promptTokens: usageMetadata?.promptTokenCount ?? null,
+    candidateTokens: usageMetadata?.candidatesTokenCount ?? null,
+    thoughtTokens: getThoughtTokens(usageMetadata),
+    totalTokens: usageMetadata?.totalTokenCount ?? null,
+  };
 }
+
+function buildStrategicReviewDeltaSnapshot(current, previous) {
+  const cur = Number.isFinite(Number(current)) ? Number(current) : null;
+  const prev = Number.isFinite(Number(previous)) ? Number(previous) : null;
+  const delta = cur !== null && prev !== null ? cur - prev : null;
+  return {
+    current: cur,
+    previous: prev,
+    delta,
+  };
+}
+
+function buildStrategicReviewInput({
+  metrics,
+  amplitudeConversion,
+  previousMetrics,
+  workProgress,
+  targetYmd,
+  projectContext,
+  contextProfile = "full",
+}) {
+  const profile =
+    STRATEGIC_CONTEXT_COMPRESSION_PROFILES[contextProfile] ||
+    STRATEGIC_CONTEXT_COMPRESSION_PROFILES.full;
+  const previousCounts = previousMetrics?.counts || {};
+  const previousRates = previousMetrics?.rates || {};
+  const completed = Array.isArray(workProgress?.completed) ? workProgress.completed : [];
+  const pending = Array.isArray(workProgress?.pending) ? workProgress.pending : [];
+  const ascentumEdits = Array.isArray(workProgress?.ascentum?.edits)
+    ? workProgress.ascentum.edits
+    : [];
+
+  const compactEdits = ascentumEdits.slice(0, profile.editLimit).map((edit) => {
+    const when = edit?.lastEdited ? String(edit.lastEdited) : "";
+    const text = clipText(edit?.text || "", profile.editChars);
+    return when ? `[${when}] ${text}` : text;
+  });
+
+  const input = {
+    date: targetYmd,
+    kpis: {
+      totalSignups: buildStrategicReviewDeltaSnapshot(
+        metrics?.counts?.totalSignups,
+        previousCounts.totalSignups
+      ),
+      signupConversionRate: buildStrategicReviewDeltaSnapshot(
+        amplitudeConversion?.currentRate,
+        amplitudeConversion?.previousRate
+      ),
+      onboardingRate: buildStrategicReviewDeltaSnapshot(
+        metrics?.rates?.onboarding,
+        previousRates.onboarding
+      ),
+      pwaRate: buildStrategicReviewDeltaSnapshot(metrics?.rates?.pwa, previousRates.pwa),
+      integrationRate: buildStrategicReviewDeltaSnapshot(
+        metrics?.rates?.integrationAny,
+        previousRates.integrationAny
+      ),
+      activationRate30d: buildStrategicReviewDeltaSnapshot(
+        metrics?.rates?.activation30d,
+        previousRates.activation30d
+      ),
+      paymentRate: buildStrategicReviewDeltaSnapshot(metrics?.rates?.payment, previousRates.payment),
+    },
+    activity: {
+      dailyNewUsers: metrics?.counts?.dailyNewUsers ?? null,
+      dailyRecordings: metrics?.counts?.dailyRecordings ?? null,
+      heavyUsersTop3: (metrics?.heavyUserTop3 || []).slice(0, 3).map((item) => ({
+        name: item?.name || "unknown",
+        count: item?.count ?? 0,
+      })),
+    },
+    workProgress: {
+      completedCount: completed.length,
+      pendingCount: pending.length,
+      completedTop: completed.slice(0, profile.completedLimit),
+      pendingTop: pending.slice(0, profile.pendingLimit),
+      recentEditsTop: compactEdits,
+    },
+  };
+
+  return {
+    contextProfile,
+    projectContext: clipText(projectContext, profile.projectContextChars),
+    input,
+  };
+}
+
+function buildStrategicReviewPrompt({ strategicInput }) {
+  const lines = [
+    "[프로젝트 맥락]",
+    strategicInput.projectContext || "(없음)",
+    "",
+    "[운영 데이터(JSON)]",
+    JSON.stringify(strategicInput.input, null, 2),
+    "",
+    "[출력 규칙]",
+    "아래 스키마의 JSON 객체만 출력해라. 코드펜스/설명문 금지.",
+    "{",
+    '  "business_state": "string (2~3문장)",',
+    '  "strengths": ["string", "... 최대 2개"],',
+    '  "risks": ["string", "... 최대 2개"],',
+    '  "priority_actions": [',
+    '    { "action": "string", "expected_effect": "string" }',
+    "  ],",
+    '  "data_check_requests": ["string", "... 최대 2개"]',
+    "}",
+    "제약:",
+    "- priority_actions는 1~5개",
+    "- strengths/risks는 각 1~2개",
+    "- data_check_requests는 0~2개",
+    "- 과장 표현/추측 금지, 수치 근거 중심으로 압축 작성",
+  ];
+  return lines.join("\n");
+}
+
+function extractJsonCandidate(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return "";
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fence?.[1] ? fence[1].trim() : text;
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start < 0 || end <= start) return source;
+  return source.slice(start, end + 1);
+}
+
+function normalizeStringArray(value, { min = 0, max = 5 } = {}) {
+  const arr = Array.isArray(value) ? value : [];
+  const normalized = arr
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+  if (normalized.length < min) return null;
+  return normalized;
+}
+
+function normalizePriorityActions(value) {
+  const list = Array.isArray(value) ? value : [];
+  const normalized = list
+    .map((item) => {
+      const action = String(item?.action || "").trim();
+      const expectedEffect = String(item?.expected_effect || item?.expectedEffect || "").trim();
+      if (!action || !expectedEffect) return null;
+      return {
+        action,
+        expectedEffect,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 5);
+  if (normalized.length < 1) return null;
+  return normalized;
+}
+
+function parseStrategicReviewJson(rawText) {
+  const candidate = extractJsonCandidate(rawText);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return {
+      ok: false,
+      reason: "json_parse_failed",
+      candidate,
+    };
+  }
+
+  const businessState = String(parsed?.business_state || parsed?.businessState || "").trim();
+  if (!businessState) {
+    return { ok: false, reason: "missing_business_state", candidate };
+  }
+
+  const strengths = normalizeStringArray(parsed?.strengths, { min: 1, max: 2 });
+  if (!strengths) {
+    return { ok: false, reason: "invalid_strengths", candidate };
+  }
+
+  const risks = normalizeStringArray(parsed?.risks, { min: 1, max: 2 });
+  if (!risks) {
+    return { ok: false, reason: "invalid_risks", candidate };
+  }
+
+  const priorityActions = normalizePriorityActions(parsed?.priority_actions || parsed?.priorityActions);
+  if (!priorityActions) {
+    return { ok: false, reason: "invalid_priority_actions", candidate };
+  }
+
+  const dataCheckRequests =
+    normalizeStringArray(parsed?.data_check_requests || parsed?.dataCheckRequests, {
+      min: 0,
+      max: 2,
+    }) || [];
+
+  return {
+    ok: true,
+    value: {
+      businessState,
+      strengths,
+      risks,
+      priorityActions,
+      dataCheckRequests,
+    },
+  };
+}
+
+function renderStrategicReviewMarkdown(data) {
+  const strengths = data?.strengths || [];
+  const risks = data?.risks || [];
+  const priorityActions = data?.priorityActions || [];
+  const dataCheckRequests = data?.dataCheckRequests || [];
+
+  const lines = [
+    "1) 오늘의 사업 상태 진단",
+    data?.businessState || "-",
+    "",
+    "2) 잘된 점",
+    ...strengths.map((item) => `- ${item}`),
+    "",
+    "3) 리스크/병목",
+    ...risks.map((item) => `- ${item}`),
+    "",
+    "4) 내일 바로 실행할 우선순위 액션",
+    ...priorityActions.map(
+      (item, idx) => `${idx + 1}. ${item.action} (기대효과: ${item.expectedEffect})`
+    ),
+    "",
+    "5) 데이터 추가 확인 요청",
+    ...(dataCheckRequests.length > 0
+      ? dataCheckRequests.map((item) => `- ${item}`)
+      : ["- 현재 추가 확인 요청 없음"]),
+  ];
+
+  return lines.join("\n").trim();
+}
+
+export const strategicReviewInternals = Object.freeze({
+  buildStrategicReviewInput,
+  buildStrategicReviewPrompt,
+  parseStrategicReviewJson,
+  renderStrategicReviewMarkdown,
+  analyzeStrategicReview,
+});
 
 function analyzeStrategicReview(text) {
   const body = String(text || "").trim();
@@ -2195,155 +2471,247 @@ export async function generateDailyStrategicReview({
   workProgress,
   targetYmd,
 }) {
-  const primaryThinkingLevel = normalizeThinkingLevel(
-    process.env.GEMINI_STRATEGIC_REVIEW_THINKING_LEVEL,
+  const startedAtMs = Date.now();
+  const slaMs = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_SLA_MS, 300000, {
+    min: 60000,
+    max: 600000,
+  });
+  const deadlineMs = startedAtMs + slaMs;
+  const temperature = toFiniteNumber(process.env.GEMINI_STRATEGIC_REVIEW_TEMPERATURE, 1.0);
+  const maxRetries = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_MAX_RETRIES, 0, {
+    min: 0,
+    max: 2,
+  });
+  const minCandidateTokens = toPositiveInt(
+    process.env.GEMINI_STRATEGIC_REVIEW_MIN_CANDIDATE_TOKENS,
+    180,
+    { min: 1, max: 2000 }
+  );
+  const proMaxOutputTokens = toPositiveInt(
+    process.env.GEMINI_STRATEGIC_REVIEW_PRO_MAX_OUTPUT_TOKENS,
+    3072,
+    { min: 512, max: 8192 }
+  );
+  const flashMaxOutputTokens = toPositiveInt(
+    process.env.GEMINI_STRATEGIC_REVIEW_FLASH_MAX_OUTPUT_TOKENS,
+    2048,
+    { min: 512, max: 8192 }
+  );
+  const proTimeoutMs = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS, 70000, {
+    min: 10000,
+    max: 180000,
+  });
+  const flashTimeoutMs = toPositiveInt(
+    process.env.GEMINI_STRATEGIC_REVIEW_FLASH_TIMEOUT_MS,
+    60000,
+    {
+      min: 10000,
+      max: 180000,
+    }
+  );
+  const proThinkingLevel = normalizeThinkingLevel(
+    process.env.GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_PRO,
     "high"
   );
-  const maxTokensDownshiftThinkingLevel = normalizeThinkingLevel(
-    process.env.GEMINI_STRATEGIC_REVIEW_MAX_TOKENS_DOWNSHIFT_LEVEL,
-    "medium"
+  const flashThinkingLevel = normalizeThinkingLevel(
+    process.env.GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_FLASH,
+    "high"
   );
-  let strategicThinkingLevel = primaryThinkingLevel;
-
-  const maybeDownshiftThinkingLevel = (stage, finishReason) => {
-    if (finishReason !== "MAX_TOKENS") return;
-    if (strategicThinkingLevel === maxTokensDownshiftThinkingLevel) return;
-    logDailyEvent("strategic_review.thinking_downshift", {
-      stage,
-      reason: finishReason,
-      fromThinkingLevel: strategicThinkingLevel,
-      toThinkingLevel: maxTokensDownshiftThinkingLevel,
-    });
-    strategicThinkingLevel = maxTokensDownshiftThinkingLevel;
-  };
-
   const projectContext = await loadProjectContext();
-
-  const reviewInput = {
-    date: targetYmd,
-    metrics: {
-      totalSignups: metrics.counts.totalSignups,
-      onboardingRate: metrics.rates.onboarding,
-      pwaRate: metrics.rates.pwa,
-      integrationRate: metrics.rates.integrationAny,
-      activationRate30d: metrics.rates.activation30d,
-      paymentRate: metrics.rates.payment,
-      customFormatRate: metrics.rates.customFormat,
-      dailyNewUsers: metrics.counts.dailyNewUsers,
-      dailyRecordings: metrics.counts.dailyRecordings,
-      heavyUsers: metrics.heavyUserTop3,
-      signupConversionRate: amplitudeConversion.currentRate,
-    },
-    previous: {
-      targetYmd: previousMetrics?.targetYmd ?? null,
-      dailyLabel: previousMetrics?.dailyLabel ?? null,
-      counts: previousMetrics?.counts ?? {},
-      rates: previousMetrics?.rates ?? {},
-      heavyUserTop3: previousMetrics?.heavyUserTop3 ?? [],
-    },
-    workProgress: {
-      completedCount: workProgress.completed.length,
-      pendingCount: workProgress.pending.length,
-      completed: workProgress.completed.slice(0, 20),
-      pending: workProgress.pending.slice(0, 20),
-      pageSummary: workProgress.text,
-    },
-  };
-
   const systemInstruction = [
     "너는 Archy 서비스의 전략 자문 에이전트다.",
-    "톤은 친근하고 캐주얼하게 유지하되, 내용은 숫자 기반으로 정확하고 빠짐없이 작성한다.",
-    "핵심 결론을 먼저 말하고, 근거/가정/리스크/우선순위 액션을 명확히 구분한다.",
-    "출력은 전반적으로 압축해서 작성하고, 불필요한 서론/중복/수식어는 제거한다.",
-    "각 항목은 핵심 문장 위주로 1~3줄 내에서 짧게 쓴다.",
-    "문맥상 자연스러울 때만 가벼운 표현(예: ㅋㅋ)을 0~1회 사용한다.",
-    "중요한 업무 항목은 생략하지 않는다.",
-    "출력은 한국어로 작성한다.",
+    "숫자 근거 중심으로 판단하며 과장/추측을 금지한다.",
+    "출력은 지정된 JSON 스키마만 반환한다.",
   ].join(" ");
 
-  const userPrompt = [
-    "아래 프로젝트 맥락, 업무 진행상황, 데일리 지표를 종합해 오늘의 리뷰를 작성해줘.",
-    "전체 분량은 600~1100자 범위로 압축하고, 각 섹션은 군더더기 없이 핵심만 써라.",
-    "요구 형식:",
-    "1) 오늘의 사업 상태 진단 (2~3줄)",
-    "2) 잘된 점 (최대 2개, 각 1줄)",
-    "3) 리스크/병목 (최대 2개, 각 1줄)",
-    "4) 내일 바로 실행할 우선순위 액션 (1~5개, 필요한 만큼만. 각 액션 + 기대효과를 1줄)",
-    "5) 데이터 추가 확인 요청이 필요한 항목 (있으면만, 최대 2개)",
-    "\n[프로젝트 맥락]\n",
-    projectContext,
-    "\n[업무 진행상황]\n",
-    workProgress.text,
-    "\n[데이터(JSON)]\n",
-    JSON.stringify(reviewInput, null, 2),
-  ].join("\n");
+  const profiles = [
+    {
+      id: "pro_full",
+      model: GEMINI_PRO_MODEL,
+      contextProfile: "full",
+      maxOutputTokens: proMaxOutputTokens,
+      timeoutMs: proTimeoutMs,
+      thinkingLevel: proThinkingLevel,
+    },
+    {
+      id: "pro_compact",
+      model: GEMINI_PRO_MODEL,
+      contextProfile: "compact",
+      maxOutputTokens: proMaxOutputTokens,
+      timeoutMs: proTimeoutMs,
+      thinkingLevel: proThinkingLevel,
+    },
+    {
+      id: "flash_compact",
+      model: GEMINI_FLASH_MODEL,
+      contextProfile: "compact",
+      maxOutputTokens: flashMaxOutputTokens,
+      timeoutMs: flashTimeoutMs,
+      thinkingLevel: flashThinkingLevel,
+    },
+    {
+      id: "flash_ultra",
+      model: GEMINI_FLASH_MODEL,
+      contextProfile: "ultra",
+      maxOutputTokens: flashMaxOutputTokens,
+      timeoutMs: 45000,
+      thinkingLevel: flashThinkingLevel,
+    },
+  ];
 
-  const draftResult = await generateStrategicReviewText({
-    systemInstruction,
-    userPrompt,
-    temperature: 0.25,
-    maxOutputTokens: 1800,
-    thinkingLevel: strategicThinkingLevel,
-    stageLabel: "strategic_review.draft",
-  });
-  maybeDownshiftThinkingLevel("strategic_review.draft", draftResult.finishReason);
+  let maxTokensShortCount = 0;
+  let schemaInvalidCount = 0;
+  let validationFailureCount = 0;
+  let timeoutCount = 0;
+  let lastFailure = null;
+  let lastValidationReasons = [];
 
-  let review = draftResult.text || "";
-  let analysis = analyzeStrategicReview(review);
-
-  for (let attempt = 1; attempt <= STRATEGIC_REVIEW_MAX_CONTINUATION_ATTEMPTS; attempt += 1) {
-    if (!analysis.needsContinuation) break;
-
-    logDailyEvent("strategic_review.continuation_needed", {
-      attempt,
-      reasons: analysis.reasons,
-      reviewLength: analysis.length,
-      actionCount: analysis.actionCount,
-    });
-
-    const continuationPrompt = [
-      "직전 전략 리뷰가 불완전하다.",
-      "아래 초안을 중복 없이 이어서 완성해라.",
-      "요구 형식(1~5번)은 유지하고, 누락된 섹션/액션을 채워라.",
-      "특히 '2) 잘된 점', '3) 리스크/병목', '4) 우선순위 액션(1~5개)'가 누락되지 않게 마무리하라.",
-      "출력은 압축형으로 유지한다.",
-      "",
-      "[초안]",
-      review,
-    ].join("\n");
-
-    const continuationResult = await generateStrategicReviewText({
-      systemInstruction,
-      userPrompt: continuationPrompt,
-      temperature: 0.2,
-      maxOutputTokens: 1000,
-      thinkingLevel: strategicThinkingLevel,
-      stageLabel: `strategic_review.continuation.${attempt}`,
-    });
-    maybeDownshiftThinkingLevel(
-      `strategic_review.continuation.${attempt}`,
-      continuationResult.finishReason
-    );
-    const continuation = continuationResult.text || "";
-
-    if (!continuation.trim()) {
+  for (const profile of profiles) {
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 1500) {
+      timeoutCount += 1;
+      lastFailure = "deadline_exceeded_before_attempt";
       break;
     }
-    review = `${review.trimEnd()}\n${continuation.trimStart()}`.trim();
-    analysis = analyzeStrategicReview(review);
-  }
 
-  if (analysis.needsContinuation) {
-    logDailyEvent("strategic_review.validation_failed", {
-      reasons: analysis.reasons,
-      reviewLength: analysis.length,
-      actionCount: analysis.actionCount,
-      minLength: STRATEGIC_REVIEW_MIN_LENGTH,
+    const strategicInput = buildStrategicReviewInput({
+      metrics,
+      amplitudeConversion,
+      previousMetrics,
+      workProgress,
+      targetYmd,
+      projectContext,
+      contextProfile: profile.contextProfile,
     });
-    throw new Error(`Strategic review validation failed: ${analysis.reasons.join(",")}`);
+    const userPrompt = buildStrategicReviewPrompt({ strategicInput });
+    const effectiveTimeoutMs = Math.max(1000, Math.min(profile.timeoutMs, remainingMs - 500));
+
+    logDailyEvent("strategic_review.profile_start", {
+      profileId: profile.id,
+      model: profile.model,
+      contextProfile: profile.contextProfile,
+      timeoutMs: effectiveTimeoutMs,
+      maxOutputTokens: profile.maxOutputTokens,
+      thinkingLevel: profile.thinkingLevel,
+      remainingMs,
+    });
+
+    let modelResult = null;
+    try {
+      modelResult = await generateStrategicReviewText({
+        model: profile.model,
+        systemInstruction,
+        userPrompt,
+        temperature,
+        maxOutputTokens: profile.maxOutputTokens,
+        thinkingLevel: profile.thinkingLevel,
+        timeoutMs: effectiveTimeoutMs,
+        maxRetries,
+        stageLabel: `strategic_review.${profile.id}`,
+        profileId: profile.id,
+      });
+    } catch (error) {
+      const message = safeErrorMessage(error).toLowerCase();
+      if (message.includes("timeout") || message.includes("aborted")) {
+        timeoutCount += 1;
+      }
+      lastFailure = safeErrorMessage(error);
+      logDailyEvent("strategic_review.profile_error", {
+        profileId: profile.id,
+        model: profile.model,
+        reason: safeErrorMessage(error).slice(0, 180),
+      });
+      continue;
+    }
+
+    const candidateTokens = toFiniteNumber(modelResult?.candidateTokens, null);
+    if (
+      modelResult?.finishReason === "MAX_TOKENS" &&
+      candidateTokens !== null &&
+      candidateTokens < minCandidateTokens
+    ) {
+      maxTokensShortCount += 1;
+      lastFailure = `max_tokens_short_output(${candidateTokens})`;
+      logDailyEvent("strategic_review.profile_short_output", {
+        profileId: profile.id,
+        finishReason: modelResult.finishReason,
+        candidateTokens,
+        minCandidateTokens,
+      });
+      continue;
+    }
+
+    const parsed = parseStrategicReviewJson(modelResult?.text || "");
+    if (!parsed.ok) {
+      schemaInvalidCount += 1;
+      lastFailure = parsed.reason;
+      logDailyEvent("strategic_review.profile_schema_invalid", {
+        profileId: profile.id,
+        reason: parsed.reason,
+      });
+      continue;
+    }
+
+    const rendered = renderStrategicReviewMarkdown(parsed.value);
+    const analysis = analyzeStrategicReview(rendered);
+    if (analysis.needsContinuation) {
+      validationFailureCount += 1;
+      lastValidationReasons = analysis.reasons;
+      lastFailure = `validation:${analysis.reasons.join(",")}`;
+      logDailyEvent("strategic_review.profile_validation_failed", {
+        profileId: profile.id,
+        reasons: analysis.reasons,
+        reviewLength: analysis.length,
+        actionCount: analysis.actionCount,
+      });
+      continue;
+    }
+
+    logDailyEvent("strategic_review.profile_success", {
+      profileId: profile.id,
+      durationMs: Date.now() - startedAtMs,
+      reviewLength: rendered.length,
+    });
+    return rendered;
   }
 
-  return review;
+  let errorCode = STRATEGIC_REVIEW_ERROR_CODES.UNKNOWN;
+  if (maxTokensShortCount >= 2) {
+    errorCode = STRATEGIC_REVIEW_ERROR_CODES.MAX_TOKENS_REPEATED;
+  } else if (timeoutCount > 0 && Date.now() >= deadlineMs) {
+    errorCode = STRATEGIC_REVIEW_ERROR_CODES.TIMEOUT_EXHAUSTED;
+  } else if (schemaInvalidCount > 0) {
+    errorCode = STRATEGIC_REVIEW_ERROR_CODES.SCHEMA_INVALID;
+  } else if (validationFailureCount > 0) {
+    errorCode = STRATEGIC_REVIEW_ERROR_CODES.VALIDATION_FAILED;
+  } else if (timeoutCount > 0) {
+    errorCode = STRATEGIC_REVIEW_ERROR_CODES.TIMEOUT_EXHAUSTED;
+  }
+
+  const reason = [
+    `code=${errorCode}`,
+    `maxTokensShort=${maxTokensShortCount}`,
+    `schemaInvalid=${schemaInvalidCount}`,
+    `validationFailed=${validationFailureCount}`,
+    `timeout=${timeoutCount}`,
+    `lastFailure=${lastFailure || "-"}`,
+    `validationReasons=${lastValidationReasons.join("|") || "-"}`,
+  ].join(", ");
+
+  logDailyEvent("strategic_review.validation_failed", {
+    code: errorCode,
+    reason,
+    minLength: STRATEGIC_REVIEW_MIN_LENGTH,
+    durationMs: Date.now() - startedAtMs,
+  });
+  throw createStrategicReviewError(errorCode, reason, {
+    maxTokensShortCount,
+    schemaInvalidCount,
+    validationFailureCount,
+    timeoutCount,
+    lastFailure,
+    validationReasons: lastValidationReasons,
+  });
 }
 
 function compareNotionMetric(currentValue, previousValue) {
@@ -2553,6 +2921,7 @@ export async function runDailyPipeline({
 
     let strategicReview = null;
     let strategicReviewError = null;
+    let strategicReviewErrorCode = null;
     if (!skipStrategicReview) {
       const strategicReviewStartedAt = Date.now();
       try {
@@ -2571,11 +2940,13 @@ export async function runDailyPipeline({
         });
       } catch (error) {
         strategicReviewError = safeErrorMessage(error);
+        strategicReviewErrorCode = getStrategicReviewErrorCode(error);
         strategicReview = null;
         logDailyEvent("step.error", {
           runId,
           step: "generate_strategic_review",
           durationMs: Date.now() - strategicReviewStartedAt,
+          errorCode: strategicReviewErrorCode,
           error: strategicReviewError,
         });
       }
@@ -2604,6 +2975,7 @@ export async function runDailyPipeline({
       workProgressError,
       strategicReview,
       strategicReviewError,
+      strategicReviewErrorCode,
     };
 
     logDailyEvent("run.done", {
@@ -2611,6 +2983,7 @@ export async function runDailyPipeline({
       targetYmd,
       durationMs: Date.now() - runStartedAtMs,
       strategicReviewGenerated: Boolean(strategicReview),
+      strategicReviewErrorCode,
       strategicReviewError: strategicReviewError ? String(strategicReviewError).slice(0, 180) : null,
     });
 
