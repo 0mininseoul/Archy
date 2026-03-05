@@ -67,6 +67,7 @@ npm run agent:discord
 - Gemini: `GEMINI_API_KEY`
 - Discord: `DISCORD_BOT_TOKEN`, `DISCORD_DAILY_CHANNEL_ID`, `DISCORD_GUILD_ID`
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+- Google Sheets 동기화 모드(옵션): `ARCHY_SHEET_SYNC_ALL_USERS` (기본 `true`)
 - Notion: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`
 - Amplitude: `AMPLITUDE_DASHBOARD_REST_API_KEY`, `AMPLITUDE_DASHBOARD_REST_SECRET`, `AMPLITUDE_SIGNUP_CONVERSION_CHART_ID`
 - Memory(옵션): `ARCHY_MEMORY_ENABLED`, `ARCHY_MEMORY_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_TURNS`, `ARCHY_MEMORY_SUMMARY_KEEP_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES`
@@ -75,5 +76,8 @@ npm run agent:discord
 
 ## 참고
 - 데일리 배치는 기본적으로 `전날(targetYmd)` 데이터를 기준으로 집계합니다.
+- Google Sheet 동기화는 기본적으로 `users` 전체를 대상으로 동작합니다.
+  - 시트에 없는 유저는 상단 행에 삽입
+  - 시트에 이미 있는 유저는 최신 Supabase 상태(O/X 포함)로 행 업데이트
 - 주간(Notion 위클리)은 일요일 00:00 실행 시 실행일 라벨(예: `3/8(일)`)로 upsert합니다.
 - 슬래시 명령 반영이 늦으면 봇 재초대(Scopes: `bot`, `applications.commands`) 후 확인하세요.

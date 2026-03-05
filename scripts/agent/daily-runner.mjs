@@ -445,6 +445,20 @@ function toRowValue(value) {
   return String(value);
 }
 
+function normalizeSheetCell(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function rowsAreEquivalent(currentRow, nextRow, width) {
+  for (let i = 0; i < width; i += 1) {
+    const a = normalizeSheetCell(currentRow?.[i]);
+    const b = normalizeSheetCell(nextRow?.[i]);
+    if (a !== b) return false;
+  }
+  return true;
+}
+
 function buildSheetRowForUser(user, header, derivedUserState) {
   const state = derivedUserState.get(user.id);
 
@@ -492,6 +506,7 @@ function buildSheetHeaderRow(header, metrics) {
 export async function syncGoogleUserSheet({
   metrics,
   targetYmd,
+  syncAllUsers = String(process.env.ARCHY_SHEET_SYNC_ALL_USERS || "true").toLowerCase() !== "false",
   spreadsheetId = getEnv("ARCHY_USER_SHEET_ID", {
     fallback: "1f2bD-9h46UMPtbw836-45bd73__FeiKxEaPdcCUue20",
   }),
@@ -583,8 +598,46 @@ export async function syncGoogleUserSheet({
       .map((row) => (row[refreshedIdIndex] || "").trim())
       .filter(Boolean)
   );
+  const existingRowsById = new Map();
+  for (let i = 1; i < refreshedValues.length; i += 1) {
+    const row = refreshedValues[i] || [];
+    const rowId = (row[refreshedIdIndex] || "").trim();
+    if (!rowId) continue;
+    existingRowsById.set(rowId, {
+      rowNumber: i + 1,
+      row,
+    });
+  }
 
-  const usersToInsert = [...metrics.usersOnTargetDate]
+  const sourceUsers = syncAllUsers ? metrics.users : metrics.usersOnTargetDate;
+  const usersToUpdate = [];
+  for (const user of sourceUsers) {
+    const existingRow = existingRowsById.get(user.id);
+    if (!existingRow) continue;
+    const rowValues = buildSheetRowForUser(user, refreshedHeader, metrics.derivedUserState);
+    if (!rowsAreEquivalent(existingRow.row, rowValues, refreshedHeader.length)) {
+      usersToUpdate.push({
+        rowNumber: existingRow.rowNumber,
+        rowValues,
+      });
+    }
+  }
+
+  if (usersToUpdate.length > 0) {
+    const lastColumn = toColumnLetter(refreshedHeader.length - 1);
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: "RAW",
+        data: usersToUpdate.map((item) => ({
+          range: `'${worksheetName}'!A${item.rowNumber}:${lastColumn}${item.rowNumber}`,
+          values: [item.rowValues],
+        })),
+      },
+    });
+  }
+
+  const usersToInsert = [...sourceUsers]
     .sort((a, b) => {
       const aTs = parseDbTimestampAsKst(a.created_at)?.getTime() || 0;
       const bTs = parseDbTimestampAsKst(b.created_at)?.getTime() || 0;
@@ -639,9 +692,11 @@ export async function syncGoogleUserSheet({
   return {
     targetYmd,
     insertedRows: rows.length,
+    updatedRows: usersToUpdate.length,
     removedExcludedRows: rowsToDelete.filter((r) => r.reason === "excluded").length,
     removedDuplicateRows: rowsToDelete.filter((r) => r.reason === "duplicate").length,
-    skippedExistingRows: metrics.usersOnTargetDate.length - rows.length,
+    skippedExistingRows: sourceUsers.length - rows.length,
+    syncMode: syncAllUsers ? "all_users" : "daily_new_users",
   };
 }
 
