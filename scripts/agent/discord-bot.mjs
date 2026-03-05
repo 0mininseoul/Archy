@@ -250,6 +250,44 @@ function formatKstDateTime(input = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} KST`;
 }
 
+function formatSignedInt(value) {
+  if (!Number.isFinite(value)) return "0";
+  if (value > 0) return `+${value}`;
+  if (value < 0) return `${value}`;
+  return "0";
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatDeltaPctPoint(current, previous) {
+  if (current === null || current === undefined || previous === null || previous === undefined) {
+    return "비교값 없음";
+  }
+  const delta = (current - previous) * 100;
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${delta.toFixed(1)}%p`;
+}
+
+function formatCountCard(current, previous) {
+  if (!Number.isFinite(current)) return "데이터 없음";
+  if (!Number.isFinite(previous)) return `${current}명\n전일 비교: -`;
+  return `${current}명\n전일 대비 ${formatSignedInt(current - previous)}명`;
+}
+
+function formatRateCard(current, previous) {
+  if (current === null || current === undefined) return "미조회\n전일 비교: -";
+  return `${formatPercent(current)}\n전일 대비 ${formatDeltaPctPoint(current, previous)}`;
+}
+
+function truncateForField(value, max = 200) {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+}
+
 function splitMessage(content, limit = 1800) {
   if (!content || content.length <= limit) return [content];
   const chunks = [];
@@ -293,24 +331,58 @@ function buildDailyEmbed(report) {
 }
 
 function buildStatsEmbed({ report, asOfDate }) {
-  const { overviewText, heavyUserText, amplitudeSourceText } = buildDiscordMetricText(report);
+  const { heavyUserText, amplitudeSourceText } = buildDiscordMetricText(report);
   const asOfKst = formatKstDateTime(asOfDate);
+  const previous = report.previous?.notion;
+  const fallbackRates = report.previous?.fallbackRates || {};
+  const fallbackCounts = report.previous?.fallbackCounts || {};
 
-  return new EmbedBuilder()
+  const prevUserCount = previous?.totalSignups ?? fallbackCounts.totalSignups ?? null;
+  const prevOnboarding = previous?.onboardingRate ?? fallbackRates.onboarding ?? null;
+  const prevPwa = previous?.pwaRate ?? fallbackRates.pwa ?? null;
+  const prevIntegration = previous?.integrationRate ?? fallbackRates.integrationAny ?? null;
+  const prevActivation = previous?.activationRate ?? fallbackRates.activation30d ?? null;
+  const prevPayment = previous?.paymentRate ?? fallbackRates.payment ?? null;
+  const prevConversion = previous?.conversionRate ?? report.amplitudeConversion?.previousRate ?? null;
+  const conversionMissing = report.amplitudeConversion?.currentRate === null;
+
+  const embed = new EmbedBuilder()
     .setColor(0x17a2d4)
-    .setTitle("📊 봇 상태")
-    .setDescription("Archy 실시간 운영 스냅샷")
+    .setTitle("📈 Archy 실시간 지표")
+    .setDescription("KST 기준 최신 운영 스냅샷")
     .addFields(
       { name: "기준일", value: report.dailyLabel, inline: true },
       { name: "기준시각", value: asOfKst, inline: true },
-      { name: "가입전환율 소스", value: amplitudeSourceText || "-", inline: true },
-      { name: "핵심 지표", value: overviewText, inline: false },
+      { name: "데이터 상태", value: conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
+      { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, prevUserCount), inline: true },
+      {
+        name: "🔁 가입전환율",
+        value: conversionMissing
+          ? "미조회\n전일 비교: -"
+          : formatRateCard(report.amplitudeConversion.currentRate, prevConversion),
+        inline: true,
+      },
+      { name: "✅ 온보딩율", value: formatRateCard(report.rates.onboarding, prevOnboarding), inline: true },
+      { name: "📲 PWA 설치율", value: formatRateCard(report.rates.pwa, prevPwa), inline: true },
+      { name: "🔗 연동율", value: formatRateCard(report.rates.integrationAny, prevIntegration), inline: true },
+      { name: "⚡ 활성화율(30일)", value: formatRateCard(report.rates.activation30d, prevActivation), inline: true },
+      { name: "💳 결제율", value: formatRateCard(report.rates.payment, prevPayment), inline: true },
       { name: "헤비 유저 TOP3 (누적 녹음)", value: heavyUserText, inline: false }
     )
     .setFooter({
       text: `집계 대상일: ${report.targetYmd} | 표시 시각: ${asOfKst}`,
     })
     .setTimestamp(asOfDate instanceof Date ? asOfDate : new Date(asOfDate));
+
+  if (conversionMissing) {
+    embed.addFields({
+      name: "가입전환율 진단",
+      value: truncateForField(amplitudeSourceText || "원인 미상", 900),
+      inline: false,
+    });
+  }
+
+  return embed;
 }
 
 async function runDailyAndPost({ trigger = "schedule" } = {}) {

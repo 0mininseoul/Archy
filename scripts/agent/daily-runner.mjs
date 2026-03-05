@@ -658,8 +658,9 @@ function toYmdFromUnknownDate(value) {
   if (value === null || value === undefined) return null;
 
   if (typeof value === "number" && Number.isFinite(value)) {
-    // Epoch milliseconds fallback.
-    return toKstYmd(new Date(value));
+    // Treat small epoch numbers as seconds.
+    const ms = value < 100_000_000_000 ? value * 1000 : value;
+    return toKstYmd(new Date(ms));
   }
 
   if (typeof value === "string") {
@@ -670,10 +671,80 @@ function toYmdFromUnknownDate(value) {
     if (date) return toKstYmd(date);
   }
 
+  if (typeof value === "object") {
+    const candidates = [
+      value.date,
+      value.day,
+      value.x,
+      value.timestamp,
+      value.time,
+      value.label,
+      value.bucket,
+      value.key,
+      value.start,
+      value.value,
+    ];
+    for (const candidate of candidates) {
+      const ymd = toYmdFromUnknownDate(candidate);
+      if (ymd) return ymd;
+    }
+  }
+
   return null;
 }
 
+function toNumberFromUnknown(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const cleaned = value.replace(/,/g, "").trim();
+    if (!cleaned) return null;
+    const isPercent = cleaned.endsWith("%");
+    const parsed = Number(isPercent ? cleaned.slice(0, -1) : cleaned);
+    if (Number.isNaN(parsed)) return null;
+    return isPercent ? parsed / 100 : parsed;
+  }
+  if (typeof value === "object") {
+    const keys = ["rate", "value", "y", "conversion_rate", "metric", "count", "v", "current"];
+    for (const key of keys) {
+      const parsed = toNumberFromUnknown(value[key]);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeRateValue(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  // Conversion rates are commonly returned as 0~1 or 0~100.
+  if (value > 1 && value <= 100) return value / 100;
+  return value;
+}
+
+function pickRateFromUnknown(value) {
+  const parsed = toNumberFromUnknown(value);
+  if (parsed === null) return null;
+  return normalizeRateValue(parsed);
+}
+
 function extractConversionSeries(payload) {
+  const findRateInObject = (obj) => {
+    if (!obj || typeof obj !== "object") return null;
+    for (const [key, raw] of Object.entries(obj)) {
+      if (/(conversion|rate|ratio|percent)/i.test(key)) {
+        const parsed = pickRateFromUnknown(raw);
+        if (parsed !== null) return parsed;
+      }
+    }
+    return null;
+  };
+
+  const getColumnLabel = (column) => {
+    if (typeof column === "string") return column;
+    if (!column || typeof column !== "object") return "";
+    return String(column.name || column.title || column.label || column.key || "");
+  };
+
   const tryExtract = (root) => {
     if (!root || typeof root !== "object") return [];
 
@@ -681,13 +752,36 @@ function extractConversionSeries(payload) {
     if (Array.isArray(root.xValues) && Array.isArray(root.series)) {
       const points = [];
       for (const series of root.series) {
-        const values = series?.values || series?.data || [];
+        const values = series?.values || series?.data || series?.yValues || series?.points || [];
         for (let i = 0; i < Math.min(root.xValues.length, values.length); i += 1) {
           const ymd = toYmdFromUnknownDate(root.xValues[i]);
-          const rate = Number(values[i]);
-          if (!ymd || Number.isNaN(rate)) continue;
+          const rate = pickRateFromUnknown(values[i]);
+          if (!ymd || rate === null) continue;
           points.push({ ymd, rate });
         }
+      }
+      if (points.length > 0) return points;
+    }
+
+    // Data table style: { columns: [...], rows: [[...], ...] }
+    if (Array.isArray(root.columns) && Array.isArray(root.rows)) {
+      const columnLabels = root.columns.map((column) => getColumnLabel(column).toLowerCase());
+      const dateIndex = columnLabels.findIndex((label) => /(date|day|time|interval|bucket)/i.test(label));
+      const rateIndex = columnLabels.findIndex((label) => /(conversion|rate|ratio|percent|signup)/i.test(label));
+
+      const points = [];
+      for (const row of root.rows) {
+        if (!Array.isArray(row)) continue;
+        const ymd = toYmdFromUnknownDate(dateIndex >= 0 ? row[dateIndex] : row[0]);
+        let rate = pickRateFromUnknown(rateIndex >= 0 ? row[rateIndex] : null);
+        if (rate === null) {
+          for (const cell of row) {
+            rate = pickRateFromUnknown(cell);
+            if (rate !== null) break;
+          }
+        }
+        if (!ymd || rate === null) continue;
+        points.push({ ymd, rate });
       }
       if (points.length > 0) return points;
     }
@@ -701,10 +795,15 @@ function extractConversionSeries(payload) {
           toYmdFromUnknownDate(item.date) ||
           toYmdFromUnknownDate(item.day) ||
           toYmdFromUnknownDate(item.x) ||
-          toYmdFromUnknownDate(item.timestamp);
-        const value = Number(item.rate ?? item.value ?? item.y ?? item.conversion_rate);
-        if (!ymd || Number.isNaN(value)) continue;
-        points.push({ ymd, rate: value });
+          toYmdFromUnknownDate(item.timestamp) ||
+          toYmdFromUnknownDate(item.time) ||
+          toYmdFromUnknownDate(item.bucket) ||
+          toYmdFromUnknownDate(item);
+        const rate =
+          pickRateFromUnknown(item.rate ?? item.value ?? item.y ?? item.conversion_rate ?? item.metric) ??
+          findRateInObject(item);
+        if (!ymd || rate === null) continue;
+        points.push({ ymd, rate });
       }
       if (points.length > 0) return points;
     }
@@ -712,7 +811,25 @@ function extractConversionSeries(payload) {
     return [];
   };
 
-  const roots = [payload, payload?.data, payload?.data?.series, payload?.series, payload?.results];
+  const roots = [
+    payload,
+    payload?.data,
+    payload?.data?.series,
+    payload?.data?.rows,
+    payload?.data?.result,
+    payload?.series,
+    payload?.results,
+    payload?.rows,
+    payload?.chart,
+    payload?.chart?.data,
+  ];
+
+  if (payload && typeof payload === "object") {
+    for (const value of Object.values(payload)) {
+      roots.push(value);
+    }
+  }
+
   for (const root of roots) {
     const points = tryExtract(root);
     if (points.length > 0) {
@@ -721,6 +838,16 @@ function extractConversionSeries(payload) {
   }
 
   return [];
+}
+
+function describePayloadShape(payload) {
+  if (payload === null || payload === undefined) return "empty";
+  if (Array.isArray(payload)) return `array(len=${payload.length})`;
+  if (typeof payload === "object") {
+    const keys = Object.keys(payload).slice(0, 12).join(", ");
+    return `object(keys=${keys || "-"})`;
+  }
+  return typeof payload;
 }
 
 export async function fetchAmplitudeSignupConversion({ targetYmd, previousYmd }) {
@@ -791,7 +918,7 @@ export async function fetchAmplitudeSignupConversion({ targetYmd, previousYmd })
       source: customApiUrl ? "custom_api_unparsed" : "dashboard_unparsed",
       currentRate: null,
       previousRate: null,
-      raw: payload,
+      rawShape: describePayloadShape(payload),
     };
   }
 
@@ -1248,14 +1375,20 @@ function describeAmplitudeSource(amplitudeConversion) {
     custom_api: "커스텀 API",
     static_env: "환경변수 고정값",
     not_configured: "미설정(차트 ID 없음)",
-    dashboard_unparsed: "Dashboard 응답 파싱 실패",
-    custom_api_unparsed: "커스텀 API 응답 파싱 실패",
+    dashboard_unparsed: "Dashboard 응답 파싱 실패(포맷 불일치)",
+    custom_api_unparsed: "커스텀 API 응답 파싱 실패(포맷 불일치)",
     error: "조회 실패",
   };
 
   const base = map[source] || source;
-  const error = amplitudeConversion?.error ? ` / ${String(amplitudeConversion.error).slice(0, 120)}` : "";
-  return `${base}${error}`;
+  const diagnostics = [
+    amplitudeConversion?.error ? `error=${String(amplitudeConversion.error).slice(0, 120)}` : null,
+    amplitudeConversion?.rawShape ? `shape=${amplitudeConversion.rawShape}` : null,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
+  return diagnostics ? `${base} (${diagnostics})` : base;
 }
 
 export async function runDailyPipeline({
