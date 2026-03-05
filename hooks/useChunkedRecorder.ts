@@ -11,6 +11,11 @@ import {
   safeLocalStorageRemoveItem,
   safeLocalStorageSetItem,
 } from "@/lib/safe-storage";
+import {
+  AUTO_PAUSE_NOTICE_EVENT,
+  AUTO_PAUSE_NOTICE_STORAGE_KEY,
+  PauseNotifyReason,
+} from "@/lib/recording-lifecycle";
 
 // 청크 설정
 const CHUNK_DURATION_SECONDS = 20; // 20초로 변경 (스마트 재개 시스템)
@@ -36,8 +41,14 @@ type RecorderAction =
   | "resume"
   | "stop"
   | "background_transition"
+  | "route_unmount_autopause"
   | "chunk_restart"
   | "state_sync";
+
+interface AutoPauseNoticePayload {
+  reason: PauseNotifyReason;
+  createdAt: string;
+}
 
 type RecorderContextWindow = Window & {
   __archyRecorderContext?: {
@@ -429,14 +440,93 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     }
   }, []);
 
-  const persistPausedSession = useCallback(
-    (pausedAt: number = Date.now()) => {
-      const session: RecordingSession = {
-        sessionId: sessionIdRef.current || "",
+  const createSessionSnapshot = useCallback(
+    (pausedAt: number = Date.now()): RecordingSession | null => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return null;
+
+      return {
+        sessionId,
         duration: Math.floor(pausedTimeRef.current / 1000),
         pausedAt,
         chunkIndex: currentChunkIndexRef.current,
       };
+    },
+    []
+  );
+
+  const notifyAutoPause = useCallback((reason: PauseNotifyReason) => {
+    try {
+      const payload: AutoPauseNoticePayload = {
+        reason,
+        createdAt: new Date().toISOString(),
+      };
+      safeLocalStorageSetItem(
+        AUTO_PAUSE_NOTICE_STORAGE_KEY,
+        JSON.stringify(payload),
+        { logPrefix: "ChunkedRecorder" }
+      );
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(AUTO_PAUSE_NOTICE_EVENT));
+      }
+    } catch (e) {
+      console.warn("[ChunkedRecorder] Failed to store auto-pause notice:", e);
+    }
+  }, []);
+
+  const sendPauseNotify = useCallback(
+    (
+      session: RecordingSession,
+      reason: PauseNotifyReason,
+      preferBeacon: boolean = false
+    ) => {
+      if (!session.sessionId) return;
+
+      const payload = JSON.stringify({
+        sessionId: session.sessionId,
+        duration: session.duration,
+        reason,
+      });
+
+      try {
+        if (
+          preferBeacon &&
+          typeof navigator !== "undefined" &&
+          typeof navigator.sendBeacon === "function"
+        ) {
+          const beaconBody = new Blob([payload], {
+            type: "application/json",
+          });
+          const sent = navigator.sendBeacon(
+            "/api/recordings/pause-notify",
+            beaconBody
+          );
+
+          if (sent) {
+            return;
+          }
+        }
+
+        void fetch("/api/recordings/pause-notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: preferBeacon,
+        }).catch((e) =>
+          console.warn("[ChunkedRecorder] Failed to send pause notify:", e)
+        );
+      } catch (e) {
+        console.warn("[ChunkedRecorder] Failed to send pause notify:", e);
+      }
+    },
+    []
+  );
+
+  const persistPausedSession = useCallback(
+    (pausedAt: number = Date.now()) => {
+      const session = createSessionSnapshot(pausedAt);
+      if (!session) return null;
       saveSessionToStorage(session);
       setPausedSession(session);
       setIsBackgroundPaused(true);
@@ -445,7 +535,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       setRuntimeState("paused", "background_transition");
       return session;
     },
-    [saveSessionToStorage, setRuntimeState]
+    [createSessionSnapshot, saveSessionToStorage, setRuntimeState]
   );
 
   // 세션 로드 함수
@@ -477,12 +567,46 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      const recorder = mediaRecorderRef.current;
+      const shouldPersistSessionOnUnmount =
+        isRecordingRef.current && Boolean(sessionIdRef.current);
+
+      if (shouldPersistSessionOnUnmount) {
+        if (recorder?.state === "recording") {
+          try {
+            recorder.requestData();
+          } catch (error) {
+            console.warn("[ChunkedRecorder] requestData failed during unmount:", error);
+          }
+
+          try {
+            recorder.pause();
+          } catch (error) {
+            console.warn("[ChunkedRecorder] pause failed during unmount:", error);
+          }
+        }
+
+        if (!isPausedRef.current) {
+          pausedTimeRef.current = Math.max(0, Date.now() - startTimeRef.current);
+        }
+        const session = createSessionSnapshot();
+        if (session) {
+          saveSessionToStorage(session);
+          notifyAutoPause("route_unmount");
+          sendPauseNotify(session, "route_unmount", true);
+          publishRecorderContext("route_unmount_autopause");
+          console.log("[ChunkedRecorder] Session auto-paused on unmount:", session);
+        }
+      }
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-      releaseWakeLock();
+      void releaseWakeLock();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
       if (chunkManagerRef.current) {
         chunkManagerRef.current.cleanup();
@@ -498,7 +622,14 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         };
       }
     };
-  }, [releaseWakeLock]);
+  }, [
+    createSessionSnapshot,
+    notifyAutoPause,
+    publishRecorderContext,
+    releaseWakeLock,
+    saveSessionToStorage,
+    sendPauseNotify,
+  ]);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -726,7 +857,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   }, [consumeCurrentChunkSignalMetrics, restartMediaRecorderForChunk, uploadChunkBlob]);
 
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
-  const handleBackgroundTransition = useCallback(async () => {
+  const handleBackgroundTransition = useCallback(
+    async (reason: PauseNotifyReason = "visibility_hidden") => {
     if (!mediaRecorderRef.current || !isRecordingRef.current || isPausedRef.current) return;
     if (isBackgroundTransitioningRef.current) return;
 
@@ -760,24 +892,25 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       console.log("[ChunkedRecorder] Session paused and saved:", session);
 
-      // 푸시알림 발송 (백그라운드에서)
-      try {
-        fetch("/api/recordings/pause-notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: session.sessionId,
-            duration: session.duration,
-          }),
-        }).catch((e) => console.warn("[ChunkedRecorder] Failed to send pause notify:", e));
-      } catch (e) {
-        console.warn("[ChunkedRecorder] Failed to send pause notify:", e);
+      if (session) {
+        notifyAutoPause(reason);
+        sendPauseNotify(session, reason);
       }
     } finally {
       isBackgroundTransitioningRef.current = false;
       setIsControlBusy(false);
     }
-  }, [extractAndUploadChunk, persistPausedSession, releaseWakeLock, safePause, safeRequestData]);
+    },
+    [
+      extractAndUploadChunk,
+      notifyAutoPause,
+      persistPausedSession,
+      releaseWakeLock,
+      safePause,
+      safeRequestData,
+      sendPauseNotify,
+    ]
+  );
 
   // Wake Lock 재획득 및 백그라운드 복귀 처리 (visibility change)
   useEffect(() => {
@@ -785,7 +918,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       if (document.visibilityState === "hidden") {
         // 백그라운드로 전환됨
         if (isRecording && !isPaused) {
-          handleBackgroundTransition();
+          handleBackgroundTransition("visibility_hidden");
         }
       } else if (document.visibilityState === "visible") {
         // 포그라운드로 복귀
@@ -1058,12 +1191,19 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
     if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
       pausedTimeRef.current = Date.now() - startTimeRef.current;
+    }
+
+    const snapshot = createSessionSnapshot();
+    if (snapshot) {
+      saveSessionToStorage(snapshot);
+      sendPauseNotify(snapshot, "manual_pause");
     }
 
     releaseWakeLock();
     console.log("[ChunkedRecorder] Recording paused");
-  }, [releaseWakeLock, safePause]);
+  }, [createSessionSnapshot, releaseWakeLock, safePause, saveSessionToStorage, sendPauseNotify]);
 
   /**
    * 녹음 재개
@@ -1112,6 +1252,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     if (!resumed) return false;
 
     setIsBackgroundPaused(false);
+    clearSessionFromStorage();
+    setPausedSession(null);
 
     startTimeRef.current = Date.now() - pausedTimeRef.current;
     chunkStartTimeRef.current = Date.now(); // 청크 타이머 리셋
@@ -1135,6 +1277,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     console.log("[ChunkedRecorder] Recording resumed");
     return true;
   }, [
+    clearSessionFromStorage,
     extractAndUploadChunk,
     pausedSession,
     requestWakeLock,

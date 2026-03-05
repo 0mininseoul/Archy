@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { getStaleRecordingCutoffIso } from "@/lib/recording-lifecycle";
 
 export type GroqApiKeySource = "primary" | "tier_2" | "tier_3";
 
@@ -55,11 +56,13 @@ export async function countActiveRecordingUsers(): Promise<number> {
 
   try {
     const supabaseAdmin = createServiceRoleClient();
+    const staleCutoffIso = getStaleRecordingCutoffIso();
     const { count, error } = await supabaseAdmin
       .from("recordings")
       .select("id", { head: true, count: "exact" })
       .eq("status", "recording")
-      .is("session_paused_at", null);
+      .is("session_paused_at", null)
+      .gte("last_activity_at", staleCutoffIso);
 
     if (error) {
       console.error("[GroqKeyRouter] Failed to count active recordings:", error);

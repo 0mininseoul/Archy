@@ -89,8 +89,22 @@ export interface PushSubscriptionData {
 
 export type RecordingStatus = "recording" | "processing" | "completed" | "failed";
 export type RecordingFormat = "meeting" | "interview" | "lecture" | "custom";
-export type ErrorStep = "upload" | "transcription" | "formatting" | "notion" | "slack" | "google";
+export type ErrorStep =
+  | "upload"
+  | "transcription"
+  | "formatting"
+  | "notion"
+  | "slack"
+  | "google"
+  | "abandoned";
 export type ProcessingStep = "transcription" | "formatting" | "saving";
+export type TerminationReason =
+  | "user_stop"
+  | "navigation_autopause"
+  | "background_autopause"
+  | "stale_timeout"
+  | "manual_discard"
+  | "processing_error";
 
 export interface Recording {
   id: string;
@@ -108,6 +122,8 @@ export interface Recording {
   google_doc_url?: string | null;
   error_message?: string | null;
   error_step?: ErrorStep | null;
+  last_activity_at?: string | null;
+  termination_reason?: TerminationReason | null;
   is_hidden?: boolean;
   is_pinned?: boolean;
   created_at: string;

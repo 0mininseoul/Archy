@@ -2,6 +2,7 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { formatKSTDate } from "@/lib/utils";
 import { hasUnlimitedUsage } from "@/lib/promo";
+import { getStaleRecordingCutoffIso } from "@/lib/recording-lifecycle";
 
 interface StartSessionResponse {
   sessionId: string;
@@ -13,11 +14,49 @@ export const POST = withAuth<StartSessionResponse>(
   async ({ user, supabase, request }) => {
     const body = await request!.json();
     const { format = "meeting" } = body;
+    const nowIso = new Date().toISOString();
+    const staleCutoffIso = getStaleRecordingCutoffIso();
+    const path = new URL(request!.url).pathname;
+
+    const { data: staleSessions, error: staleError } = await supabase
+      .from("recordings")
+      .update({
+        status: "failed",
+        processing_step: null,
+        error_step: "abandoned",
+        error_message: "Recording session timed out due to inactivity.",
+        termination_reason: "stale_timeout",
+        last_activity_at: nowIso,
+      })
+      .eq("user_id", user.id)
+      .eq("status", "recording")
+      .is("session_paused_at", null)
+      .lt("last_activity_at", staleCutoffIso)
+      .select("id, duration_seconds, last_chunk_index");
+
+    if (staleError) {
+      console.error("[StartSession] Failed to cleanup stale sessions:", staleError);
+    } else if (staleSessions && staleSessions.length > 0) {
+      console.log("[RecorderLifecycle]", {
+        event: "stale_failed",
+        userId: user.id,
+        count: staleSessions.length,
+        sessionIds: staleSessions.map((session) => session.id),
+        path,
+      });
+    }
 
     // 유저 데이터와 기존 세션을 병렬로 조회 (속도 최적화)
     const [userResult, sessionResult] = await Promise.all([
       supabase.from("users").select("monthly_minutes_used, bonus_minutes, promo_expires_at").eq("id", user.id).single(),
-      supabase.from("recordings").select("id").eq("user_id", user.id).eq("status", "recording").single(),
+      supabase
+        .from("recordings")
+        .select("id, duration_seconds, last_chunk_index, session_paused_at")
+        .eq("user_id", user.id)
+        .eq("status", "recording")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const userData = userResult.data;
@@ -28,8 +67,27 @@ export const POST = withAuth<StartSessionResponse>(
     }
 
     if (existingSession) {
+      await supabase
+        .from("recordings")
+        .update({
+          last_activity_at: nowIso,
+          session_paused_at: null,
+          termination_reason: null,
+        })
+        .eq("id", existingSession.id)
+        .eq("user_id", user.id);
+
       // Return existing session instead of creating new one
       console.log(`[StartSession] User already has active session: ${existingSession.id}`);
+      console.log("[RecorderLifecycle]", {
+        event: "session_reused",
+        userId: user.id,
+        sessionId: existingSession.id,
+        durationSeconds: existingSession.duration_seconds ?? 0,
+        lastChunkIndex: existingSession.last_chunk_index ?? -1,
+        pausedAt: existingSession.session_paused_at,
+        path,
+      });
       return successResponse({
         sessionId: existingSession.id,
         title: `Archy - ${formatKSTDate()}`,
@@ -59,6 +117,8 @@ export const POST = withAuth<StartSessionResponse>(
         status: "recording",
         transcript: "",
         last_chunk_index: -1,
+        last_activity_at: nowIso,
+        termination_reason: null,
       })
       .select()
       .single();
@@ -69,6 +129,14 @@ export const POST = withAuth<StartSessionResponse>(
     }
 
     console.log(`[StartSession] Created new session: ${recording.id}`);
+    console.log("[RecorderLifecycle]", {
+      event: "session_started",
+      userId: user.id,
+      sessionId: recording.id,
+      durationSeconds: 0,
+      lastChunkIndex: -1,
+      path,
+    });
 
     return successResponse({
       sessionId: recording.id,

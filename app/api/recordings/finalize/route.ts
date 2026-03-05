@@ -32,6 +32,7 @@ export const POST = withAuth<FinalizeResponse>(
   async ({ user, supabase, request }) => {
     const body: FinalizeRequest = await request!.json();
     const { sessionId, transcripts, totalDurationSeconds, format } = body;
+    const path = new URL(request!.url).pathname;
 
     if (!totalDurationSeconds || totalDurationSeconds <= 0) {
       return errorResponse("Valid totalDurationSeconds is required", 400);
@@ -172,6 +173,8 @@ export const POST = withAuth<FinalizeResponse>(
           processing_step: "transcription",
           duration_seconds: totalDurationSeconds,
           session_paused_at: null,
+          last_activity_at: new Date().toISOString(),
+          termination_reason: "user_stop",
         })
         .eq("id", sessionId)
         .eq("user_id", user.id)
@@ -261,6 +264,8 @@ export const POST = withAuth<FinalizeResponse>(
           format: format || "smart",
           status: "processing",
           transcript: mergedTranscript,
+          last_activity_at: new Date().toISOString(),
+          termination_reason: "user_stop",
         })
         .select()
         .single();
@@ -302,6 +307,15 @@ export const POST = withAuth<FinalizeResponse>(
     }).catch(async (error) => {
       await handleProcessingError(recordingId, error);
       return null;
+    });
+
+    console.log("[RecorderLifecycle]", {
+      event: "finalized",
+      userId: user.id,
+      sessionId: sessionId ?? recordingId,
+      durationSeconds: totalDurationSeconds,
+      success: Boolean(result?.success),
+      path,
     });
 
     return successResponse({

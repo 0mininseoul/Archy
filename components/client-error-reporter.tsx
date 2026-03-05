@@ -21,6 +21,7 @@ type RecorderAction =
   | "resume"
   | "stop"
   | "background_transition"
+  | "route_unmount_autopause"
   | "chunk_restart"
   | "state_sync";
 

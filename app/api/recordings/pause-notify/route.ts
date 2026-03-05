@@ -1,24 +1,68 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { sendPushNotification } from "@/lib/services/push";
+import {
+  mapPauseReasonToTerminationReason,
+  PauseNotifyReason,
+} from "@/lib/recording-lifecycle";
 
 interface PauseNotifyRequest {
   sessionId: string;
   duration: number;
+  reason?: PauseNotifyReason;
 }
 
 // POST /api/recordings/pause-notify - 녹음 일시정지 푸시알림 발송
 export const POST = withAuth(async ({ user, supabase, request }) => {
   const body: PauseNotifyRequest = await request!.json();
   const { sessionId, duration } = body;
+  const reasonCandidates: PauseNotifyReason[] = [
+    "visibility_hidden",
+    "route_unmount",
+    "manual_pause",
+  ];
+  const reason = reasonCandidates.includes(body.reason as PauseNotifyReason)
+    ? (body.reason as PauseNotifyReason)
+    : "visibility_hidden";
+  const path = new URL(request!.url).pathname;
 
   if (!sessionId) {
     return errorResponse("Session ID is required", 400);
   }
 
+  const nowIso = new Date().toISOString();
+  const terminationReason = mapPauseReasonToTerminationReason(reason);
+
+  // 세션 상태 업데이트는 푸시 구독 여부와 무관하게 항상 수행
+  const { error: pauseUpdateError } = await supabase
+    .from("recordings")
+    .update({
+      session_paused_at: nowIso,
+      duration_seconds: duration,
+      last_activity_at: nowIso,
+      termination_reason: terminationReason,
+    })
+    .eq("id", sessionId)
+    .eq("user_id", user.id)
+    .eq("status", "recording");
+
+  if (pauseUpdateError) {
+    console.error("[PauseNotify] Failed to update paused session:", pauseUpdateError);
+    return errorResponse("Failed to update session state", 500);
+  }
+
+  console.log("[RecorderLifecycle]", {
+    event: "autopaused",
+    userId: user.id,
+    sessionId,
+    durationSeconds: duration,
+    reason,
+    path,
+  });
+
   // 사용자의 푸시 구독 정보 조회
   const { data: userData } = await supabase
     .from("users")
-    .select("push_subscription, push_enabled, language")
+    .select("push_subscription, push_enabled")
     .eq("id", user.id)
     .single();
 
@@ -27,18 +71,9 @@ export const POST = withAuth(async ({ user, supabase, request }) => {
     return successResponse({ sent: false, reason: "push_not_enabled" });
   }
 
-  // 세션 상태 업데이트
-  await supabase
-    .from("recordings")
-    .update({
-      session_paused_at: new Date().toISOString(),
-      duration_seconds: duration,
-    })
-    .eq("id", sessionId)
-    .eq("user_id", user.id);
-
   // 언어별 메시지
-  const isKorean = userData.language === "ko";
+  const acceptLanguage = request?.headers.get("accept-language") || "";
+  const isKorean = acceptLanguage.toLowerCase().includes("ko");
   const title = isKorean
     ? "🎙️ 녹음이 일시정지되었습니다"
     : "🎙️ Recording paused";

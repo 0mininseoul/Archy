@@ -21,6 +21,7 @@ export const en = {
       history: "History",
       settings: "Settings",
       settingsTooltip: "Connect services in Settings!",
+      autoPauseNotice: "Recording paused. You can continue on the Record page.",
     },
 
     // Landing Page

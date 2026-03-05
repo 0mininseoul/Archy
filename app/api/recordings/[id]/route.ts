@@ -194,6 +194,15 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    console.log("[RecorderLifecycle]", {
+      event: "discarded",
+      userId: user.id,
+      sessionId: id,
+      durationSeconds: recording.duration_seconds ?? 0,
+      lastChunkIndex: recording.last_chunk_index ?? -1,
+      path: request.nextUrl.pathname,
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("API error:", error);

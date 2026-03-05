@@ -642,12 +642,16 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
     ? {
       status: "completed" as const,
       processing_step: null,
+      last_activity_at: new Date().toISOString(),
+      termination_reason: "user_stop",
     }
     : {
       status: "completed" as const,
       processing_step: null,
       error_step: null,
       error_message: null,
+      last_activity_at: new Date().toISOString(),
+      termination_reason: "user_stop",
     };
   await supabase
     .from("recordings")
@@ -697,6 +701,8 @@ export async function processFromTranscripts(
         status: "failed",
         error_step: "formatting",
         error_message: formatResult.error,
+        termination_reason: "processing_error",
+        last_activity_at: new Date().toISOString(),
       })
       .eq("id", recordingId);
 
@@ -771,12 +777,16 @@ export async function processFromTranscripts(
     ? {
       status: "completed" as const,
       processing_step: null,
+      last_activity_at: new Date().toISOString(),
+      termination_reason: "user_stop",
     }
     : {
       status: "completed" as const,
       processing_step: null,
       error_step: null,
       error_message: null,
+      last_activity_at: new Date().toISOString(),
+      termination_reason: "user_stop",
     };
   await supabase
     .from("recordings")
@@ -813,6 +823,8 @@ export async function handleProcessingError(
         status: "failed",
         error_step: "upload",
         error_message: `Critical error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        termination_reason: "processing_error",
+        last_activity_at: new Date().toISOString(),
       })
       .eq("id", recordingId);
   } catch (updateError) {

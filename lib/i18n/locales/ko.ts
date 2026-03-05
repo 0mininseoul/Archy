@@ -21,6 +21,7 @@ export const ko = {
       history: "기록",
       settings: "설정",
       settingsTooltip: "설정에서 서비스를 연동해보세요!",
+      autoPauseNotice: "녹음이 일시정지되었어요. 녹음 페이지에서 이어서 진행할 수 있어요.",
     },
 
     // Landing Page

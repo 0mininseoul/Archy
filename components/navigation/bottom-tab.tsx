@@ -1,8 +1,18 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
+import {
+  AUTO_PAUSE_NOTICE_EVENT,
+  AUTO_PAUSE_NOTICE_STORAGE_KEY,
+  RECORDING_STALE_TIMEOUT_MS,
+} from "@/lib/recording-lifecycle";
+import {
+  safeLocalStorageGetItem,
+  safeLocalStorageRemoveItem,
+} from "@/lib/safe-storage";
 
 interface BottomTabProps {
   showSettingsTooltip?: boolean;
@@ -11,6 +21,62 @@ interface BottomTabProps {
 export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
   const pathname = usePathname();
   const { t } = useI18n();
+  const [showAutoPauseNotice, setShowAutoPauseNotice] = useState(false);
+
+  const consumeAutoPauseNotice = useCallback(() => {
+    const raw = safeLocalStorageGetItem(AUTO_PAUSE_NOTICE_STORAGE_KEY, {
+      logPrefix: "BottomTab",
+    });
+    if (!raw) return;
+
+    safeLocalStorageRemoveItem(AUTO_PAUSE_NOTICE_STORAGE_KEY, {
+      logPrefix: "BottomTab",
+    });
+
+    try {
+      const parsed = JSON.parse(raw) as { createdAt?: string };
+      const createdAt = parsed.createdAt ? new Date(parsed.createdAt).getTime() : 0;
+      if (!createdAt || Number.isNaN(createdAt)) return;
+
+      // Ignore stale notices to avoid unexpected popups after a long idle.
+      if (Date.now() - createdAt > RECORDING_STALE_TIMEOUT_MS) return;
+
+      setShowAutoPauseNotice(true);
+    } catch (error) {
+      console.warn("[BottomTab] Failed to parse auto-pause notice:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    consumeAutoPauseNotice();
+
+    const onAutoPauseNotice = () => consumeAutoPauseNotice();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        consumeAutoPauseNotice();
+      }
+    };
+
+    window.addEventListener(AUTO_PAUSE_NOTICE_EVENT, onAutoPauseNotice);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener(AUTO_PAUSE_NOTICE_EVENT, onAutoPauseNotice);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [consumeAutoPauseNotice]);
+
+  useEffect(() => {
+    if (!showAutoPauseNotice) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setShowAutoPauseNotice(false);
+    }, 4500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [showAutoPauseNotice]);
 
   const tabs = [
     {
@@ -55,6 +121,13 @@ export function BottomTab({ showSettingsTooltip = false }: BottomTabProps) {
 
   return (
     <nav className="bottom-tab">
+      {showAutoPauseNotice && (
+        <div className="absolute left-1/2 -translate-x-1/2 -top-16 z-50 w-[calc(100%-1rem)] max-w-[398px] animate-fade-in rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 shadow-lg">
+          <p className="text-xs font-medium leading-5 text-amber-700 clamp-2-lines">
+            {t.nav.autoPauseNotice}
+          </p>
+        </div>
+      )}
       <div className="bottom-tab-inner">
         {tabs.map((tab) => (
           <div key={tab.id} className="relative">

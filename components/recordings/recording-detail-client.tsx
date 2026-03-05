@@ -50,7 +50,7 @@ function getStatusIcon(status: string): string {
 
 export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: RecordingDetailClientProps) {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [viewMode, setViewMode] = useState<"transcript" | "formatted">("formatted");
   const [isEditing, setIsEditing] = useState(false);
   const [recordingTitle, setRecordingTitle] = useState(recording.title);
@@ -135,19 +135,39 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
     }
     switch (errorStep) {
       case "transcription":
-        return "음성 변환 중 오류가 발생했습니다. 다시 녹음해주세요.";
+        return locale === "ko"
+          ? "음성 변환 중 오류가 발생했습니다. 다시 녹음해주세요."
+          : "Transcription failed. Please record again.";
       case "formatting":
-        return "문서 정리 중 오류가 발생했습니다.";
+        return locale === "ko"
+          ? "문서 정리 중 오류가 발생했습니다."
+          : "Formatting failed while organizing your note.";
       case "notion":
-        return "노션 저장 중 오류가 발생했습니다. 설정을 확인해주세요.";
+        return locale === "ko"
+          ? "노션 저장 중 오류가 발생했습니다. 설정을 확인해주세요."
+          : "Notion save failed. Please check your settings.";
+      case "google":
+        return locale === "ko"
+          ? "Google Docs 저장 중 오류가 발생했습니다. 설정을 확인해주세요."
+          : "Google Docs save failed. Please check your settings.";
       case "slack":
-        return "슬랙 알림 전송 중 오류가 발생했습니다.";
+        return locale === "ko"
+          ? "슬랙 알림 전송 중 오류가 발생했습니다."
+          : "Slack notification failed.";
       case "upload":
-        return "녹음 파일 처리 중 오류가 발생했습니다. 다시 녹음해주세요.";
+        return locale === "ko"
+          ? "녹음 파일 처리 중 오류가 발생했습니다. 다시 녹음해주세요."
+          : "Audio processing failed. Please record again.";
+      case "abandoned":
+        return locale === "ko"
+          ? "녹음이 중단돼 저장되지 않았어요. 다시 녹음하거나 왼쪽 스와이프로 삭제해 주세요."
+          : "Recording stopped before save. Record again or swipe left to delete.";
       default:
-        return "처리 중 오류가 발생했습니다.";
+        return locale === "ko"
+          ? "처리 중 오류가 발생했습니다."
+          : "An error occurred while processing.";
     }
-  }, []);
+  }, [locale]);
 
   const handleCopy = useCallback((text: string) => {
     navigator.clipboard.writeText(text);
@@ -343,7 +363,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
               <div className="p-4 min-h-[300px]">
                 {/* Error Message */}
                 {recording.error_step && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600">
+                  <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 clamp-2-lines">
                     {getUserFriendlyErrorMessage(recording.error_step, recording.error_message)}
                   </div>
                 )}

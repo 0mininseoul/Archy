@@ -170,10 +170,14 @@ export const POST = withAuth<ChunkTranscriptResponse>(
               last_chunk_index: number;
               duration_seconds: number;
               session_paused_at: null;
+              last_activity_at: string;
+              termination_reason: null;
             } = {
               last_chunk_index: chunkIndex,
               duration_seconds: totalDuration,
               session_paused_at: null,
+              last_activity_at: new Date().toISOString(),
+              termination_reason: null,
             };
 
             if (transcript.trim().length > 0) {
