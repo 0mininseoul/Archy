@@ -2,9 +2,14 @@
 
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { trackAmplitudeEvent, syncAmplitudeUser } from "@/lib/analytics/amplitude";
 import { useI18n } from "@/lib/i18n";
-import { DesktopLoginNoticeModal } from "@/components/desktop-login-notice-modal";
-import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
+import {
+  safeSessionStorageGetItem,
+  safeSessionStorageRemoveItem,
+  safeSessionStorageSetItem,
+} from "@/lib/safe-storage";
+import { createClient } from "@/lib/supabase/client";
 
 type OnboardingStep = 1 | 2;
 
@@ -21,21 +26,17 @@ interface ConsentState {
   marketing: boolean;
 }
 
-async function trackAmplitudeEvent(
-  eventName: string,
-  eventProperties: Record<string, unknown>
-) {
-  try {
-    const amplitude = await import("@amplitude/analytics-browser");
-    amplitude.track(eventName, eventProperties);
-  } catch {
-    console.warn(`[Amplitude] Failed to track ${eventName}`);
-  }
+interface PendingSignupCompletedEvent {
+  signup_method: "google_oauth";
+  completion_entry: "onboarding";
+  path: string;
 }
+
+const SIGNUP_COMPLETED_PENDING_KEY = "signup_completed_pending";
+const SIGNUP_COMPLETED_STORAGE_PREFIX = "Onboarding";
 
 function OnboardingContent() {
   const [step, setStep] = useState<OnboardingStep>(1);
-  const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
   const [showReferralInput, setShowReferralInput] = useState(false);
   const [referralCode, setReferralCode] = useState("");
   const [referralStatus, setReferralStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -51,6 +52,7 @@ function OnboardingContent() {
   const [consentError, setConsentError] = useState("");
   const [promoStatus, setPromoStatus] = useState<PromoStatus | null>(null);
   const hasTrackedSignupCompletionRef = useRef(false);
+  const [supabase] = useState(() => createClient());
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useI18n();
@@ -58,34 +60,114 @@ function OnboardingContent() {
   const requiredConsentsChecked = consents.age14 && consents.terms && consents.privacy;
   const allConsentsChecked = requiredConsentsChecked && consents.serviceQuality && consents.marketing;
 
-  // Check if user has promo applied (from signup link)
-  useEffect(() => {
-    if (consumeDesktopLoginNoticeEligibility()) {
-      setShowDesktopLoginNotice(true);
-    }
-  }, []);
-
   useEffect(() => {
     const signupStatus = searchParams.get("signup");
-    if (signupStatus !== "completed" || hasTrackedSignupCompletionRef.current) {
+    if (signupStatus !== "completed") {
       return;
     }
 
-    hasTrackedSignupCompletionRef.current = true;
+    const cleanupSignupParam = () => {
+      const cleanedParams = new URLSearchParams(searchParams.toString());
+      cleanedParams.delete("signup");
+      const nextUrl = cleanedParams.toString()
+        ? `/onboarding?${cleanedParams.toString()}`
+        : "/onboarding";
+      router.replace(nextUrl, { scroll: false });
+    };
 
-    void trackAmplitudeEvent("signup_completed", {
-      signup_method: "google_oauth",
-      completion_entry: "onboarding",
-      path: window.location.pathname,
+    safeSessionStorageSetItem(
+      SIGNUP_COMPLETED_PENDING_KEY,
+      JSON.stringify({
+        signup_method: "google_oauth",
+        completion_entry: "onboarding",
+        path: window.location.pathname,
+      } satisfies PendingSignupCompletedEvent),
+      { logPrefix: SIGNUP_COMPLETED_STORAGE_PREFIX }
+    );
+    cleanupSignupParam();
+  }, [router, searchParams]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const readPendingSignupCompletion = (): PendingSignupCompletedEvent | null => {
+      const raw = safeSessionStorageGetItem(SIGNUP_COMPLETED_PENDING_KEY, {
+        logPrefix: SIGNUP_COMPLETED_STORAGE_PREFIX,
+      });
+      if (!raw) return null;
+
+      try {
+        return JSON.parse(raw) as PendingSignupCompletedEvent;
+      } catch (error) {
+        console.warn("[Amplitude] Failed to parse pending signup_completed payload:", error);
+        safeSessionStorageRemoveItem(SIGNUP_COMPLETED_PENDING_KEY, {
+          logPrefix: SIGNUP_COMPLETED_STORAGE_PREFIX,
+        });
+        return null;
+      }
+    };
+
+    const clearPendingSignupCompletion = () => {
+      safeSessionStorageRemoveItem(SIGNUP_COMPLETED_PENDING_KEY, {
+        logPrefix: SIGNUP_COMPLETED_STORAGE_PREFIX,
+      });
+    };
+
+    const trackPendingSignupCompletion = async () => {
+      if (hasTrackedSignupCompletionRef.current) {
+        return;
+      }
+
+      const pendingEvent = readPendingSignupCompletion();
+      if (!pendingEvent) {
+        return;
+      }
+
+      for (let attempt = 0; attempt < 5 && !isCancelled; attempt += 1) {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        if (error) {
+          console.warn("[Amplitude] Failed to resolve auth user for signup_completed:", error);
+          break;
+        }
+
+        if (!user) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          continue;
+        }
+
+        hasTrackedSignupCompletionRef.current = true;
+        await syncAmplitudeUser(user.id);
+        await trackAmplitudeEvent("signup_completed", { ...pendingEvent });
+        clearPendingSignupCompletion();
+        return;
+      }
+
+      if (!isCancelled) {
+        console.warn(
+          "[Amplitude] signup_completed is still pending because no authenticated user was available."
+        );
+      }
+    };
+
+    void trackPendingSignupCompletion();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        void trackPendingSignupCompletion();
+      }
     });
 
-    const cleanedParams = new URLSearchParams(searchParams.toString());
-    cleanedParams.delete("signup");
-    const nextUrl = cleanedParams.toString()
-      ? `/onboarding?${cleanedParams.toString()}`
-      : "/onboarding";
-    router.replace(nextUrl, { scroll: false });
-  }, [router, searchParams]);
+    return () => {
+      isCancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   // Check if user has promo applied (from signup link)
   useEffect(() => {
@@ -533,10 +615,6 @@ function OnboardingContent() {
         </div>
       </main>
 
-      <DesktopLoginNoticeModal
-        isOpen={showDesktopLoginNotice}
-        onClose={() => setShowDesktopLoginNotice(false)}
-      />
     </div >
   );
 }

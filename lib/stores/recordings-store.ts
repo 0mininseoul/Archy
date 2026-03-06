@@ -24,6 +24,7 @@ interface RecordingsStore {
     fetchMoreRecordings: () => Promise<void>;
     invalidate: () => void;
     updateRecording: (id: string, updates: Partial<RecordingListItem>) => void;
+    upsertRecording: (recording: RecordingListItem) => void;
     removeRecording: (id: string) => void;
     getRecordingById: (id: string) => RecordingListItem | undefined;
     setPaginationState: (hasMore: boolean, nextOffset: number | null) => void;
@@ -204,6 +205,32 @@ export const useRecordingsStore = create<RecordingsStore>((set, get) => ({
                 state.recordings.map((r) => (r.id === id ? { ...r, ...updates } : r))
             ),
         }));
+    },
+
+    upsertRecording: (recording) => {
+        set((state) => {
+            const existingIndex = state.recordings.findIndex((item) => item.id === recording.id);
+
+            if (existingIndex === -1) {
+                return {
+                    recordings: sortRecordings([recording, ...state.recordings]),
+                    isLoaded: true,
+                    lastFetchedAt: Date.now(),
+                };
+            }
+
+            const next = [...state.recordings];
+            next[existingIndex] = {
+                ...next[existingIndex],
+                ...recording,
+            };
+
+            return {
+                recordings: sortRecordings(next),
+                isLoaded: true,
+                lastFetchedAt: Date.now(),
+            };
+        });
     },
 
     removeRecording: (id) => {

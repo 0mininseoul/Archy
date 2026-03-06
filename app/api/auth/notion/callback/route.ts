@@ -10,6 +10,8 @@ interface NotionOAuthState {
   traceId?: unknown;
 }
 
+type LogLevel = "info" | "warn" | "error";
+
 function sanitizeReturnTo(returnTo: unknown, fallback: string = DEFAULT_RETURN_TO): string {
   if (typeof returnTo !== "string") return fallback;
   if (!returnTo.startsWith("/") || returnTo.startsWith("//")) return fallback;
@@ -56,12 +58,21 @@ function toTraceId(value: unknown): string {
   return "trace-unknown";
 }
 
-function logWithTrace(traceId: string, message: string, details?: Record<string, unknown>) {
+function logWithTrace(
+  traceId: string,
+  level: LogLevel,
+  message: string,
+  details?: Record<string, unknown>
+) {
+  const prefix = `[Notion Callback][${traceId}] ${message}`;
+  // eslint-disable-next-line no-console
+  const logger = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+
   if (details) {
-    console.warn(`[Notion Callback][${traceId}] ${message}`, details);
+    logger(prefix, details);
     return;
   }
-  console.warn(`[Notion Callback][${traceId}] ${message}`);
+  logger(prefix);
 }
 
 export async function GET(request: NextRequest) {
@@ -90,7 +101,7 @@ export async function GET(request: NextRequest) {
   }
 
   const configuredRedirectUri = process.env.NOTION_REDIRECT_URI;
-  logWithTrace(traceId, "Received callback", {
+  logWithTrace(traceId, "info", "Received callback", {
     hasCode: Boolean(code),
     hasError: Boolean(error),
     returnTo,
@@ -100,7 +111,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (process.env.NODE_ENV === "production" && !configuredRedirectUri) {
-    logWithTrace(traceId, "Missing NOTION_REDIRECT_URI");
+    logWithTrace(traceId, "error", "Missing NOTION_REDIRECT_URI");
     return NextResponse.redirect(
       buildRedirectUrl(canonicalOrigin, returnTo, {
         errorCode: "notion_not_configured",
@@ -110,7 +121,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (error) {
-    logWithTrace(traceId, "Authorization denied or failed", { notionError: error });
+    logWithTrace(traceId, "warn", "Authorization denied or failed", { notionError: error });
     return NextResponse.redirect(
       buildRedirectUrl(canonicalOrigin, returnTo, {
         errorCode: "notion_auth_failed",
@@ -120,7 +131,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!code) {
-    logWithTrace(traceId, "Missing authorization code");
+    logWithTrace(traceId, "warn", "Missing authorization code");
     return NextResponse.redirect(
       buildRedirectUrl(canonicalOrigin, returnTo, {
         errorCode: "no_code",
@@ -137,7 +148,7 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      logWithTrace(traceId, "No authenticated user in callback");
+      logWithTrace(traceId, "warn", "No authenticated user in callback");
       return NextResponse.redirect(
         buildRedirectUrl(canonicalOrigin, returnTo, {
           errorCode: "no_session",
@@ -149,10 +160,10 @@ export async function GET(request: NextRequest) {
     // Exchange code for access token
     // IMPORTANT: The redirect_uri must match exactly what was used in the initial auth request
     const redirectUri = configuredRedirectUri || `${requestOrigin}/api/auth/notion/callback`;
-    logWithTrace(traceId, "Exchanging code", { redirectUri, userId: user.id });
+    logWithTrace(traceId, "info", "Exchanging code", { redirectUri, userId: user.id });
 
     const { access_token } = await exchangeNotionCode(code, redirectUri);
-    logWithTrace(traceId, "Received access token, updating user");
+    logWithTrace(traceId, "info", "Received access token, updating user");
 
     // Update user with Notion credentials
     const { error: updateError } = await supabase
@@ -173,13 +184,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    logWithTrace(traceId, "Successfully saved token to DB");
+    logWithTrace(traceId, "info", "Successfully saved token to DB");
 
     const redirectParams: Record<string, string> = { notion: "connected" };
     if (selectDb) {
       redirectParams.selectDb = "true";
     }
-    logWithTrace(traceId, "OAuth completed", { returnTo, selectDb });
+    logWithTrace(traceId, "info", "OAuth completed", { returnTo, selectDb });
     return NextResponse.redirect(
       buildRedirectUrl(canonicalOrigin, returnTo, { params: redirectParams })
     );

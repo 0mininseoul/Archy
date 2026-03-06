@@ -2,8 +2,14 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 
 export const runtime = "edge";
 
+interface PWAInstallRecordResult {
+    message: string;
+    installed_at: string;
+    record_status: "recorded" | "already_recorded";
+}
+
 // POST /api/user/pwa-install - Record PWA installation
-export const POST = withAuth(async ({ user, supabase }) => {
+export const POST = withAuth<PWAInstallRecordResult>(async ({ user, supabase }) => {
     // Check if already installed (pwa_installed_at is not null)
     const { data: existingUser } = await supabase
         .from("users")
@@ -15,7 +21,8 @@ export const POST = withAuth(async ({ user, supabase }) => {
     if (existingUser?.pwa_installed_at) {
         return successResponse({
             message: "PWA already installed",
-            installed_at: existingUser.pwa_installed_at,
+            installed_at: String(existingUser.pwa_installed_at),
+            record_status: "already_recorded" as const,
         });
     }
 
@@ -34,5 +41,6 @@ export const POST = withAuth(async ({ user, supabase }) => {
     return successResponse({
         message: "PWA installation recorded",
         installed_at: now,
+        record_status: "recorded" as const,
     });
 });

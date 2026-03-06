@@ -180,6 +180,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const currentChunkIndexRef = useRef<number>(0);
   const chunkStartTimeRef = useRef<number>(0);
   const lastChunkTimeRef = useRef<number>(0);
+  const skipUnmountCleanupRef = useRef<boolean>(false);
   const isRestartingRef = useRef<boolean>(false); // iOS용 MediaRecorder 재시작 중 플래그
   const analyserNodeRef = useRef<AnalyserNode | null>(null); // AnalyserNode 참조 유지
   const isRecordingRef = useRef<boolean>(false);
@@ -567,6 +568,10 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (skipUnmountCleanupRef.current) {
+        return;
+      }
+
       const recorder = mediaRecorderRef.current;
       const shouldPersistSessionOnUnmount =
         isRecordingRef.current && Boolean(sessionIdRef.current);
@@ -1292,17 +1297,20 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
    */
   const stopRecording = useCallback(async (): Promise<ChunkedRecordingResult | null> => {
     if (!mediaRecorderRef.current || !isRecordingRef.current) {
+      skipUnmountCleanupRef.current = false;
       return null;
     }
 
     const mediaRecorder = mediaRecorderRef.current;
     if (mediaRecorder.state === "inactive") {
+      skipUnmountCleanupRef.current = false;
       syncRuntimeStateFromRecorder("stop");
       setIsControlBusy(false);
       return null;
     }
 
     const currentSessionId = sessionIdRef.current;
+    skipUnmountCleanupRef.current = true;
     setRuntimeState("stopping", "stop");
     setIsControlBusy(true);
 
@@ -1330,6 +1338,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
           const signalMetrics = consumeCurrentChunkSignalMetrics();
 
           if (chunkBlob.size >= 1024) {
+            currentChunkIndexRef.current++;
             await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
           }
           currentChunkDataRef.current = [];
@@ -1359,6 +1368,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         const totalChunks = currentChunkIndexRef.current;
         const totalDuration = duration;
 
+        chunkManagerRef.current?.cleanup();
+
         console.log(
           `[ChunkedRecorder] Recording stopped, ${transcripts.length}/${totalChunks} chunks transcribed, session: ${currentSessionId}`
         );
@@ -1370,6 +1381,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         setDuration(0);
         setPausedSession(null);
         pausedTimeRef.current = 0;
+        skipUnmountCleanupRef.current = false;
 
         resolve({
           transcripts,

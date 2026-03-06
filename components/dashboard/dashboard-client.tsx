@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ChunkedAudioRecorder } from "@/components/recorder/chunked-audio-recorder";
 import { ChunkedRecordingResult } from "@/hooks/useChunkedRecorder";
@@ -12,20 +11,20 @@ import { useUserStore } from "@/lib/stores/user-store";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
 import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
 import { safeLocalStorageGetItem, safeLocalStorageSetItem } from "@/lib/safe-storage";
+import { formatKSTDate } from "@/lib/utils";
 
 // =============================================================================
 // Component
 // =============================================================================
 
 export function DashboardClient() {
-  const router = useRouter();
   const [showPWAModal, setShowPWAModal] = useState(false);
   const [showDesktopLoginNotice, setShowDesktopLoginNotice] = useState(false);
   const inFlightFinalizeSetRef = useRef<Set<string>>(new Set());
 
   // Use cached data from store
   const { connectionStatus, fetchUserData, isLoaded: userLoaded } = useUserStore();
-  const { invalidate: invalidateRecordings } = useRecordingsStore();
+  const { upsertRecording, mergePolledRecordings } = useRecordingsStore();
 
   // Fetch user data on mount if not already loaded
   useEffect(() => {
@@ -88,6 +87,18 @@ export function DashboardClient() {
     return () => window.clearTimeout(timeoutId);
   }, []);
 
+  const createFallbackTitle = useCallback(() => `Archy - ${formatKSTDate()}`, []);
+  const refreshLatestRecordings = useCallback(async () => {
+    const response = await fetch("/api/recordings?offset=0&limit=20");
+    if (!response.ok) {
+      throw new Error("Failed to refresh recordings");
+    }
+
+    const data = await response.json();
+    const freshRecordings = data.data?.recordings || data.recordings || [];
+    mergePolledRecordings(freshRecordings);
+  }, [mergePolledRecordings]);
+
   const handleRecordingComplete = useCallback(
     async (result: ChunkedRecordingResult) => {
       const { transcripts, totalDuration, totalChunks, sessionId } = result;
@@ -97,10 +108,6 @@ export function DashboardClient() {
         alert("녹음 시간이 너무 짧습니다. 다시 녹음해주세요.");
         return;
       }
-
-      // 즉시 history 페이지로 이동
-      invalidateRecordings();
-      router.push("/dashboard/history");
 
       // 백그라운드에서 finalize 처리 (await 하지 않음)
       const finalizeInBackground = async () => {
@@ -116,6 +123,17 @@ export function DashboardClient() {
             console.log(
               `[Dashboard] Finalizing session in background: ${sessionId}, ${totalDuration}s`
             );
+            upsertRecording({
+              id: sessionId,
+              title: createFallbackTitle(),
+              status: "processing",
+              processing_step: "transcription",
+              created_at: new Date().toISOString(),
+              duration_seconds: totalDuration,
+              format: "meeting",
+              has_transcript: false,
+              transcript: "",
+            });
 
             try {
               const response = await fetch("/api/recordings/finalize", {
@@ -139,7 +157,16 @@ export function DashboardClient() {
                 } else {
                   console.log(`[Dashboard] Session ${sessionId} finalized successfully`);
                 }
-                invalidateRecordings();
+                upsertRecording({
+                  id: data?.data?.recording?.id ?? sessionId,
+                  title: data?.data?.recording?.title ?? createFallbackTitle(),
+                  status: data?.data?.recording?.status ?? "completed",
+                  processing_step: null,
+                  created_at: new Date().toISOString(),
+                  duration_seconds: totalDuration,
+                  format: "meeting",
+                });
+                await refreshLatestRecordings();
               }
             } finally {
               inFlightFinalizeSetRef.current.delete(sessionId);
@@ -173,7 +200,7 @@ export function DashboardClient() {
             console.error("Error finalizing recording:", errorData.error);
           } else {
             console.log("[Dashboard] Recording finalized successfully");
-            invalidateRecordings();
+            await refreshLatestRecordings();
           }
         } catch (error) {
           console.error("Error in background finalize:", error);
@@ -183,7 +210,7 @@ export function DashboardClient() {
       // 백그라운드 처리 시작
       finalizeInBackground();
     },
-    [router, invalidateRecordings]
+    [createFallbackTitle, refreshLatestRecordings, upsertRecording]
   );
 
   return (

@@ -13,8 +13,10 @@ import cron from "node-cron";
 import { randomUUID } from "node:crypto";
 import { google } from "googleapis";
 import { Client as NotionClient } from "@notionhq/client";
+import { createClient } from "@supabase/supabase-js";
 
 import {
+  FIXED_EXCLUDED_USER_IDS,
   GEMINI_FLASH_MODEL,
   GEMINI_PRO_MODEL,
   buildDiscordMetricText,
@@ -71,6 +73,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getSupabaseAdminClient() {
+  const url = getEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const key = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
 function logBotEvent(event, payload = {}) {
   const line = {
     ts: new Date().toISOString(),
@@ -103,6 +111,17 @@ function parseJsonSafe(text) {
     return null;
   }
 }
+
+const NOTION_WRITING_RESPONSE_JSON_SCHEMA = Object.freeze({
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    content_markdown: { type: "string" },
+    discord_summary: { type: "string" },
+  },
+  required: ["title", "content_markdown", "discord_summary"],
+  additionalProperties: false,
+});
 
 function shouldUseToolWorkflow(question) {
   const text = String(question || "").toLowerCase();
@@ -250,6 +269,58 @@ function isNotionCreationRequest(question) {
   return hasCreateVerb && (hasNotionTarget || looksLikeDatedTask);
 }
 
+function isLongformWritingRequest(question) {
+  const lowered = String(question || "").toLowerCase();
+  const writingKeywords = [
+    "메일",
+    "이메일",
+    "email",
+    "e-mail",
+    "문안",
+    "초안",
+    "draft",
+    "작성",
+    "써줘",
+    "써 줘",
+    "정중",
+    "격식",
+    "공손",
+    "안내문",
+    "공지문",
+    "제안서",
+    "소개글",
+    "카피",
+    "copy",
+  ];
+  return writingKeywords.some((keyword) => lowered.includes(keyword));
+}
+
+function wantsDraftPreview(question) {
+  const lowered = String(question || "").toLowerCase();
+  const previewKeywords = [
+    "미리보기",
+    "본문도",
+    "본문 보여",
+    "내용도 보여",
+    "내용도 보내",
+    "디스코드에도",
+    "여기에도",
+    "채널에도",
+    "복붙해서",
+    "붙여서 보여",
+  ];
+  return previewKeywords.some((keyword) => lowered.includes(keyword));
+}
+
+function needsHeavyUserContext(question) {
+  const lowered = String(question || "").toLowerCase();
+  return (
+    lowered.includes("헤비 유저") ||
+    lowered.includes("heavy user") ||
+    (lowered.includes("상위") && lowered.includes("유저"))
+  );
+}
+
 function detectDateExpression(question) {
   const text = String(question || "");
   const lowered = text.toLowerCase();
@@ -332,6 +403,159 @@ function extractTitleFromQuestion(question, fallback = "업무 항목") {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120) || fallback;
+}
+
+function formatHeavyUserContext(items = []) {
+  const rows = Array.isArray(items) ? items.slice(0, 3) : [];
+  if (rows.length === 0) return "헤비 유저 상위 데이터 없음";
+  return rows.map((item, idx) => `${idx + 1}. ${item.name || "이름 없음"} (${item.count || 0}회)`).join("\n");
+}
+
+let heavyUserContextCache = {
+  value: [],
+  expiresAt: 0,
+};
+
+async function getCachedHeavyUserTop3() {
+  const now = Date.now();
+  if (heavyUserContextCache.expiresAt > now && Array.isArray(heavyUserContextCache.value)) {
+    return heavyUserContextCache.value;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const excluded = new Set(FIXED_EXCLUDED_USER_IDS);
+  const [usersRes, recordingsRes] = await Promise.all([
+    supabase.from("users").select("id,name,email"),
+    supabase.from("recordings").select("user_id"),
+  ]);
+
+  if (usersRes.error) throw usersRes.error;
+  if (recordingsRes.error) throw recordingsRes.error;
+
+  const users = (usersRes.data || []).filter((user) => !excluded.has(user.id));
+  const activeUserIds = new Set(users.map((user) => user.id));
+  const counts = new Map();
+
+  for (const row of recordingsRes.data || []) {
+    const userId = row.user_id;
+    if (!activeUserIds.has(userId)) continue;
+    counts.set(userId, (counts.get(userId) || 0) + 1);
+  }
+
+  const top3 = [...counts.entries()]
+    .map(([userId, count]) => {
+      const user = users.find((item) => item.id === userId);
+      return {
+        userId,
+        name: user?.name || user?.email || userId,
+        count,
+      };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  heavyUserContextCache = {
+    value: top3,
+    expiresAt: now + 5 * 60 * 1000,
+  };
+
+  return top3;
+}
+
+async function maybeGenerateDraftForToolCall({ question, toolCall, traceId }) {
+  if (toolCall?.tool !== "notion_create_page" || !isLongformWritingRequest(question)) {
+    return toolCall;
+  }
+
+  const currentTitle = String(toolCall.args?.title || "").trim() || extractTitleFromQuestion(question, "새 노션 페이지");
+  let contextText = "";
+
+  if (needsHeavyUserContext(question)) {
+    try {
+      const heavyUserTop3 = await getCachedHeavyUserTop3();
+      contextText = [
+        "현재 운영 지표 참고:",
+        `- 기준 날짜(KST): ${toKstYmd(new Date())}`,
+        "- 헤비 유저 상위 3명",
+        formatHeavyUserContext(heavyUserTop3),
+      ].join("\n");
+    } catch (error) {
+      logBotEvent("tool.draft.context.fail", {
+        traceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const prompt = [
+    "사용자 요청을 바탕으로 Notion 페이지 제목과 본문 초안을 JSON으로 작성해라.",
+    '출력 형식: {"title":"string","content_markdown":"string","discord_summary":"string"}',
+    "규칙:",
+    "1) 한국어로 작성",
+    "2) content_markdown은 Notion에 바로 넣을 수 있는 markdown만 사용",
+    "3) 메일/이메일/문안 요청이면 `# 메일 초안`, `## 메일 제목`, `## 메일 본문`, `## 개인화 포인트` 구조를 포함",
+    "4) 문체는 정중하고 자연스럽게, 과장하거나 확인되지 않은 사실을 꾸며내지 말 것",
+    "5) 불확실한 개인 정보는 [이름], [최근 사용 포인트] 같은 placeholder로 처리",
+    "6) 여러 명에게 보낼 내용이면 재사용 가능한 공통 초안으로 작성",
+    "7) title은 Notion 페이지 제목으로 자연스럽고 짧게 작성",
+    "8) discord_summary는 1~2문장, 120자 이내",
+    "",
+    "[현재 기본 제목]",
+    currentTitle,
+    "",
+    "[추가 운영 컨텍스트]",
+    contextText || "(없음)",
+    "",
+    "[사용자 요청]",
+    question,
+  ].join("\n");
+
+  logBotEvent("tool.draft.start", {
+    traceId,
+    tool: toolCall.tool,
+    model: GEMINI_PRO_MODEL,
+    titlePreview: truncate(currentTitle, 120),
+  });
+
+  const raw = await generateGeminiText({
+    model: GEMINI_PRO_MODEL,
+    systemInstruction:
+      "너는 Archy 운영팀의 한국어 문안 작성기다. 실제 발송 가능한 수준으로 정중하고 명확하게 쓰고, JSON만 출력한다.",
+    userPrompt: prompt,
+    temperature: 0.3,
+    maxOutputTokens: 1800,
+    thinkingLevel: "medium",
+    responseMimeType: "application/json",
+    responseJsonSchema: NOTION_WRITING_RESPONSE_JSON_SCHEMA,
+  });
+
+  const parsed = parseJsonSafe(raw);
+  const title = String(parsed?.title || currentTitle).trim() || currentTitle;
+  const contentMarkdown = String(parsed?.content_markdown || "").trim();
+  const discordSummary = String(parsed?.discord_summary || "").trim();
+
+  logBotEvent("tool.draft.done", {
+    traceId,
+    tool: toolCall.tool,
+    model: GEMINI_PRO_MODEL,
+    titlePreview: truncate(title, 120),
+    contentLength: contentMarkdown.length,
+    discordSummaryPreview: truncate(discordSummary, 160),
+  });
+
+  if (!contentMarkdown) {
+    return toolCall;
+  }
+
+  return {
+    ...toolCall,
+    args: {
+      ...toolCall.args,
+      title,
+      content_markdown: contentMarkdown,
+      discord_summary: discordSummary,
+    },
+  };
 }
 
 function toPlainTextRichText(content) {
@@ -1377,6 +1601,45 @@ async function buildToolWorkflowResponse({ question, plan, executions }) {
     lines.push("", followup);
   }
 
+  const previewRequested = wantsDraftPreview(question);
+  const draftPreviews = executions
+    .filter((item) => item.ok && item.tool === "notion_create_page")
+    .map((item) => {
+      const contentMarkdown = String(item.args?.content_markdown || "").trim();
+      if (!contentMarkdown) return null;
+      return {
+        title: String(item.args?.title || "").trim(),
+        discordSummary: String(item.args?.discord_summary || "").trim(),
+        contentMarkdown,
+      };
+    })
+    .filter(Boolean);
+
+  if (draftPreviews.length > 0 && !previewRequested) {
+    const successfulCreates = executions.filter((item) => item.ok && item.tool === "notion_create_page");
+    if (successfulCreates.length === 1 && failCount === 0) {
+      const result = successfulCreates[0].result || {};
+      return `노션 페이지 생성 완료: ${result.url || result.id || "(url 없음)"}`;
+    }
+    return lines.join("\n");
+  }
+
+  if (draftPreviews.length > 0) {
+    for (let i = 0; i < draftPreviews.length; i += 1) {
+      const draft = draftPreviews[i];
+      lines.push("", draftPreviews.length > 1 ? `작성 초안 미리보기 ${i + 1}` : "작성 초안 미리보기");
+      if (draft.title) {
+        lines.push(`페이지 제목: ${draft.title}`);
+      }
+      if (draft.discordSummary) {
+        lines.push(draft.discordSummary);
+      }
+      lines.push("", draft.contentMarkdown);
+    }
+    lines.push("", "전체 내용은 생성된 Notion 페이지에도 저장했습니다.");
+    return lines.join("\n");
+  }
+
   const addendumPrompt = [
     "아래 결과 요약을 2~4문장으로 부연해라.",
     "반드시 사실만 요약하고, 실행되지 않은 작업을 꾸며내지 마라.",
@@ -1446,7 +1709,11 @@ async function maybeHandleToolWorkflow({ question, memoryContext, workProgressTe
 
   const executions = [];
   for (let i = 0; i < toolCalls.length; i += 1) {
-    const toolCall = toolCalls[i];
+    const toolCall = await maybeGenerateDraftForToolCall({
+      question,
+      toolCall: toolCalls[i],
+      traceId,
+    });
     logBotEvent("tool.exec.start", {
       traceId,
       index: i + 1,
@@ -1511,6 +1778,15 @@ async function maybeHandleToolWorkflow({ question, memoryContext, workProgressTe
       tool_calls: toolCalls,
     },
     executions,
+  });
+
+  logBotEvent("tool.response.built", {
+    traceId,
+    responseLength: response.length,
+    chunkCount: splitMessage(response).length,
+    includesDraftPreview: executions.some(
+      (item) => item.ok && item.tool === "notion_create_page" && String(item.args?.content_markdown || "").trim()
+    ),
   });
 
   return { handled: true, response };
@@ -2239,7 +2515,10 @@ async function answerAdvisorQuestion(message, question, { traceId = null } = {})
       traceId,
     });
     if (toolWorkflow.handled && toolWorkflow.response) {
-      await sendLongMessage(message.channel, toolWorkflow.response, { traceId });
+      await sendLongMessage(message.channel, toolWorkflow.response, {
+        traceId,
+        withSequence: true,
+      });
       await persistConversationExchange({
         message,
         question,

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { resetAmplitudeUser } from "@/lib/analytics/amplitude";
 import { useI18n } from "@/lib/i18n";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,6 +13,7 @@ export default function WithdrawCompletePage() {
   // Sign out when page loads
   useEffect(() => {
     const signOut = async () => {
+      await resetAmplitudeUser();
       const supabase = createClient();
       await supabase.auth.signOut();
     };

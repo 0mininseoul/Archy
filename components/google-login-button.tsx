@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { trackAmplitudeEvent } from "@/lib/analytics/amplitude";
 import { createClient } from "@/lib/supabase/client";
 import { useI18n } from "@/lib/i18n";
 import { detectInAppBrowserType, isAndroid, openExternalBrowser, InAppBrowserType } from "@/lib/browser";
@@ -11,18 +12,6 @@ import { markLoginIntent } from "@/lib/desktop-login-notice";
 interface GoogleLoginButtonProps {
   variant?: "nav" | "primary" | "cta";
   label?: string;
-}
-
-async function trackAmplitudeEvent(
-  eventName: string,
-  eventProperties: Record<string, unknown>
-) {
-  try {
-    const amplitude = await import("@amplitude/analytics-browser");
-    amplitude.track(eventName, eventProperties);
-  } catch (error) {
-    console.warn(`[Amplitude] Failed to track ${eventName}:`, error);
-  }
 }
 
 export function GoogleLoginButton({ variant = "nav", label }: GoogleLoginButtonProps) {

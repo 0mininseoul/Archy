@@ -54,7 +54,8 @@ export async function GET(request: NextRequest) {
   // Use environment variable for redirect URI to ensure consistency with Notion developer console
   const redirectUri = configuredRedirectUri || `${requestUrl.origin}/api/auth/notion/callback`;
 
-  console.warn("[Notion Auth] Start OAuth", {
+  // eslint-disable-next-line no-console
+  console.info("[Notion Auth] Start OAuth", {
     traceId,
     redirectUri,
     returnTo,

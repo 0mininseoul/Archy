@@ -1,100 +1,245 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import * as amplitude from "@amplitude/analytics-browser";
+import { useEffect, useRef, useState } from "react";
+import {
+  syncAmplitudeUser,
+  trackAmplitudeEvent,
+} from "@/lib/analytics/amplitude";
+import { safeLocalStorageGetItem, safeLocalStorageRemoveItem, safeLocalStorageSetItem } from "@/lib/safe-storage";
+import { createClient } from "@/lib/supabase/client";
+
+type Platform = "android" | "ios" | "desktop";
+type InstallSource = "appinstalled" | "standalone";
+
+interface PendingPWAInstall {
+  detectedAt: string;
+  platform: Platform;
+  source: InstallSource;
+}
+
+interface PWAInstallResponseData {
+  installed_at?: string;
+  record_status?: "recorded" | "already_recorded";
+  message?: string;
+}
+
+const PWA_INSTALL_RECORDED_KEY = "pwa_install_recorded";
+const PWA_INSTALL_PENDING_KEY = "pwa_install_pending";
+const STORAGE_LOG_PREFIX = "PWAInstaller";
 
 /**
- * PWA 설치 완료 이벤트를 감지하고 DB에 저장 + Amplitude 이벤트 전송
- * - appinstalled 이벤트: Android Chrome에서 PWA 설치 완료 시 발생
- * - iOS는 appinstalled 이벤트를 지원하지 않으므로, standalone 모드 진입 감지로 처리
+ * PWA 설치 감지와 DB 저장을 분리한다.
+ * - 감지 시: PWA_Install_Detected
+ * - DB 저장 성공/기존 기록 확인 시: PWA_Installed
+ * - DB 저장 실패 시: PWA_Install_Persist_Failed
  */
 export function PWAInstaller() {
-    const hasRecordedRef = useRef(false);
+  const hasRecordedRef = useRef(false);
+  const isPersistingRef = useRef(false);
+  const [supabase] = useState(() => createClient());
 
-    useEffect(() => {
-        // 이미 기록했으면 스킵
-        if (hasRecordedRef.current) return;
+  useEffect(() => {
+    hasRecordedRef.current = safeLocalStorageGetItem(PWA_INSTALL_RECORDED_KEY, {
+      logPrefix: STORAGE_LOG_PREFIX,
+    }) === "true";
 
-        // PWA 설치 완료 이벤트 핸들러
-        const handleAppInstalled = async () => {
-            if (hasRecordedRef.current) return;
-            hasRecordedRef.current = true;
+    const readPendingInstall = (): PendingPWAInstall | null => {
+      const raw = safeLocalStorageGetItem(PWA_INSTALL_PENDING_KEY, {
+        logPrefix: STORAGE_LOG_PREFIX,
+      });
+      if (!raw) return null;
 
-            console.log("[PWA] Installation detected");
+      try {
+        return JSON.parse(raw) as PendingPWAInstall;
+      } catch (error) {
+        console.warn("[PWA] Failed to parse pending install metadata:", error);
+        safeLocalStorageRemoveItem(PWA_INSTALL_PENDING_KEY, {
+          logPrefix: STORAGE_LOG_PREFIX,
+        });
+        return null;
+      }
+    };
 
-            // 1. Amplitude 이벤트 전송
-            amplitude.track("PWA_Installed", {
-                platform: getPlatform(),
-                timestamp: new Date().toISOString(),
-            });
+    const writePendingInstall = (pending: PendingPWAInstall) => {
+      safeLocalStorageSetItem(PWA_INSTALL_PENDING_KEY, JSON.stringify(pending), {
+        logPrefix: STORAGE_LOG_PREFIX,
+      });
+    };
 
-            // 2. DB에 설치 시점 저장
-            try {
-                await fetch("/api/user/pwa-install", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                });
-                console.log("[PWA] Installation recorded to DB");
-            } catch (error) {
-                console.error("[PWA] Failed to record installation:", error);
-            }
-        };
+    const markInstallRecorded = () => {
+      hasRecordedRef.current = true;
+      safeLocalStorageSetItem(PWA_INSTALL_RECORDED_KEY, "true", {
+        logPrefix: STORAGE_LOG_PREFIX,
+      });
+      safeLocalStorageRemoveItem(PWA_INSTALL_PENDING_KEY, {
+        logPrefix: STORAGE_LOG_PREFIX,
+      });
+    };
 
-        // Android/Desktop: appinstalled 이벤트 리스너
-        window.addEventListener("appinstalled", handleAppInstalled);
+    const parseResponseData = (payload: unknown): PWAInstallResponseData => {
+      if (!payload || typeof payload !== "object") return {};
 
-        // iOS: standalone 모드로 처음 진입한 경우 체크
-        // (iOS는 appinstalled 이벤트를 지원하지 않음)
-        const isStandalone =
-            window.matchMedia("(display-mode: standalone)").matches ||
-            (navigator as Navigator & { standalone?: boolean }).standalone === true;
+      if ("data" in payload && payload.data && typeof payload.data === "object") {
+        return payload.data as PWAInstallResponseData;
+      }
 
-        if (isStandalone) {
-            // localStorage 접근이 제한된 환경(iOS webview 등)에서도 크래시 없이 진행
-            const alreadyRecorded = safeGetLocalStorage("pwa_install_recorded");
-            if (!alreadyRecorded) {
-                safeSetLocalStorage("pwa_install_recorded", "true");
-                handleAppInstalled();
-            }
+      return payload as PWAInstallResponseData;
+    };
+
+    const parseResponseError = (payload: unknown): string | null => {
+      if (!payload || typeof payload !== "object") return null;
+
+      if ("error" in payload && typeof payload.error === "string") {
+        return payload.error;
+      }
+
+      return null;
+    };
+
+    const persistPendingInstall = async (pending: PendingPWAInstall) => {
+      if (hasRecordedRef.current || isPersistingRef.current) return;
+
+      isPersistingRef.current = true;
+
+      let userId: string | null = null;
+
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        if (error) {
+          console.warn("[PWA] Failed to resolve auth user:", error);
+          return;
         }
 
-        return () => {
-            window.removeEventListener("appinstalled", handleAppInstalled);
-        };
-    }, []);
+        userId = user?.id || null;
+        if (!userId) return;
 
-    return null;
-}
+        await syncAmplitudeUser(userId);
 
-function safeGetLocalStorage(key: string): string | null {
-    if (typeof window === "undefined") return null;
+        const response = await fetch("/api/user/pwa-install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
 
-    try {
-        return window.localStorage.getItem(key);
-    } catch (error) {
-        console.warn(`[PWA] localStorage get failed for key "${key}":`, error);
-        return null;
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch {
+          // Ignore JSON parse failures and fall back to status-based logging.
+        }
+
+        if (!response.ok) {
+          const errorMessage = parseResponseError(payload) || `HTTP ${response.status}`;
+          await trackAmplitudeEvent("PWA_Install_Persist_Failed", {
+            platform: pending.platform,
+            install_source: pending.source,
+            detected_at: pending.detectedAt,
+            error: errorMessage,
+            http_status: response.status,
+          });
+          console.error("[PWA] Failed to record installation:", errorMessage);
+          return;
+        }
+
+        const data = parseResponseData(payload);
+        const installedAt = data.installed_at || pending.detectedAt;
+        const recordStatus = data.record_status || "recorded";
+
+        markInstallRecorded();
+
+        await trackAmplitudeEvent("PWA_Installed", {
+          platform: pending.platform,
+          install_source: pending.source,
+          detected_at: pending.detectedAt,
+          installed_at: installedAt,
+          record_status: recordStatus,
+        });
+      } catch (error) {
+        await trackAmplitudeEvent("PWA_Install_Persist_Failed", {
+          platform: pending.platform,
+          install_source: pending.source,
+          detected_at: pending.detectedAt,
+          error: error instanceof Error ? error.message : String(error),
+          ...(userId ? { supabase_user_id: userId } : {}),
+        });
+        console.error("[PWA] Failed to record installation:", error);
+      } finally {
+        isPersistingRef.current = false;
+      }
+    };
+
+    const handleInstallDetected = async (source: InstallSource) => {
+      if (hasRecordedRef.current) return;
+
+      const existingPending = readPendingInstall();
+      const pending = existingPending || {
+        detectedAt: new Date().toISOString(),
+        platform: getPlatform(),
+        source,
+      };
+
+      if (!existingPending) {
+        writePendingInstall(pending);
+        await trackAmplitudeEvent("PWA_Install_Detected", {
+          platform: pending.platform,
+          install_source: pending.source,
+          detected_at: pending.detectedAt,
+        });
+      }
+
+      await persistPendingInstall(pending);
+    };
+
+    const handleAppInstalled = () => {
+      void handleInstallDetected("appinstalled");
+    };
+
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user) return;
+
+      const pending = readPendingInstall();
+      if (pending) {
+        void persistPendingInstall(pending);
+      }
+    });
+
+    const pending = readPendingInstall();
+    if (pending) {
+      void persistPendingInstall(pending);
+    } else if (isStandaloneMode() && !hasRecordedRef.current) {
+      void handleInstallDetected("standalone");
     }
+
+    return () => {
+      window.removeEventListener("appinstalled", handleAppInstalled);
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  return null;
 }
 
-function safeSetLocalStorage(key: string, value: string): void {
-    if (typeof window === "undefined") return;
+function isStandaloneMode(): boolean {
+  if (typeof window === "undefined") return false;
 
-    try {
-        window.localStorage.setItem(key, value);
-    } catch (error) {
-        console.warn(`[PWA] localStorage set failed for key "${key}":`, error);
-    }
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
 }
 
-/**
- * 현재 플랫폼 감지
- */
-function getPlatform(): "android" | "ios" | "desktop" {
-    if (typeof window === "undefined") return "desktop";
+function getPlatform(): Platform {
+  if (typeof window === "undefined") return "desktop";
 
-    const ua = navigator.userAgent;
-    if (/Android/i.test(ua)) return "android";
-    if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
-    return "desktop";
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) return "android";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  return "desktop";
 }

@@ -36,6 +36,7 @@ export interface User {
   // Push Notifications
   push_subscription?: PushSubscriptionData | null;
   push_enabled: boolean;
+  pwa_installed_at?: string | null;
 
   // Audio Storage
   save_audio_enabled: boolean;
@@ -210,6 +211,19 @@ export interface WithdrawnUser {
   data?: Record<string, unknown> | null;
   withdrawal_reason?: string | null;
   withdrawn_at: string;
+}
+
+export interface AmplitudeSignupIdentityMapping {
+  id: string;
+  supabase_user_id: string;
+  amplitude_id: number;
+  amplitude_device_id: string;
+  amplitude_event_time: string;
+  supabase_created_at: string;
+  match_type: string;
+  confidence: string;
+  match_metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 // -----------------------------------------------------------------------------

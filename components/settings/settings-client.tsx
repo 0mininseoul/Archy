@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { resetAmplitudeUser } from "@/lib/analytics/amplitude";
 import { InviteFriends } from "./invite-friends";
 import {
   AccountSection,
@@ -211,7 +212,9 @@ export function SettingsClient() {
   const handleSignOut = useCallback(() => {
     // Clear client caches first, then delegate sign-out to server route.
     useUserStore.getState().invalidate();
-    window.location.assign("/api/auth/signout");
+    void resetAmplitudeUser().finally(() => {
+      window.location.assign("/api/auth/signout");
+    });
   }, []);
 
   const toggleSection = useCallback((section: string) => {

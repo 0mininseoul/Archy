@@ -118,6 +118,7 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         const transcription = await transcribeAudio(audioChunk, {
           avgRms,
           peakRms,
+          durationSeconds,
           chunkIndex,
           apiKeyOverride: keySelection.apiKey,
           apiKeySource: keySelection.source,

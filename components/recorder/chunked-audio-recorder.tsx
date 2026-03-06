@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   useChunkedRecorder,
   ChunkedRecordingResult,
 } from "@/hooks/useChunkedRecorder";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, formatKSTDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { useRecordingsStore } from "@/lib/stores/recordings-store";
 import { StealthMode } from "./stealth-mode";
 import { RecordingGuideModal } from "./recording-guide-modal";
 import { ResumeModal } from "./resume-modal";
@@ -139,7 +141,9 @@ function WaveformVisualizer({
 export function ChunkedAudioRecorder({
   onRecordingComplete,
 }: ChunkedAudioRecorderProps) {
+  const router = useRouter();
   const { t } = useI18n();
+  const { upsertRecording } = useRecordingsStore();
 
   // UI 상태
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -158,9 +162,8 @@ export function ChunkedAudioRecorder({
     canPause,
     canResume,
     canStop,
-    chunksTotal,
-    isOnline,
     sessionId,
+    isOnline,
     pausedSession,
     isBackgroundPaused,
     startRecording,
@@ -171,6 +174,24 @@ export function ChunkedAudioRecorder({
     discardSession,
     finalizeCurrentSession,
   } = useChunkedRecorder();
+
+  const transitionToHistory = useCallback(
+    (activeSessionId: string, activeDuration: number) => {
+      upsertRecording({
+        id: activeSessionId,
+        title: `Archy - ${formatKSTDate()}`,
+        status: "recording",
+        processing_step: "transcription",
+        created_at: new Date().toISOString(),
+        duration_seconds: activeDuration,
+        format: "meeting",
+        has_transcript: false,
+        transcript: "",
+      });
+      router.push("/dashboard/history");
+    },
+    [router, upsertRecording]
+  );
 
   // 푸시 권한 상태 확인
   const checkPushPermission = useCallback(async (): Promise<"granted" | "denied" | "default" | "unsupported"> => {
@@ -238,30 +259,26 @@ export function ChunkedAudioRecorder({
     setStealthModeActive(false);
   }, []);
 
-  // 녹음 중지 핸들러 - 즉시 history로 이동, 백그라운드에서 처리
+  // 녹음 중지 핸들러 - UI는 즉시 전환하고 저장/최종화는 백그라운드에서 처리
   const handleStopRecording = useCallback(() => {
     if (!canStop) return;
     setStealthModeActive(false);
+    const stopPromise = stopRecording();
 
-    // 현재 sessionId와 duration을 즉시 캡처
-    const currentSessionId = sessionId;
-    const currentDuration = duration;
-
-    // 즉시 onRecordingComplete 호출 (history로 이동)
-    if (currentSessionId && currentDuration >= 1) {
-      onRecordingComplete({
-        transcripts: [],
-        totalDuration: currentDuration,
-        totalChunks: chunksTotal,
-        sessionId: currentSessionId,
-      });
+    if (sessionId && duration >= 1) {
+      transitionToHistory(sessionId, duration);
     }
 
-    // 백그라운드에서 stopRecording 실행 (await 하지 않음)
-    stopRecording().catch((err) => {
-      console.error("[ChunkedAudioRecorder] Error in background stopRecording:", err);
-    });
-  }, [canStop, sessionId, duration, chunksTotal, stopRecording, onRecordingComplete]);
+    void stopPromise
+      .then((result) => {
+        if (result) {
+          onRecordingComplete(result);
+        }
+      })
+      .catch((err) => {
+        console.error("[ChunkedAudioRecorder] Error in background stopRecording:", err);
+      });
+  }, [canStop, duration, onRecordingComplete, sessionId, stopRecording, transitionToHistory]);
 
   // 일시정지 핸들러
   const handlePauseRecording = useCallback(() => {
@@ -292,9 +309,12 @@ export function ChunkedAudioRecorder({
     setShowResumeModal(false);
     const result = await finalizeCurrentSession();
     if (result) {
+      if (result.sessionId && result.totalDuration >= 1) {
+        transitionToHistory(result.sessionId, result.totalDuration);
+      }
       onRecordingComplete(result);
     }
-  }, [finalizeCurrentSession, onRecordingComplete]);
+  }, [finalizeCurrentSession, onRecordingComplete, transitionToHistory]);
 
   // 재개 모달에서 취소
   const handleDiscard = useCallback(async () => {

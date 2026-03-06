@@ -4,6 +4,7 @@
 export interface TranscriptionOptions {
   avgRms?: number;
   peakRms?: number;
+  durationSeconds?: number;
   chunkIndex?: number;
   apiKeyOverride?: string;
   apiKeySource?: string;
@@ -41,11 +42,13 @@ export const SILENCE_FILTER_VERSION = "balanced_v1";
 // Balanced filtering thresholds
 export const SILENCE_FILTER_THRESHOLDS = {
   lowSignalRms: 0.006,
+  weakSignalRms: 0.0085,
   highNoSpeechProb: 0.62,
   midNoSpeechProb: 0.5,
   lowAvgLogprob: -1.1,
   allSegmentNoSpeechProb: 0.8,
   suspiciousShortTextMaxChars: 12,
+  longChunkMinSeconds: 10,
 } as const;
 
 // Keep this list narrow and always combine with signal/confidence checks.
@@ -55,6 +58,13 @@ const SUSPICIOUS_SHORT_PHRASES = new Set([
   "thankyou",
   "thanks",
 ]);
+
+const OUTRO_HALLUCINATION_MARKERS = [
+  "시청해주셔서감사합니다",
+  "들어주셔서감사합니다",
+  "봐주셔서감사합니다",
+  "구독과좋아요",
+] as const;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -79,6 +89,29 @@ function isSuspiciousShortPhrase(text: string): boolean {
   }
 
   return SUSPICIOUS_SHORT_PHRASES.has(normalized);
+}
+
+function isLikelyOutroHallucination(text: string): boolean {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  if (OUTRO_HALLUCINATION_MARKERS.some((marker) => normalized.includes(marker))) {
+    return true;
+  }
+
+  const gratitudeMatches = normalized.match(/감사합니다|고맙습니다|thankyou|thanks/gu) ?? [];
+  if (gratitudeMatches.length < 2) {
+    return false;
+  }
+
+  const stripped = gratitudeMatches.reduce(
+    (value, token) => value.replaceAll(token, ""),
+    normalized
+  );
+
+  return stripped.length <= 8;
 }
 
 function analyzeSilence(
@@ -124,6 +157,26 @@ function analyzeSilence(
     isSuspiciousShortPhrase(text)
   ) {
     return { isLikelySilence: true, reason: "rule_c_suspicious_short_phrase" };
+  }
+
+  // Rule D: long weak-signal chunk containing only a tiny gratitude phrase.
+  if (
+    hasRms &&
+    avgRms! < SILENCE_FILTER_THRESHOLDS.weakSignalRms &&
+    (options.durationSeconds ?? 0) >= SILENCE_FILTER_THRESHOLDS.longChunkMinSeconds &&
+    isSuspiciousShortPhrase(text)
+  ) {
+    return { isLikelySilence: true, reason: "rule_d_long_chunk_short_phrase" };
+  }
+
+  // Rule E: long weak-signal chunk that looks like an outro hallucination.
+  if (
+    hasRms &&
+    avgRms! < SILENCE_FILTER_THRESHOLDS.weakSignalRms &&
+    (options.durationSeconds ?? 0) >= SILENCE_FILTER_THRESHOLDS.longChunkMinSeconds &&
+    isLikelyOutroHallucination(text)
+  ) {
+    return { isLikelySilence: true, reason: "rule_e_long_chunk_outro_hallucination" };
   }
 
   return { isLikelySilence: false };
