@@ -2278,7 +2278,6 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
     const report = await runDailyPipeline({
       runDate: new Date(),
       dryRun: false,
-      runWeeklyWhenSunday: true,
       skipStrategicReview: false,
     });
     logBotEvent("daily.pipeline_done", {

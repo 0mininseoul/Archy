@@ -300,13 +300,6 @@ function addDays(ymd, deltaDays) {
   return toKstYmd(new Date(utc));
 }
 
-function isSundayKst(inputDate = new Date()) {
-  const ymd = toKstYmd(inputDate);
-  const [y, m, d] = ymd.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).getUTCDay();
-  return weekday === 0;
-}
-
 function formatKoreanDayLabel(ymd) {
   const weekdayKo = ["일", "월", "화", "수", "목", "금", "토"];
   const [y, m, d] = ymd.split("-").map(Number);
@@ -2951,7 +2944,6 @@ export async function runDailyPipeline({
   runDate = new Date(),
   targetYmd: forcedTargetYmd = null,
   dryRun = false,
-  runWeeklyWhenSunday = true,
   skipStrategicReview = false,
 } = {}) {
   const runStartedAtMs = Date.now();
@@ -2965,7 +2957,6 @@ export async function runDailyPipeline({
     runYmd,
     targetYmd,
     dryRun,
-    runWeeklyWhenSunday,
     skipStrategicReview,
   });
 
@@ -3041,7 +3032,6 @@ export async function runDailyPipeline({
 
     let sheetSync = null;
     let dailyNotionUpsert = null;
-    let weeklyNotionUpsert = null;
 
     if (!dryRun) {
       const sheetSyncStartedAt = Date.now();
@@ -3070,22 +3060,6 @@ export async function runDailyPipeline({
         durationMs: Date.now() - dailyNotionStartedAt,
         mode: dailyNotionUpsert?.mode ?? null,
       });
-
-      if (runWeeklyWhenSunday && isSundayKst(runDate)) {
-        const weeklyLabel = formatKoreanDayLabel(runYmd);
-        const weeklyNotionStartedAt = Date.now();
-        weeklyNotionUpsert = await upsertNotionMetricsRow({
-          label: weeklyLabel,
-          metrics,
-          conversionRate: amplitudeConversion.currentRate,
-        });
-        logDailyEvent("step.done", {
-          runId,
-          step: "upsert_notion_weekly",
-          durationMs: Date.now() - weeklyNotionStartedAt,
-          mode: weeklyNotionUpsert?.mode ?? null,
-        });
-      }
     }
 
     let workProgress = null;
@@ -3167,7 +3141,6 @@ export async function runDailyPipeline({
       },
       sheetSync,
       dailyNotionUpsert,
-      weeklyNotionUpsert,
       heavyUserTop3: metrics.heavyUserTop3,
       workProgress,
       workProgressError,
