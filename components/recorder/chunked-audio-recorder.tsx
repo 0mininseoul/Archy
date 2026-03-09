@@ -14,7 +14,7 @@ import { RecordingGuideModal } from "./recording-guide-modal";
 import { ResumeModal } from "./resume-modal";
 
 interface ChunkedAudioRecorderProps {
-  onRecordingComplete: (result: ChunkedRecordingResult) => void;
+  onRecordingComplete: (result: ChunkedRecordingResult) => Promise<void> | void;
 }
 
 function WaveformVisualizer({
@@ -162,7 +162,6 @@ export function ChunkedAudioRecorder({
     canPause,
     canResume,
     canStop,
-    sessionId,
     isOnline,
     pausedSession,
     isBackgroundPaused,
@@ -180,7 +179,7 @@ export function ChunkedAudioRecorder({
       upsertRecording({
         id: activeSessionId,
         title: `Archy - ${formatKSTDate()}`,
-        status: "recording",
+        status: "processing",
         processing_step: "transcription",
         created_at: new Date().toISOString(),
         duration_seconds: activeDuration,
@@ -260,25 +259,22 @@ export function ChunkedAudioRecorder({
   }, []);
 
   // 녹음 중지 핸들러 - UI는 즉시 전환하고 저장/최종화는 백그라운드에서 처리
-  const handleStopRecording = useCallback(() => {
+  const handleStopRecording = useCallback(async () => {
     if (!canStop) return;
     setStealthModeActive(false);
-    const stopPromise = stopRecording();
+    try {
+      const result = await stopRecording();
+      if (!result) return;
 
-    if (sessionId && duration >= 1) {
-      transitionToHistory(sessionId, duration);
+      await onRecordingComplete(result);
+
+      if (result.sessionId && result.totalDuration >= 1) {
+        transitionToHistory(result.sessionId, result.totalDuration);
+      }
+    } catch (err) {
+      console.error("[ChunkedAudioRecorder] Error while stopping recording:", err);
     }
-
-    void stopPromise
-      .then((result) => {
-        if (result) {
-          onRecordingComplete(result);
-        }
-      })
-      .catch((err) => {
-        console.error("[ChunkedAudioRecorder] Error in background stopRecording:", err);
-      });
-  }, [canStop, duration, onRecordingComplete, sessionId, stopRecording, transitionToHistory]);
+  }, [canStop, onRecordingComplete, stopRecording, transitionToHistory]);
 
   // 일시정지 핸들러
   const handlePauseRecording = useCallback(() => {
@@ -309,10 +305,10 @@ export function ChunkedAudioRecorder({
     setShowResumeModal(false);
     const result = await finalizeCurrentSession();
     if (result) {
+      await onRecordingComplete(result);
       if (result.sessionId && result.totalDuration >= 1) {
         transitionToHistory(result.sessionId, result.totalDuration);
       }
-      onRecordingComplete(result);
     }
   }, [finalizeCurrentSession, onRecordingComplete, transitionToHistory]);
 

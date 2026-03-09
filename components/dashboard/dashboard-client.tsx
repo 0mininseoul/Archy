@@ -11,6 +11,7 @@ import { useUserStore } from "@/lib/stores/user-store";
 import { useRecordingsStore } from "@/lib/stores/recordings-store";
 import { consumeDesktopLoginNoticeEligibility } from "@/lib/desktop-login-notice";
 import { safeLocalStorageGetItem, safeLocalStorageSetItem } from "@/lib/safe-storage";
+import { submitFinalizeIntent } from "@/lib/services/finalize-intent-client";
 import { formatKSTDate } from "@/lib/utils";
 
 // =============================================================================
@@ -112,17 +113,15 @@ export function DashboardClient() {
       // 백그라운드에서 finalize 처리 (await 하지 않음)
       const finalizeInBackground = async () => {
         try {
-          // 세션 기반인 경우
           if (sessionId) {
             if (inFlightFinalizeSetRef.current.has(sessionId)) {
-              console.log(`[Dashboard] Finalize already in-flight for session ${sessionId}, skipping duplicate call`);
+              console.log(
+                `[Dashboard] Finalize already in-flight for session ${sessionId}, skipping duplicate call`
+              );
               return;
             }
 
             inFlightFinalizeSetRef.current.add(sessionId);
-            console.log(
-              `[Dashboard] Finalizing session in background: ${sessionId}, ${totalDuration}s`
-            );
             upsertRecording({
               id: sessionId,
               title: createFallbackTitle(),
@@ -136,37 +135,21 @@ export function DashboardClient() {
             });
 
             try {
-              const response = await fetch("/api/recordings/finalize", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
+              const submitted = await submitFinalizeIntent(
+                {
                   sessionId,
                   totalDurationSeconds: totalDuration,
-                }),
-              });
-
-              if (!response.ok) {
-                const errorData = await response.json();
-                console.error("Error finalizing session:", errorData.error);
-              } else {
-                const data = await response.json();
-                if (data?.data?.idempotent) {
-                  console.log(`[Dashboard] Session ${sessionId} finalize skipped as idempotent`);
-                } else {
-                  console.log(`[Dashboard] Session ${sessionId} finalized successfully`);
-                }
-                upsertRecording({
-                  id: data?.data?.recording?.id ?? sessionId,
-                  title: data?.data?.recording?.title ?? createFallbackTitle(),
-                  status: data?.data?.recording?.status ?? "completed",
-                  processing_step: null,
-                  created_at: new Date().toISOString(),
-                  duration_seconds: totalDuration,
                   format: "meeting",
-                });
-                await refreshLatestRecordings();
+                },
+                { keepalive: true }
+              );
+
+              if (!submitted) {
+                console.warn(
+                  `[Dashboard] Failed to submit finalize intent for session ${sessionId}; recovery will retry`
+                );
+              } else {
+                console.log(`[Dashboard] Finalize intent submitted for session ${sessionId}`);
               }
             } finally {
               inFlightFinalizeSetRef.current.delete(sessionId);
@@ -207,8 +190,7 @@ export function DashboardClient() {
         }
       };
 
-      // 백그라운드 처리 시작
-      finalizeInBackground();
+      await finalizeInBackground();
     },
     [createFallbackTitle, refreshLatestRecordings, upsertRecording]
   );

@@ -45,6 +45,20 @@ const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 1000; // 1초
 const MAX_RETRY_DELAY = 30000; // 30초
 
+class ChunkUploadError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "ChunkUploadError";
+    this.retryable = retryable;
+  }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 /**
  * MIME 타입에 맞는 파일 확장자 반환
  */
@@ -174,8 +188,21 @@ export class ChunkUploadManager {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        let errorMessage = `HTTP ${response.status}`;
+
+        try {
+          const errorData = await response.json();
+          if (errorData?.error) {
+            errorMessage = errorData.error;
+          }
+        } catch {
+          // Ignore JSON parsing errors and fall back to the HTTP status.
+        }
+
+        throw new ChunkUploadError(
+          errorMessage,
+          isRetryableStatus(response.status)
+        );
       }
 
       const data = await response.json();
@@ -204,13 +231,15 @@ export class ChunkUploadManager {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
+      const retryable =
+        !(error instanceof ChunkUploadError) || error.retryable;
       console.error(
         `[ChunkManager] Chunk ${chunk.chunkIndex} upload failed:`,
         errorMessage
       );
 
       // 재시도 로직
-      if (chunk.retryCount < MAX_RETRIES) {
+      if (retryable && chunk.retryCount < MAX_RETRIES) {
         chunk.retryCount++;
         const delay = Math.min(
           INITIAL_RETRY_DELAY * Math.pow(2, chunk.retryCount - 1),
@@ -230,9 +259,12 @@ export class ChunkUploadManager {
 
         return null;
       } else {
-        // 최대 재시도 횟수 초과
+        this.pendingChunks.delete(chunk.id);
+        this.clearRetryTimeout(chunk.id);
         console.error(
-          `[ChunkManager] Chunk ${chunk.chunkIndex} failed after ${MAX_RETRIES} retries`
+          retryable
+            ? `[ChunkManager] Chunk ${chunk.chunkIndex} failed after ${MAX_RETRIES} retries`
+            : `[ChunkManager] Chunk ${chunk.chunkIndex} failed with a non-retryable error`
         );
         this.callbacks.onChunkFailed?.(chunk.chunkIndex, errorMessage);
         return null;

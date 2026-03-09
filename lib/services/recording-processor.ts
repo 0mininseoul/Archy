@@ -6,7 +6,7 @@
  */
 
 import { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { transcribeAudio } from "@/lib/services/whisper";
 import { formatDocument } from "@/lib/services/openai";
 import { createNotionPage, getNotionDatabases, getNotionPages } from "@/lib/services/notion";
@@ -63,6 +63,10 @@ interface StepResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+function createProcessingClient(): SupabaseClient {
+  return createServiceRoleClient();
 }
 
 // =============================================================================
@@ -554,7 +558,7 @@ async function stepPushNotify(
  */
 export async function processRecording(ctx: ProcessingContext): Promise<ProcessingResult> {
   const { recordingId, audioFile, format, duration, userData, title } = ctx;
-  const supabase = await createClient();
+  const supabase = createProcessingClient();
 
   log(recordingId, "Starting processing...");
 
@@ -679,7 +683,7 @@ export async function processFromTranscripts(
   ctx: TranscriptProcessingContext
 ): Promise<ProcessingResult> {
   const { recordingId, transcript, format, duration, userData, title } = ctx;
-  const supabase = await createClient();
+  const supabase = createProcessingClient();
 
   log(recordingId, "Starting processing from pre-transcribed chunks...");
 
@@ -816,7 +820,7 @@ export async function handleProcessingError(
   console.error(`[${recordingId}] Critical error in processRecording:`, error);
 
   try {
-    const supabase = await createClient();
+    const supabase = createProcessingClient();
     await supabase
       .from("recordings")
       .update({

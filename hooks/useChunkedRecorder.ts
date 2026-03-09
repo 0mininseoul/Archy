@@ -691,6 +691,27 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     return { avgRms, peakRms };
   }, []);
 
+  const isChunkUploadable = useCallback(
+    (chunkBlob: Blob, chunkIndex: number, durationSeconds: number): boolean => {
+      if (chunkBlob.size < 1024) {
+        console.warn(
+          `[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`
+        );
+        return false;
+      }
+
+      if (durationSeconds <= 0) {
+        console.warn(
+          `[ChunkedRecorder] Chunk ${chunkIndex} has non-positive duration (${durationSeconds}s), skipping upload`
+        );
+        return false;
+      }
+
+      return true;
+    },
+    []
+  );
+
   /**
    * 청크 Blob 업로드 (공통 로직)
    */
@@ -763,9 +784,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       // Blob 획득
       const chunkBlob = await chunkBlobPromise;
       const signalMetrics = consumeCurrentChunkSignalMetrics();
+      const shouldUploadChunk = isChunkUploadable(
+        chunkBlob,
+        chunkIndex,
+        durationSeconds
+      );
 
-      // 청크 인덱스 증가
-      currentChunkIndexRef.current++;
+      if (shouldUploadChunk) {
+        currentChunkIndexRef.current++;
+      }
       chunkStartTimeRef.current = Date.now();
 
       // 새 MediaRecorder 생성 및 시작
@@ -801,11 +828,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         return;
       }
 
-      // 1KB 미만 청크는 무시
-      if (chunkBlob.size < 1024) {
-        console.warn(
-          `[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`
-        );
+      if (!shouldUploadChunk) {
         return;
       }
 
@@ -818,6 +841,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   }, [
     attachRecorderLifecycleListeners,
     consumeCurrentChunkSignalMetrics,
+    isChunkUploadable,
     persistPausedSession,
     releaseWakeLock,
     setRuntimeState,
@@ -843,10 +867,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     const durationSeconds = Math.floor(chunkDuration / 1000);
     const signalMetrics = consumeCurrentChunkSignalMetrics();
 
-    // 1KB 미만 청크는 무시 (유효한 오디오 데이터가 없을 가능성 높음)
-    if (chunkBlob.size < 1024) {
-      console.warn(`[ChunkedRecorder] Chunk ${chunkIndex} too small (${chunkBlob.size} bytes), skipping upload`);
-      // 데이터는 초기화하지만 업로드는 하지 않음
+    if (!isChunkUploadable(chunkBlob, chunkIndex, durationSeconds)) {
       currentChunkDataRef.current = [];
       chunkStartTimeRef.current = Date.now();
       return;
@@ -859,7 +880,12 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
     // 업로드
     await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
-  }, [consumeCurrentChunkSignalMetrics, restartMediaRecorderForChunk, uploadChunkBlob]);
+  }, [
+    consumeCurrentChunkSignalMetrics,
+    isChunkUploadable,
+    restartMediaRecorderForChunk,
+    uploadChunkBlob,
+  ]);
 
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
   const handleBackgroundTransition = useCallback(
@@ -1042,6 +1068,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
                 `[ChunkedRecorder] Chunk ${chunkIndex} failed:`,
                 error
               );
+              setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
               setError(`청크 ${chunkIndex} 업로드 실패`);
             },
             onRetrying: (chunkIndex, retryCount) => {
@@ -1337,7 +1364,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
           const durationSeconds = Math.floor(chunkDuration / 1000);
           const signalMetrics = consumeCurrentChunkSignalMetrics();
 
-          if (chunkBlob.size >= 1024) {
+          if (isChunkUploadable(chunkBlob, chunkIndex, durationSeconds)) {
             currentChunkIndexRef.current++;
             await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
           }
@@ -1408,6 +1435,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     clearSessionFromStorage,
     consumeCurrentChunkSignalMetrics,
     duration,
+    isChunkUploadable,
     releaseWakeLock,
     safeRequestData,
     safeResume,
