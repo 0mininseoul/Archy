@@ -300,7 +300,7 @@ function addDays(ymd, deltaDays) {
   return toKstYmd(new Date(utc));
 }
 
-function formatKoreanDayLabel(ymd) {
+export function formatKoreanDayLabel(ymd) {
   const weekdayKo = ["일", "월", "화", "수", "목", "금", "토"];
   const [y, m, d] = ymd.split("-").map(Number);
   const weekday = new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).getUTCDay();
@@ -392,7 +392,7 @@ function getSupabaseAdminClient() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function fetchSupabaseSnapshot() {
+export async function fetchSupabaseSnapshot() {
   const supabase = getSupabaseAdminClient();
   const [usersRes, recordingsRes, formatsRes, withdrawnRes] = await Promise.all([
     supabase.from("users").select("*"),
@@ -427,7 +427,7 @@ function filterExcludedUsers(snapshot) {
   return { users, recordings, customFormats, withdrawnUsers, userIdSet };
 }
 
-function buildMetricsForDate(snapshot, targetYmd) {
+export function buildMetricsForDate(snapshot, targetYmd) {
   const filtered = filterExcludedUsers(snapshot);
   const { users, recordings, customFormats, withdrawnUsers } = filtered;
 
@@ -470,7 +470,8 @@ function buildMetricsForDate(snapshot, targetYmd) {
 
   const activeUsersCount = usersAsOf.length;
   const withdrawnUsersCount = withdrawnUsersAsOf.length;
-  const totalSignups = activeUsersCount + withdrawnUsersCount;
+  // "유저 수" is reported as active accounts only; withdrawn users are tracked separately.
+  const totalSignups = activeUsersCount;
 
   const onboardedCount = usersAsOf.filter((u) => u.is_onboarded).length;
   const pwaCount = usersAsOf.filter((u) => Boolean(u.pwa_installed_at)).length;
@@ -1539,59 +1540,130 @@ function extractNotionPageTitle(page) {
 const notionMetricsDataSourceCache = {
   key: null,
   dataSourceId: null,
+  properties: null,
 };
 
-async function resolveNotionMetricsDataSourceId(notion) {
-  const configuredId = getNotionUserMetricsDatabaseId();
-  if (notionMetricsDataSourceCache.key === configuredId && notionMetricsDataSourceCache.dataSourceId) {
-    return notionMetricsDataSourceCache.dataSourceId;
+const NOTION_METRIC_PROPERTY_ALIASES = Object.freeze({
+  totalSignups: ["유저 수"],
+  conversionRate: ["가입전환율"],
+  onboarding: ["온보딩율"],
+  pwa: ["PWA 설치율"],
+  integrationAny: ["연동율"],
+  activation30d: ["활성화율(30일)", "활성화율"],
+  activationAllTime: ["이용률(누적)", "이용률"],
+  customFormat: ["커스텀 포맷 이용률"],
+  notionIntegration: ["노션 연동율"],
+  googleIntegration: ["구글 독스 연동율"],
+  slackIntegration: ["슬랙 연동율"],
+  payment: ["결제율"],
+});
+
+function getNotionPropertySchemaEntries(properties = {}) {
+  return Object.entries(properties).filter(([, property]) => property && typeof property === "object");
+}
+
+function findNotionPropertyNameByType(properties = {}, type) {
+  const match = getNotionPropertySchemaEntries(properties).find(([, property]) => property.type === type);
+  return match?.[0] || null;
+}
+
+function findMatchingNotionPropertyName(properties = {}, aliases = [], { expectedType = null } = {}) {
+  for (const alias of aliases) {
+    const property = properties?.[alias];
+    if (!property || typeof property !== "object") continue;
+    if (expectedType && property.type !== expectedType) continue;
+    return alias;
   }
+  return null;
+}
+
+function getConfiguredNotionMetricPropertyName(properties = {}, key, fallbackAliases = []) {
+  const aliases =
+    NOTION_METRIC_PROPERTY_ALIASES[key] ||
+    (Array.isArray(fallbackAliases) ? fallbackAliases : [fallbackAliases]).filter(Boolean);
+  const matched = findMatchingNotionPropertyName(properties, aliases, { expectedType: "number" });
+  if (matched) return matched;
+  return Object.keys(properties || {}).length > 0 ? null : aliases[0] || null;
+}
+
+function assignNotionNumberMetric(properties, propertyName, value) {
+  if (!propertyName) return;
+  properties[propertyName] = { number: value ?? null };
+}
+
+async function resolveNotionMetricsDataSource(notion) {
+  const configuredId = getNotionUserMetricsDatabaseId();
+  if (
+    notionMetricsDataSourceCache.key === configuredId &&
+    notionMetricsDataSourceCache.dataSourceId &&
+    notionMetricsDataSourceCache.properties
+  ) {
+    return {
+      dataSourceId: notionMetricsDataSourceCache.dataSourceId,
+      properties: notionMetricsDataSourceCache.properties,
+    };
+  }
+
+  let dataSource = null;
 
   // 1) Prefer direct data source id.
   try {
-    const ds = await notion.dataSources.retrieve({
+    dataSource = await notion.dataSources.retrieve({
       data_source_id: configuredId,
     });
-    if (ds?.id) {
-      notionMetricsDataSourceCache.key = configuredId;
-      notionMetricsDataSourceCache.dataSourceId = ds.id;
-      return ds.id;
-    }
   } catch {
     // Fall through to database lookup.
   }
 
   // 2) Fallback: configured id is database id -> use first data source.
-  let database = null;
-  try {
-    database = await notion.databases.retrieve({
-      database_id: configuredId,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `NOTION_USER_METRICS_DATABASE_ID 접근 실패: ${configuredId}. ` +
-        `해당 DB(또는 데이터소스)를 Notion integration에 공유했는지 확인하세요. 원인: ${message}`
-    );
-  }
+  if (!dataSource?.id) {
+    let database = null;
+    try {
+      database = await notion.databases.retrieve({
+        database_id: configuredId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `NOTION_USER_METRICS_DATABASE_ID 접근 실패: ${configuredId}. ` +
+          `해당 DB(또는 데이터소스)를 Notion integration에 공유했는지 확인하세요. 원인: ${message}`
+      );
+    }
 
-  const firstDataSourceId = database?.data_sources?.[0]?.id;
-  if (!firstDataSourceId) {
-    throw new Error(
-      "NOTION_USER_METRICS_DATABASE_ID must be a data_source id, or a database id that contains at least one data source."
-    );
+    const firstDataSourceId = database?.data_sources?.[0]?.id;
+    if (!firstDataSourceId) {
+      throw new Error(
+        "NOTION_USER_METRICS_DATABASE_ID must be a data_source id, or a database id that contains at least one data source."
+      );
+    }
+
+    try {
+      dataSource = await notion.dataSources.retrieve({
+        data_source_id: firstDataSourceId,
+      });
+    } catch {
+      dataSource = {
+        id: firstDataSourceId,
+        properties: database?.properties || {},
+      };
+    }
   }
 
   notionMetricsDataSourceCache.key = configuredId;
-  notionMetricsDataSourceCache.dataSourceId = firstDataSourceId;
-  return firstDataSourceId;
+  notionMetricsDataSourceCache.dataSourceId = dataSource.id;
+  notionMetricsDataSourceCache.properties = dataSource.properties || {};
+
+  return {
+    dataSourceId: dataSource.id,
+    properties: dataSource.properties || {},
+  };
 }
 
-async function findNotionPageByTitle(notion, dataSourceId, title) {
+async function findNotionPageByTitle(notion, dataSourceId, title, titlePropertyName = "이름") {
   const result = await notion.dataSources.query({
     data_source_id: dataSourceId,
     filter: {
-      property: "이름",
+      property: titlePropertyName,
       title: {
         equals: title,
       },
@@ -1602,33 +1674,102 @@ async function findNotionPageByTitle(notion, dataSourceId, title) {
   return result.results?.[0] || null;
 }
 
-function buildNotionMetricProperties(label, metrics, conversionRate) {
+function buildNotionMetricProperties(label, metrics, conversionRate, notionProperties = {}) {
+  const titlePropertyName = findNotionPropertyNameByType(notionProperties, "title") || "이름";
   const properties = {
-    이름: {
+    [titlePropertyName]: {
       title: [{ text: { content: label } }],
     },
-    "유저 수": { number: metrics.counts.totalSignups },
-    "가입전환율": { number: conversionRate ?? null },
-    "온보딩율": { number: metrics.rates.onboarding },
-    "PWA 설치율": { number: metrics.rates.pwa },
-    "연동율": { number: metrics.rates.integrationAny },
-    "활성화율": { number: metrics.rates.activation30d },
-    "커스텀 포맷 이용률": { number: metrics.rates.customFormat },
-    "노션 연동율": { number: metrics.rates.notionIntegration },
-    "구글 독스 연동율": { number: metrics.rates.googleIntegration },
-    "슬랙 연동율": { number: metrics.rates.slackIntegration },
-    "결제율": { number: metrics.rates.payment },
   };
+
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "totalSignups"),
+    metrics.counts.totalSignups
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "conversionRate"),
+    conversionRate
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "onboarding"),
+    metrics.rates.onboarding
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "pwa"),
+    metrics.rates.pwa
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "integrationAny"),
+    metrics.rates.integrationAny
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "activation30d"),
+    metrics.rates.activation30d
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "activationAllTime"),
+    metrics.rates.activationAllTime
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "customFormat"),
+    metrics.rates.customFormat
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "notionIntegration"),
+    metrics.rates.notionIntegration
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "googleIntegration"),
+    metrics.rates.googleIntegration
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "slackIntegration"),
+    metrics.rates.slackIntegration
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "payment"),
+    metrics.rates.payment
+  );
+
+  return properties;
+}
+
+function buildNotionEngagementMetricProperties(metrics, notionProperties = {}) {
+  const properties = {};
+
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "activation30d"),
+    metrics.rates.activation30d
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "activationAllTime"),
+    metrics.rates.activationAllTime
+  );
 
   return properties;
 }
 
 export async function upsertNotionMetricsRow({ label, metrics, conversionRate }) {
   const notion = getNotionClient();
-  const dataSourceId = await resolveNotionMetricsDataSourceId(notion);
-  const properties = buildNotionMetricProperties(label, metrics, conversionRate);
+  const { dataSourceId, properties: notionProperties } = await resolveNotionMetricsDataSource(notion);
+  const titlePropertyName = findNotionPropertyNameByType(notionProperties, "title") || "이름";
+  const properties = buildNotionMetricProperties(label, metrics, conversionRate, notionProperties);
 
-  const existing = await findNotionPageByTitle(notion, dataSourceId, label);
+  const existing = await findNotionPageByTitle(notion, dataSourceId, label, titlePropertyName);
   if (existing) {
     await notion.pages.update({
       page_id: existing.id,
@@ -1645,14 +1786,72 @@ export async function upsertNotionMetricsRow({ label, metrics, conversionRate })
   return { mode: "insert", pageId: created.id };
 }
 
+export async function updateNotionEngagementMetricsByLabel({
+  label,
+  metrics,
+  createIfMissing = false,
+} = {}) {
+  const notion = getNotionClient();
+  const { dataSourceId, properties: notionProperties } = await resolveNotionMetricsDataSource(notion);
+  const titlePropertyName = findNotionPropertyNameByType(notionProperties, "title") || "이름";
+  const properties = buildNotionEngagementMetricProperties(metrics, notionProperties);
+
+  if (Object.keys(properties).length === 0) {
+    return {
+      mode: "skipped",
+      reason: "no_matching_properties",
+      label,
+    };
+  }
+
+  const existing = await findNotionPageByTitle(notion, dataSourceId, label, titlePropertyName);
+  if (existing) {
+    await notion.pages.update({
+      page_id: existing.id,
+      properties,
+    });
+    return {
+      mode: "update",
+      pageId: existing.id,
+      label,
+    };
+  }
+
+  if (!createIfMissing) {
+    return {
+      mode: "missing",
+      label,
+    };
+  }
+
+  const fullProperties = buildNotionMetricProperties(label, metrics, null, notionProperties);
+  const created = await notion.pages.create({
+    parent: { data_source_id: dataSourceId },
+    properties: fullProperties,
+  });
+
+  return {
+    mode: "insert",
+    pageId: created.id,
+    label,
+  };
+}
+
 export async function getNotionMetricsByLabel(label) {
   const notion = getNotionClient();
-  const dataSourceId = await resolveNotionMetricsDataSourceId(notion);
-  const page = await findNotionPageByTitle(notion, dataSourceId, label);
+  const { dataSourceId, properties: notionProperties } = await resolveNotionMetricsDataSource(notion);
+  const titlePropertyName = findNotionPropertyNameByType(notionProperties, "title") || "이름";
+  const page = await findNotionPageByTitle(notion, dataSourceId, label, titlePropertyName);
   if (!page) return null;
 
-  const getNumber = (name) => {
-    const prop = page.properties?.[name];
+  const getNumber = (key, fallbackAliases = []) => {
+    const propertyName = getConfiguredNotionMetricPropertyName(
+      notionProperties,
+      key,
+      fallbackAliases
+    );
+    if (!propertyName) return null;
+    const prop = page.properties?.[propertyName];
     if (!prop || typeof prop !== "object") return null;
     if (prop.type !== "number") return null;
     return prop.number;
@@ -1660,13 +1859,14 @@ export async function getNotionMetricsByLabel(label) {
 
   return {
     label,
-    totalSignups: getNumber("유저 수"),
-    conversionRate: getNumber("가입전환율"),
-    onboardingRate: getNumber("온보딩율"),
-    pwaRate: getNumber("PWA 설치율"),
-    integrationRate: getNumber("연동율"),
-    activationRate: getNumber("활성화율"),
-    paymentRate: getNumber("결제율"),
+    totalSignups: getNumber("totalSignups", ["유저 수"]),
+    conversionRate: getNumber("conversionRate", ["가입전환율"]),
+    onboardingRate: getNumber("onboarding", ["온보딩율"]),
+    pwaRate: getNumber("pwa", ["PWA 설치율"]),
+    integrationRate: getNumber("integrationAny", ["연동율"]),
+    activationRate: getNumber("activation30d", ["활성화율(30일)", "활성화율"]),
+    usageRate: getNumber("activationAllTime", ["이용률(누적)", "이용률"]),
+    paymentRate: getNumber("payment", ["결제율"]),
   };
 }
 

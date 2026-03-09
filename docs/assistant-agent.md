@@ -17,9 +17,10 @@
 - 제외 테스트 유저 ID:
   - `2018416a-14dc-4087-91aa-24cf68451366`
   - `724261a2-8cdd-4318-9c99-fd8c7a39c5d8`
-- 전체 가입자 수: `users(활성) + withdrawn_users(탈퇴)`
+- 유저 수: 기준 시점 `users` 테이블에 남아 있는 활성 유저 수 (`withdrawn_users` 제외)
 - 가입전환율: Amplitude 차트(`signup_completed / visitor`) 값 사용
-- 활성화율: 가입자 대비 최근 30일 내 1회 이상 녹음한 유저 비율
+- 이용률(누적): 현재 `users`에 남아 있는 가입자 대비, 기준일까지 `recordings` row가 1회 이상 있었던 유저 비율
+- 활성화율(30일): 현재 `users`에 남아 있는 가입자 대비, 최근 30일 내 `recordings` row가 1회 이상 있었던 유저 비율
 - 결제율: 가입자 대비 `users.is_paid_user = true` 유저 비율
 - 배치 시간대: `Asia/Seoul 00:05`
 
