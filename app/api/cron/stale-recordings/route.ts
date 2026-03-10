@@ -3,8 +3,27 @@ import { cleanupStaleRecordings } from "@/lib/services/stale-recordings";
 
 export const runtime = "nodejs";
 
+function getProvidedCronSecrets(request: NextRequest): string[] {
+  const providedSecrets: string[] = [];
+  const authHeader = request.headers.get("authorization");
+  const headerSecret = request.headers.get("x-cron-secret");
+
+  if (authHeader?.toLowerCase().startsWith("bearer ")) {
+    const bearerToken = authHeader.slice(7).trim();
+    if (bearerToken) {
+      providedSecrets.push(bearerToken);
+    }
+  }
+
+  if (headerSecret?.trim()) {
+    providedSecrets.push(headerSecret.trim());
+  }
+
+  return providedSecrets;
+}
+
 export async function GET(request: NextRequest) {
-  const expectedSecret = process.env.CRON_SECRET;
+  const expectedSecret = process.env.CRON_SECRET?.trim();
 
   if (!expectedSecret) {
     console.error("[StaleRecordingsCron] CRON_SECRET is not configured.");
@@ -14,8 +33,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${expectedSecret}`) {
+  const providedSecrets = getProvidedCronSecrets(request);
+  if (!providedSecrets.some((providedSecret) => providedSecret === expectedSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

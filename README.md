@@ -62,6 +62,13 @@ npm run dev
 STT 다중 키 라우팅(선택):
 - `GROQ_API_KEY_TIER_2` (동시 녹음 유저 3명 이상일 때 사용)
 - `GROQ_API_KEY_TIER_3` (동시 녹음 유저 5명 이상일 때 사용)
+- `GROQ_AUDIO_SECONDS_DAILY_LIMIT` (기본 `28800`)
+- `GROQ_AUDIO_SECONDS_DAILY_RISK_THRESHOLD_RATIO` (기본 `0.9`)
+- `GROQ_AUDIO_SECONDS_DAILY_FIXED_BUFFER_SECONDS` (기본 `300`)
+- `GROQ_AUDIO_SECONDS_DAILY_BUFFER_PER_ACTIVE_RECORDER_SECONDS` (기본 `40`)
+- `GROQ_AUDIO_SECONDS_ROLLING_WINDOW_HOURS` (기본 `24`)
+- `GROQ_AUDIO_SECONDS_BUCKET_MINUTES` (기본 `5`)
+- `GROQ_ASPD_RATE_LIMIT_COOLDOWN_MINUTES` (기본 `60`)
 
 연동/옵션:
 - Notion: `NOTION_CLIENT_ID`, `NOTION_CLIENT_SECRET`, `NOTION_REDIRECT_URI`
@@ -88,9 +95,10 @@ STT 다중 키 라우팅(선택):
 7. `add_push_notification.sql`
 8. `add_referral_system.sql`
 9. `add_google_integration.sql`
-10. `add_user_name.sql`
-11. `add_withdrawn_users_table.sql`
-12. `update_withdrawn_users_add_name.sql`
+10. `add_groq_audio_budget_tracking.sql`
+11. `add_user_name.sql`
+12. `add_withdrawn_users_table.sql`
+13. `update_withdrawn_users_add_name.sql`
 13. `update_withdrawn_users_add_data.sql`
 14. `add_recording_session.sql`
 15. `add_audio_storage_setting.sql`

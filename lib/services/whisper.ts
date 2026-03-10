@@ -1,6 +1,12 @@
 // Groq Whisper Large V3 STT Service
 // Using Groq API for fast and accurate Korean transcription
 
+import {
+  getGroqBilledAudioSeconds,
+  markGroqKeyAspdRateLimited,
+  recordGroqAudioUsage,
+} from "@/lib/services/groq-audio-budget";
+import type { GroqApiKeySource } from "@/lib/services/groq-key-types";
 import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
 
 export interface TranscriptionOptions {
@@ -9,7 +15,7 @@ export interface TranscriptionOptions {
   durationSeconds?: number;
   chunkIndex?: number;
   apiKeyOverride?: string;
-  apiKeySource?: string;
+  apiKeySource?: GroqApiKeySource;
   activeRecorderUsers?: number;
 }
 
@@ -27,6 +33,38 @@ export interface TranscriptionResult {
   isLikelySilence: boolean;
   reason?: string;
   metrics: TranscriptionMetrics;
+}
+
+export class GroqTranscriptionError extends Error {
+  apiKeySource?: GroqApiKeySource;
+  errorText?: string;
+  retryAfterSeconds?: number;
+  statusCode?: number;
+
+  constructor(
+    message: string,
+    options: {
+      apiKeySource?: GroqApiKeySource;
+      errorText?: string;
+      retryAfterSeconds?: number;
+      statusCode?: number;
+    } = {}
+  ) {
+    super(message);
+    this.name = "GroqTranscriptionError";
+    this.apiKeySource = options.apiKeySource;
+    this.errorText = options.errorText;
+    this.retryAfterSeconds = options.retryAfterSeconds;
+    this.statusCode = options.statusCode;
+  }
+}
+
+export function isGroqAspdRateLimitError(error: unknown): error is GroqTranscriptionError {
+  return (
+    error instanceof GroqTranscriptionError &&
+    error.statusCode === 429 &&
+    /Audio Seconds per Day|ASPD/i.test(error.errorText ?? "")
+  );
 }
 
 interface GroqSegment {
@@ -193,6 +231,7 @@ export async function transcribeAudio(
   options: TranscriptionOptions = {}
 ): Promise<TranscriptionResult> {
   const groqApiKey = options.apiKeyOverride || process.env.GROQ_API_KEY;
+  const billedAudioSeconds = getGroqBilledAudioSeconds(options.durationSeconds);
   if (!groqApiKey) {
     throw new Error("Groq API key not configured");
   }
@@ -225,8 +264,29 @@ export async function transcribeAudio(
 
     if (!response.ok) {
       const errorText = await response.text();
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfterSeconds = retryAfterHeader
+        ? Number.parseInt(retryAfterHeader, 10)
+        : undefined;
       console.error("[Transcription] Groq API error:", errorText);
-      throw new Error(`Groq API error: ${response.status} - ${errorText}`);
+      if (
+        response.status === 429 &&
+        options.apiKeySource &&
+        /Audio Seconds per Day|ASPD/i.test(errorText)
+      ) {
+        await markGroqKeyAspdRateLimited(options.apiKeySource, errorText, {
+          retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
+        });
+      }
+      throw new GroqTranscriptionError(
+        `Groq API error: ${response.status} - ${errorText}`,
+        {
+          apiKeySource: options.apiKeySource,
+          errorText,
+          retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
+          statusCode: response.status,
+        }
+      );
     }
 
     const data = await response.json() as GroqVerboseJsonResponse;
@@ -265,6 +325,10 @@ export async function transcribeAudio(
       console.log("[Transcription] Groq transcription succeeded, length:", text.length);
     }
 
+    if (options.apiKeySource) {
+      await recordGroqAudioUsage(options.apiKeySource, billedAudioSeconds);
+    }
+
     return {
       text: analysis.isLikelySilence ? "" : text,
       rawTextLength: text.length,
@@ -274,8 +338,12 @@ export async function transcribeAudio(
     };
   } catch (error) {
     console.error("[Transcription] Groq error:", error);
-    throw new Error(
-      `Transcription failed: ${error instanceof Error ? error.message : "Unknown error"}`
+    if (error instanceof GroqTranscriptionError) {
+      throw error;
+    }
+    throw new GroqTranscriptionError(
+      `Transcription failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      { apiKeySource: options.apiKeySource }
     );
   }
 }

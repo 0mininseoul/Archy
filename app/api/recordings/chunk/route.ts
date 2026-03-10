@@ -1,6 +1,11 @@
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
-import { transcribeAudio } from "@/lib/services/whisper";
+import {
+  GroqTranscriptionError,
+  isGroqAspdRateLimitError,
+  transcribeAudio,
+} from "@/lib/services/whisper";
 import { logSttDecision } from "@/lib/services/stt-observability";
+import { getGroqBilledAudioSeconds } from "@/lib/services/groq-audio-budget";
 import { resolveGroqKeySelection } from "@/lib/services/groq-key-router";
 
 // Vercel Free tier: 4.5MB limit
@@ -15,6 +20,8 @@ interface ChunkTranscriptResponse {
   chunkIndex: number;
   totalDuration: number;
 }
+
+const GROQ_ASPD_RATE_LIMIT_MESSAGE = "Groq ASPD rate limit exceeded.";
 
 function parseOptionalNumber(value: FormDataEntryValue | null): number | undefined {
   if (typeof value !== "string") {
@@ -110,9 +117,10 @@ export const POST = withAuth<ChunkTranscriptResponse>(
           },
         });
       } else {
-        const keySelection = await resolveGroqKeySelection();
+        const estimatedAudioSeconds = getGroqBilledAudioSeconds(durationSeconds);
+        const keySelection = await resolveGroqKeySelection({ estimatedAudioSeconds });
         console.log(
-          `[Chunk] Key routing for chunk ${chunkIndex}: activeRecorders=${keySelection.activeRecorderUsers}, keySource=${keySelection.source}`
+          `[Chunk] Key routing for chunk ${chunkIndex}: activeRecorders=${keySelection.activeRecorderUsers}, keySource=${keySelection.source}, routingReason=${keySelection.routingReason}, recordedLast24h=${keySelection.recordedAudioSecondsLast24h}, projectedLast24h=${keySelection.projectedAudioSecondsLast24h}, riskThreshold=${keySelection.dailyAudioRiskThresholdSeconds}, aspdCooldownUntil=${keySelection.aspdCooldownUntil ?? "none"}`
         );
 
         const transcription = await transcribeAudio(audioChunk, {
@@ -217,10 +225,42 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         totalDuration,
       });
     } catch (error) {
+      if (sessionId && isGroqAspdRateLimitError(error)) {
+        const nowIso = new Date().toISOString();
+        const { error: updateError } = await supabase
+          .from("recordings")
+          .update({
+            status: "failed",
+            processing_step: null,
+            error_step: "transcription",
+            error_message: GROQ_ASPD_RATE_LIMIT_MESSAGE,
+            termination_reason: "processing_error",
+            session_paused_at: nowIso,
+            last_activity_at: nowIso,
+          })
+          .eq("id", sessionId)
+          .eq("user_id", user.id)
+          .eq("status", "recording");
+
+        if (updateError) {
+          console.error(
+            `[Chunk] Failed to persist ASPD rate limit failure for session ${sessionId}:`,
+            updateError
+          );
+        }
+
+        console.error(
+          `[Chunk] Session ${sessionId} failed due to Groq ASPD rate limit on chunk ${chunkIndex}`
+        );
+        return errorResponse(GROQ_ASPD_RATE_LIMIT_MESSAGE, 409);
+      }
+
       console.error(`[Chunk] Transcription failed for chunk ${chunkIndex}:`, error);
       return errorResponse(
         `Transcription failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        500
+        error instanceof GroqTranscriptionError && error.statusCode
+          ? error.statusCode
+          : 500
       );
     }
   }
