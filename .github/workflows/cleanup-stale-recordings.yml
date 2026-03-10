@@ -26,6 +26,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://ydotomyiabchrdhytynr.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
+          export SUPABASE_SERVICE_ROLE_KEY="$(printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | tr -d '\r\n')"
+
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
             echo "SUPABASE_SERVICE_ROLE_KEY secret is not configured."
             exit 1
