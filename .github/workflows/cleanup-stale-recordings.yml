@@ -23,14 +23,9 @@ jobs:
 
       - name: Cleanup stale recordings in Supabase
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: https://ydotomyiabchrdhytynr.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ]; then
-            echo "NEXT_PUBLIC_SUPABASE_URL secret is not configured."
-            exit 1
-          fi
-
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
             echo "SUPABASE_SERVICE_ROLE_KEY secret is not configured."
             exit 1
