@@ -1,0 +1,29 @@
+name: Cleanup stale recordings
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke stale recording cleanup endpoint
+        env:
+          ARCHY_CRON_URL: ${{ secrets.ARCHY_CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$ARCHY_CRON_URL" ]; then
+            echo "ARCHY_CRON_URL secret is not configured."
+            exit 1
+          fi
+
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret is not configured."
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$ARCHY_CRON_URL"

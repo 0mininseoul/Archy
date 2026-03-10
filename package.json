@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "backfill:amplitude-signup-mappings": "node scripts/backfill-amplitude-signup-mappings.mjs",
     "backfill:notion-engagement-metrics": "node scripts/backfill-notion-engagement-metrics.mjs",
+    "backfill:stale-recordings": "node scripts/backfill-stale-recordings.mjs",
     "check:notion-oauth": "bash scripts/check-notion-oauth.sh",
     "agent:daily": "node scripts/agent/daily-runner.mjs",
     "agent:daily:dry": "node scripts/agent/daily-runner.mjs --dry-run",

@@ -67,7 +67,6 @@ async function main() {
       "id,user_id,status,duration_seconds,last_chunk_index,last_activity_at,session_paused_at,created_at"
     )
     .eq("status", "recording")
-    .is("session_paused_at", null)
     .lt("last_activity_at", cutoffIso)
     .order("last_activity_at", { ascending: true })
     .limit(5000);
@@ -123,7 +122,6 @@ async function main() {
       last_activity_at: nowIso,
     })
     .eq("status", "recording")
-    .is("session_paused_at", null)
     .lt("last_activity_at", cutoffIso)
     .select("id");
 

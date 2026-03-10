@@ -2,7 +2,7 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { formatKSTDate } from "@/lib/utils";
 import { hasUnlimitedUsage } from "@/lib/promo";
-import { getStaleRecordingCutoffIso } from "@/lib/recording-lifecycle";
+import { cleanupStaleRecordings } from "@/lib/services/stale-recordings";
 
 interface StartSessionResponse {
   sessionId: string;
@@ -15,24 +15,11 @@ export const POST = withAuth<StartSessionResponse>(
     const body = await request!.json();
     const { format = "meeting" } = body;
     const nowIso = new Date().toISOString();
-    const staleCutoffIso = getStaleRecordingCutoffIso();
     const path = new URL(request!.url).pathname;
 
-    const { data: staleSessions, error: staleError } = await supabase
-      .from("recordings")
-      .update({
-        status: "failed",
-        processing_step: null,
-        error_step: "abandoned",
-        error_message: "Recording session timed out due to inactivity.",
-        termination_reason: "stale_timeout",
-        last_activity_at: nowIso,
-      })
-      .eq("user_id", user.id)
-      .eq("status", "recording")
-      .is("session_paused_at", null)
-      .lt("last_activity_at", staleCutoffIso)
-      .select("id, duration_seconds, last_chunk_index");
+    const { recordings: staleSessions, error: staleError } = await cleanupStaleRecordings({
+      userId: user.id,
+    });
 
     if (staleError) {
       console.error("[StartSession] Failed to cleanup stale sessions:", staleError);
