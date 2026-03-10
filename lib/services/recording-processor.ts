@@ -14,6 +14,7 @@ import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
 import { logSttDecision } from "@/lib/services/stt-observability";
+import { hasMeaningfulTranscript, sanitizeTranscriptText } from "@/lib/utils/transcript";
 import {
   Recording,
   User,
@@ -570,7 +571,7 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
       error: { step: "transcription", message: transcribeResult.error! },
     };
   }
-  const transcript = transcribeResult.data!;
+  const transcript = sanitizeTranscriptText(transcribeResult.data!);
 
   // Step 2: Format
   const formatResult = await stepFormat(
@@ -586,7 +587,7 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
   await updateProcessingStep(supabase, recordingId, "saving");
 
   // 빈 녹음(무음 등)이면 외부 서비스 저장 스킵
-  const isEmptyRecording = !transcript || transcript.trim().length === 0;
+  const isEmptyRecording = !hasMeaningfulTranscript(transcript);
 
   let notionUrl = "";
   let googleDocUrl = "";
@@ -684,15 +685,23 @@ export async function processFromTranscripts(
 ): Promise<ProcessingResult> {
   const { recordingId, transcript, format, duration, userData, title } = ctx;
   const supabase = createProcessingClient();
+  const normalizedTranscript = sanitizeTranscriptText(transcript);
 
   log(recordingId, "Starting processing from pre-transcribed chunks...");
+
+  if (normalizedTranscript !== transcript) {
+    await supabase
+      .from("recordings")
+      .update({ transcript: normalizedTranscript })
+      .eq("id", recordingId);
+  }
 
   // Skip Step 1 (transcription already done)
   // Step 2: Format
   const formatResult = await stepFormat(
     supabase,
     recordingId,
-    transcript,
+    normalizedTranscript,
     format,
     userData.id,
     title
@@ -721,7 +730,7 @@ export async function processFromTranscripts(
   await updateProcessingStep(supabase, recordingId, "saving");
 
   // 빈 녹음(무음 등)이면 외부 서비스 저장 스킵
-  const isEmptyRecording = !transcript || transcript.trim().length === 0;
+  const isEmptyRecording = !hasMeaningfulTranscript(normalizedTranscript);
 
   let notionUrl = "";
   let googleDocUrl = "";
@@ -802,7 +811,7 @@ export async function processFromTranscripts(
 
   return {
     success: true,
-    transcript,
+    transcript: normalizedTranscript,
     formattedContent,
     title: finalTitle,
     notionUrl: notionUrl || undefined,

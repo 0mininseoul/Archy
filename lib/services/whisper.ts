@@ -1,6 +1,8 @@
 // Groq Whisper Large V3 STT Service
 // Using Groq API for fast and accurate Korean transcription
 
+import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
+
 export interface TranscriptionOptions {
   avgRms?: number;
   peakRms?: number;
@@ -123,6 +125,10 @@ function analyzeSilence(
 ): { isLikelySilence: boolean; reason?: string } {
   if (!text.trim()) {
     return { isLikelySilence: true, reason: "empty_text" };
+  }
+
+  if (!hasMeaningfulTranscript(text)) {
+    return { isLikelySilence: true, reason: "punctuation_only_text" };
   }
 
   const hasRms = isFiniteNumber(options.avgRms);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { RecordingListItem } from "@/lib/types/database";
 import { formatDurationMinutes } from "@/lib/utils";
+import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
 import { useI18n } from "@/lib/i18n";
 import Image from "next/image";
 
@@ -103,7 +104,7 @@ export function RecordingCard({
 }: RecordingCardProps) {
   const router = useRouter();
   const { t, locale } = useI18n();
-  const hasTranscript = recording.has_transcript ?? Boolean(recording.transcript);
+  const hasTranscript = recording.has_transcript ?? hasMeaningfulTranscript(recording.transcript);
 
   // Gesture state
   const [touchStart, setTouchStart] = useState<number | null>(null);

@@ -2,6 +2,7 @@ import { withAuth, successResponse, errorResponse } from "@/lib/api";
 import { Recording, RecordingListItem, User, MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { processRecording, handleProcessingError } from "@/lib/services/recording-processor";
 import { formatKSTDate } from "@/lib/utils";
+import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
 
 // POST /api/recordings - Upload and process recording
 export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "status"> }>(
@@ -170,7 +171,7 @@ export const GET = withAuth<{
     if (ids.length > 0) {
       const { data: transcriptRows, error: transcriptError } = await supabase
         .from("recordings")
-        .select("id")
+        .select("id, transcript")
         .eq("user_id", user.id)
         .in("id", ids)
         .not("transcript", "is", null)
@@ -181,6 +182,7 @@ export const GET = withAuth<{
       } else {
         transcriptAvailableIds = new Set(
           (transcriptRows ?? [])
+            .filter((row) => hasMeaningfulTranscript(row.transcript))
             .map((row) => row.id)
             .filter((id): id is string => typeof id === "string" && id.length > 0)
         );

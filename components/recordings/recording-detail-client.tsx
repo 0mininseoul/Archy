@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { Recording } from "@/types";
 import { formatDurationMinutes } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
 import { AudioPlayer } from "./audio-player";
 
 // =============================================================================
@@ -51,6 +52,7 @@ function getStatusIcon(status: string): string {
 export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: RecordingDetailClientProps) {
   const router = useRouter();
   const { t, locale } = useI18n();
+  const hasTranscript = hasMeaningfulTranscript(recording.transcript);
   const [viewMode, setViewMode] = useState<"transcript" | "formatted">("formatted");
   const [isEditing, setIsEditing] = useState(false);
   const [recordingTitle, setRecordingTitle] = useState(recording.title);
@@ -333,7 +335,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
           )}
 
           {/* Content Tabs */}
-          {(recording.transcript || recording.formatted_content) && (
+          {(hasTranscript || recording.formatted_content) && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="flex border-b border-slate-100">
                 {recording.formatted_content && (
@@ -347,7 +349,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                     정리된 문서
                   </button>
                 )}
-                {recording.transcript && (
+                {hasTranscript && (
                   <button
                     onClick={() => setViewMode("transcript")}
                     className={`flex-1 py-3 text-sm font-medium transition-colors ${viewMode === "transcript"
@@ -388,7 +390,7 @@ export function RecordingDetailClient({ recording, saveAudioEnabled, isOwner }: 
                       </ReactMarkdown>
                     </div>
                   </div>
-                ) : viewMode === "transcript" && recording.transcript ? (
+                ) : viewMode === "transcript" && hasTranscript ? (
                   <div>
                     <div className="flex justify-end mb-2">
                       <button

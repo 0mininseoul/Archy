@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { buildUniversalPrompt } from "@/lib/prompts";
+import { sanitizeTranscriptText } from "@/lib/utils/transcript";
 
 export interface FormatResult {
   title: string;
@@ -255,7 +256,7 @@ export async function formatDocument(
   }
 
   // Handle empty or whitespace-only transcripts
-  const trimmedTranscript = transcript.trim();
+  const trimmedTranscript = sanitizeTranscriptText(transcript);
   if (!trimmedTranscript) {
     console.warn("[Formatting] Empty transcript provided");
     return {
