@@ -9,28 +9,18 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Cleanup stale recordings in Supabase
+      - name: Invoke stale recording cleanup endpoint
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://ydotomyiabchrdhytynr.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          export SUPABASE_SERVICE_ROLE_KEY="$(printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | tr -d '\r\n')"
+          export CRON_SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '\r\n')"
 
-          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "SUPABASE_SERVICE_ROLE_KEY secret is not configured."
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret is not configured."
             exit 1
           fi
 
-          npm run backfill:stale-recordings -- --apply
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            "https://www.archynotes.com/api/cron/stale-recordings"
