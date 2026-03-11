@@ -2025,10 +2025,10 @@ function formatDeltaPctPoint(current, previous) {
   return `${sign}${delta.toFixed(1)}%p`;
 }
 
-function formatCountCard(current, previous) {
+function formatCountCard(current, previous, unit = "명") {
   if (!Number.isFinite(current)) return "데이터 없음";
-  if (!Number.isFinite(previous)) return `${current}명\n전일 비교: -`;
-  return `${current}명\n전일 대비 ${formatSignedInt(current - previous)}명`;
+  if (!Number.isFinite(previous)) return `${current}${unit}\n전일 비교: -`;
+  return `${current}${unit}\n전일 대비 ${formatSignedInt(current - previous)}${unit}`;
 }
 
 function formatRateCard(current, previous) {
@@ -2146,6 +2146,9 @@ function buildMetricComparisonContext(report) {
 
   return {
     prevUserCount: previous?.totalSignups ?? fallbackCounts.totalSignups ?? null,
+    prevDailyRecordings: previous?.dailyRecordings ?? fallbackCounts.dailyRecordings ?? null,
+    prevDailyRecordingUsers:
+      previous?.dailyRecordingUsers ?? fallbackCounts.dailyRecordingUsers ?? null,
     prevOnboarding: previous?.onboardingRate ?? fallbackRates.onboarding ?? null,
     prevPwa: previous?.pwaRate ?? fallbackRates.pwa ?? null,
     prevIntegration: previous?.integrationRate ?? fallbackRates.integrationAny ?? null,
@@ -2171,6 +2174,16 @@ function buildDailyEmbed({ report, asOfDate }) {
       { name: "🕒 기준시각", value: asOfKst, inline: true },
       { name: "🧭 데이터 상태", value: ctx.conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
       { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, ctx.prevUserCount), inline: true },
+      {
+        name: "🎙️ 금일 녹음 횟수",
+        value: formatCountCard(report.counts.dailyRecordings, ctx.prevDailyRecordings, "회"),
+        inline: true,
+      },
+      {
+        name: "🙋 금일 녹음한 유저 수",
+        value: formatCountCard(report.counts.dailyRecordingUsers, ctx.prevDailyRecordingUsers),
+        inline: true,
+      },
       {
         name: "🔁 가입전환율",
         value: ctx.conversionMissing
@@ -2212,6 +2225,16 @@ function buildStatsEmbed({ report, asOfDate }) {
       { name: "🕒 기준시각", value: asOfKst, inline: true },
       { name: "🧭 데이터 상태", value: ctx.conversionMissing ? "가입전환율 미조회" : "정상", inline: true },
       { name: "👥 유저 수", value: formatCountCard(report.counts.totalSignups, ctx.prevUserCount), inline: true },
+      {
+        name: "🎙️ 금일 녹음 횟수",
+        value: formatCountCard(report.counts.dailyRecordings, ctx.prevDailyRecordings, "회"),
+        inline: true,
+      },
+      {
+        name: "🙋 금일 녹음한 유저 수",
+        value: formatCountCard(report.counts.dailyRecordingUsers, ctx.prevDailyRecordingUsers),
+        inline: true,
+      },
       {
         name: "🔁 가입전환율",
         value: ctx.conversionMissing

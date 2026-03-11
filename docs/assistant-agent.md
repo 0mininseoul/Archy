@@ -1,6 +1,12 @@
-# Archy Assistant Agent (Discord + Daily Ops)
+# Archy Ops Agent (Discord + Daily Ops)
 
 ## 개요
+`Archy Ops Agent`는 Archy 서비스를 운영하는 관리자용 내부 에이전트의 정식 명칭입니다.
+
+- 권장 한글 명칭: `아키 운영 에이전트`
+- 허용 별칭: `아키 에이전트`
+- 이 문서에서 `Archy`는 사용자용 제품/서비스를, `Archy Ops Agent`는 Railway에서 상시 실행되는 운영 주체를 뜻합니다.
+
 `scripts/agent/discord-bot.mjs`는 Railway에서 상시 실행되는 Discord 하이브리드 봇(슬래시 + 멘션)입니다.
 
 역할:
@@ -12,6 +18,8 @@
 6. Supabase 기반 대화 메모리(요약 + 사실 메모)로 연속 맥락 유지
 7. 멘션 요청으로 웹 조사 / Notion 페이지·DB 생성·편집 / Google Sheet 탭·셀 편집 실행
 8. 업무 맥락 동기화: Notion `업무 DB` + `Ascentum` 최근 편집 반영
+
+즉, `Archy Ops Agent`는 사용자에게 제공되는 제품 기능이 아니라, Archy 서비스를 관리하고 운영하는 관리자 역할의 에이전트입니다.
 
 ## 핵심 정의 (고정)
 - 제외 테스트 유저 ID:
@@ -76,11 +84,13 @@ npm run agent:discord
 - Gemini: `GEMINI_API_KEY`
 - Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_SLA_MS`, `GEMINI_STRATEGIC_REVIEW_TEMPERATURE`, `GEMINI_STRATEGIC_REVIEW_PRO_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_FLASH_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FLASH_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_PRO`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_FLASH`, `GEMINI_STRATEGIC_REVIEW_MIN_CANDIDATE_TOKENS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`
 - Discord: `DISCORD_BOT_TOKEN`, `DISCORD_DAILY_CHANNEL_ID`, `DISCORD_GUILD_ID`
-- Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+- Discord 채팅 채널 제한(옵션): `DISCORD_CHAT_CHANNEL_IDS` (alias: `DISCORD_CHANNEL_IDS`)
+- Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `ARCHY_USER_SHEET_ID`, `ARCHY_USER_SHEET_TAB_NAME`
 - Google Sheets 동기화 모드(옵션): `ARCHY_SHEET_SYNC_ALL_USERS` (기본 `true`)
 - Notion: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`
 - 업무 맥락 추적(Notion): `NOTION_WORK_DB_DATA_SOURCE_ID`, `NOTION_ASCENTUM_PAGE_ID`
   - `NOTION_WORK_DB_DATA_SOURCE_ID`는 날짜성 업무 요청 자동 생성 기능에 필수
+- 채팅 리포트 캐시(옵션): `ARCHY_CHAT_REPORT_CACHE_SECONDS`
 - Amplitude: `AMPLITUDE_DASHBOARD_REST_API_KEY`, `AMPLITUDE_DASHBOARD_REST_SECRET`, `AMPLITUDE_SIGNUP_CONVERSION_CHART_ID`
 - Memory(옵션): `ARCHY_MEMORY_ENABLED`, `ARCHY_MEMORY_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_TURNS`, `ARCHY_MEMORY_SUMMARY_KEEP_RECENT_TURNS`, `ARCHY_MEMORY_SUMMARY_MIN_INTERVAL_MINUTES`
 - 멘션 업무맥락 캐시(옵션): `ARCHY_WORK_CONTEXT_CACHE_SECONDS`

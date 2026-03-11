@@ -4,9 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Archy is an automated voice documentation service built with Next.js 14 (App Router). Users record audio, which is transcribed via Groq Whisper API, formatted by OpenAI GPT-4o-mini, and saved to Notion/Google Docs with optional Slack notifications. The app is a PWA with multilingual support (Korean/English).
+Archy is an automated voice documentation service built with Next.js 16 (App Router). Users record audio, which is transcribed via Groq Whisper API, formatted by OpenAI GPT-4o-mini, and saved to Notion/Google Docs with optional Slack notifications. The app is a PWA with multilingual support (Korean/English).
 
 **Critical: Audio files are NOT stored.** They are sent directly to Groq API for transcription, then discarded. Only text (transcripts and formatted content) is persisted in the database.
+
+**Source of truth note:** For the current API surface, setup, and lifecycle behavior, prefer [docs/LLMS.md](docs/LLMS.md), [docs/FEATURE_SPEC.md](docs/FEATURE_SPEC.md), [SETUP.md](SETUP.md), `app/api/**/route.ts`, and `lib/types/database.ts`. Older examples in this file may lag behind implementation details.
+
+## Terminology
+
+- `Archy`: the user-facing product and service.
+- `Archy Ops Agent`: the canonical name for the Railway-deployed internal operations agent that administers Archy.
+- Preferred Korean name: `아키 운영 에이전트`.
+- Accepted alias: `아키 에이전트`.
+- Do not treat `Archy` and `Archy Ops Agent` as the same actor.
 
 ## Development Commands
 
@@ -44,7 +54,7 @@ npx tsc --noEmit
 ## Architecture
 
 ### Tech Stack
-- **Frontend**: Next.js 14 App Router, React 19, TypeScript, Tailwind CSS
+- **Frontend**: Next.js 16 App Router, React 19, TypeScript, Tailwind CSS
 - **Backend**: Next.js API Routes (serverless, Edge runtime where applicable)
 - **Database**: Supabase (PostgreSQL with Row Level Security)
 - **Auth**: Supabase Auth with Google OAuth
@@ -69,7 +79,7 @@ app/
 │   ├── formats/            # Custom format editor
 │   └── contact/            # Contact & account withdrawal
 │       └── withdraw/       # Withdrawal flow
-├── onboarding/             # 3-step setup flow
+├── onboarding/             # 2-step consent + referral flow
 ├── privacy/                # Privacy policy
 └── terms/                  # Terms of service
 
@@ -128,7 +138,7 @@ Four main tables (PostgreSQL with RLS):
 
 **custom_formats**
 - User-defined document templates (name, prompt, is_default)
-- Max 3 per user
+- Free tier limit is 1; Pro effectively uses 999
 
 **withdrawn_users**
 - Anonymized withdrawal statistics (no PII)
@@ -139,24 +149,22 @@ Four main tables (PostgreSQL with RLS):
 
 ```typescript
 export const MONTHLY_MINUTES_LIMIT = 350;      // Base free tier (minutes)
-export const MAX_CUSTOM_FORMATS = 3;           // Max custom formats per user
+export const MAX_CUSTOM_FORMATS = 1;           // Free tier custom format limit
 export const REFERRAL_BONUS_MINUTES = 350;     // Bonus per successful referral
 // Total available = MONTHLY_MINUTES_LIMIT + bonus_minutes
 ```
 
 ### Recording Processing Flow
 
-1. **POST /api/recordings**: Client uploads audio + metadata
-2. Create recording record with `status: 'processing'`
-3. Background async processing (no queue - production should use one):
-   - **Transcription**: Send audio File to Groq Whisper API → get text
-   - **Formatting**: Send transcript to OpenAI with universal prompt → get formatted doc with title
-   - **Notion**: Create page in user's database/page (if configured)
-   - **Google Docs**: Create doc in user's Drive folder (if configured)
-   - **Slack**: Send notification (if configured)
-   - **Push**: Send web push notification (if enabled)
-4. Update recording status to 'completed' or 'failed'
-5. Update user's monthly usage (`monthly_minutes_used`)
+1. `POST /api/recordings/start`: create or resume a `status='recording'` session
+2. `POST /api/recordings/chunk`: upload 20s chunks, apply signal gates, transcribe via Groq, and update `recording_chunks` plus session progress
+3. `POST /api/recordings/pause-notify`: persist auto-pause state and optionally push a notification
+4. `POST /api/recordings/finalize-intent`: schedule background finalize with `after()`
+5. `POST /api/recordings/finalize`: synchronous fallback / recovery path when needed
+6. Formatting + external sync:
+   - OpenAI → `formatted_content` + title
+   - Notion / Google Docs / Slack / Push if configured
+7. Final status becomes `completed` or `failed`
 
 **Important**: Audio file is passed directly to `transcribeAudio()` and never written to disk/storage. After transcription, it's garbage collected.
 
@@ -186,66 +194,13 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 - `app/register-sw.tsx`: Service worker registration
 - Icons in `public/icons/` and `public/logos/`
 
-## API Routes - Complete List
+## Current API / Setup References
 
-### Recording Management
-- `POST /api/recordings` - Create & process recording (checks monthly limit + bonus)
-- `GET /api/recordings` - List all recordings (sorted by is_pinned DESC, created_at DESC)
-- `GET /api/recordings/[id]` - Get recording details
-- `PATCH /api/recordings/[id]` - Update title, is_hidden, or is_pinned
-- `DELETE /api/recordings/[id]` - Delete recording
-
-### Format Management
-- `GET /api/formats` - List custom formats
-- `POST /api/formats` - Create custom format (max 3 per user)
-- `PUT /api/formats` - Update or set as default
-- `DELETE /api/formats` - Delete format
-
-### User Management
-- `GET /api/user/data` - Get connection status
-- `DELETE /api/user/data` - Reset all integrations & data
-- `GET /api/user/profile` - Get profile with integration status
-- `GET /api/user/language` - Get user language
-- `PUT /api/user/language` - Set language (ko/en)
-- `GET /api/user/onboarding` - Check onboarding status
-- `PUT /api/user/onboarding` - Mark as onboarded
-- `GET /api/user/usage` - Get monthly usage stats
-- `GET /api/user/referral` - Get referral code & bonus minutes
-- `POST /api/user/referral` - Apply referral code
-- `DELETE /api/user/withdraw` - Initiate account withdrawal
-
-### Notion Integration
-- `GET /api/auth/notion` - Initiate OAuth
-- `GET /api/auth/notion/callback` - Handle callback
-- `GET /api/notion/database` - Get target database
-- `GET /api/notion/databases` - List accessible databases
-- `POST /api/notion/page` - Create page in database
-- `GET /api/notion/pages` - List pages
-
-### Google Integration
-- `GET /api/auth/google` - Initiate OAuth
-- `GET /api/auth/google/callback` - Handle callback
-- `GET /api/google/folders` - List Google Drive folders
-- `PUT /api/user/google` - Update folder settings
-- `DELETE /api/user/google` - Disconnect Google
-
-### Slack Integration
-- `GET /api/auth/slack` - Initiate OAuth
-- `GET /api/auth/slack/callback` - Handle callback
-
-### Push Notifications
-- `GET /api/user/push-subscription` - Get VAPID public key
-- `POST /api/user/push-subscription` - Save subscription
-- `DELETE /api/user/push-subscription` - Unsubscribe
-
-### Audio Storage
-- `GET /api/user/audio-storage` - Get audio storage setting
-- `PATCH /api/user/audio-storage` - Toggle audio storage setting
-- `GET /api/recordings/[id]/audio` - Get signed URL for audio playback
-
-### Auth
-- `GET /api/auth/callback` - Supabase OAuth callback
-- `GET /api/auth/signout` - Sign out
+- Current API surface: `docs/FEATURE_SPEC.md`
+- Current codebase summary for models/flows: `docs/LLMS.md`
+- Current setup and migration order: `SETUP.md`
+- Current deployment topology: `DEPLOYMENT.md`
+- Current route implementations: `app/api/**/route.ts`
 
 ## Key Features
 
@@ -298,76 +253,11 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 - Flexible body structure with markdown headers
 - Adapts to content type (meeting, interview, lecture, etc.)
 
-## Database Management
+## Database / Env References
 
-### Initial Setup
-1. Run `database/schema.sql` in Supabase SQL Editor
-2. Run migrations in order (see below)
-
-### Migration Order
-1. `add_language.sql` - User language preference (ko/en)
-2. `add_is_onboarded.sql` - Onboarding completion flag
-3. `make_audio_file_path_nullable.sql` - Audio not stored, path nullable
-4. `add_notion_save_target_fields.sql` - Notion database/page target selection
-5. `add_processing_step.sql` - Track processing stage
-6. `add_error_tracking.sql` - Error step & message for debugging
-7. `add_push_notification.sql` - Push subscription & enabled flag
-8. `add_referral_system.sql` - Referral code, referred_by, bonus_minutes
-9. `add_google_integration.sql` - Google OAuth tokens & folder settings
-10. `add_user_name.sql` - User display name field
-11. `add_withdrawn_users_table.sql` - Withdrawal archive table
-12. `update_withdrawn_users_add_data.sql` - Store full user snapshot (JSONB)
-13. `update_withdrawn_users_add_name.sql` - Store user name separately
-14. `add_audio_storage_setting.sql` - User audio storage preference (opt-in, default false)
-15. `add_recording_session.sql` - Recording session status and chunk tracking
-16. `add_custom_format_is_default.sql` - Default flag for custom formats
-
-### Adding Migrations
-- Create new file in `database/migrations/`
-- Update this file with migration order
-- Test locally before production deployment
-
-## Environment Variables
-
-Required:
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-
-# AI APIs
-GROQ_API_KEY=...           # Whisper STT
-OPENAI_API_KEY=...         # GPT-4o-mini
-
-# Notion OAuth
-NOTION_CLIENT_ID=...
-NOTION_CLIENT_SECRET=...
-NOTION_REDIRECT_URI=...
-
-# Slack OAuth
-SLACK_CLIENT_ID=...
-SLACK_CLIENT_SECRET=...
-SLACK_REDIRECT_URI=...
-
-# Google OAuth
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=...
-
-# Push Notifications (VAPID)
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
-VAPID_PRIVATE_KEY=...
-VAPID_SUBJECT=...
-
-# App
-NEXT_PUBLIC_APP_URL=...
-
-# Kakao (for referral sharing)
-NEXT_PUBLIC_KAKAO_JS_KEY=...
-```
-
-See `.env.example` for full structure.
+- `database/schema.sql` is a legacy baseline, not the complete current schema
+- Use `SETUP.md` for the authoritative migration order
+- Use `.env.example` for the current environment variable matrix
 
 ## Common Gotchas
 

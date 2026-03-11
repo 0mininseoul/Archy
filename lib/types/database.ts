@@ -281,6 +281,6 @@ export interface PromoCode {
 // -----------------------------------------------------------------------------
 
 export const MONTHLY_MINUTES_LIMIT = 350;
-export const REFERRAL_BONUS_MINUTES = 30;
+export const REFERRAL_BONUS_MINUTES = 350;
 export const MAX_CUSTOM_FORMATS = 1;
 export const PRO_MAX_CUSTOM_FORMATS = 999; // Effectively unlimited for Pro users

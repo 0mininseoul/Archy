@@ -99,7 +99,7 @@ async function main() {
 
     if (!apply) {
       printLine(
-        `${current} ${label} -> 이용률(누적) ${usageRate}, 활성화율(30일) ${activationRate30d}`
+        `${current} ${label} -> 이용률(누적) ${usageRate}, 활성화율(30일) ${activationRate30d}, 녹음 횟수 ${metrics.counts.dailyRecordings}회, 녹음 유저 ${metrics.counts.dailyRecordingUsers}명`
       );
       continue;
     }
