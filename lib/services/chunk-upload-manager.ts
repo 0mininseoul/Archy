@@ -47,11 +47,13 @@ const MAX_RETRY_DELAY = 30000; // 30초
 
 class ChunkUploadError extends Error {
   readonly retryable: boolean;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, retryAfterSeconds?: number) {
     super(message);
     this.name = "ChunkUploadError";
     this.retryable = retryable;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -189,19 +191,41 @@ export class ChunkUploadManager {
 
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}`;
+        let retryable = isRetryableStatus(response.status);
+        let retryAfterSeconds: number | undefined;
 
         try {
           const errorData = await response.json();
           if (errorData?.error) {
             errorMessage = errorData.error;
           }
+          if (typeof errorData?.recoverable === "boolean") {
+            retryable = errorData.recoverable;
+          }
+          if (
+            typeof errorData?.retryAfterSeconds === "number" &&
+            Number.isFinite(errorData.retryAfterSeconds)
+          ) {
+            retryAfterSeconds = errorData.retryAfterSeconds;
+          }
         } catch {
           // Ignore JSON parsing errors and fall back to the HTTP status.
         }
 
+        if (!retryAfterSeconds) {
+          const retryAfterHeader = response.headers.get("Retry-After");
+          if (retryAfterHeader) {
+            const parsedRetryAfter = Number.parseInt(retryAfterHeader, 10);
+            if (Number.isFinite(parsedRetryAfter)) {
+              retryAfterSeconds = parsedRetryAfter;
+            }
+          }
+        }
+
         throw new ChunkUploadError(
           errorMessage,
-          isRetryableStatus(response.status)
+          retryable,
+          retryAfterSeconds
         );
       }
 
@@ -241,10 +265,18 @@ export class ChunkUploadManager {
       // 재시도 로직
       if (retryable && chunk.retryCount < MAX_RETRIES) {
         chunk.retryCount++;
-        const delay = Math.min(
-          INITIAL_RETRY_DELAY * Math.pow(2, chunk.retryCount - 1),
-          MAX_RETRY_DELAY
-        );
+        const retryAfterDelay =
+          error instanceof ChunkUploadError &&
+          typeof error.retryAfterSeconds === "number" &&
+          error.retryAfterSeconds > 0
+            ? error.retryAfterSeconds * 1000
+            : null;
+        const delay = retryAfterDelay
+          ? Math.min(retryAfterDelay, MAX_RETRY_DELAY)
+          : Math.min(
+              INITIAL_RETRY_DELAY * Math.pow(2, chunk.retryCount - 1),
+              MAX_RETRY_DELAY
+            );
 
         console.log(
           `[ChunkManager] Retrying chunk ${chunk.chunkIndex} in ${delay}ms (attempt ${chunk.retryCount}/${MAX_RETRIES})`

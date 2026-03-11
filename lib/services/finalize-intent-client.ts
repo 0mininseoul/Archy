@@ -10,6 +10,7 @@ import type { Recording } from "@/lib/types/database";
 const PENDING_FINALIZE_STORAGE_KEY = "archy_pending_finalize_intent";
 
 export interface PendingFinalizeIntent {
+  expectedChunkCount?: number;
   sessionId: string;
   totalDurationSeconds: number;
   format?: Recording["format"];
@@ -24,7 +25,9 @@ function isValidPendingIntent(
       typeof value.sessionId === "string" &&
       value.sessionId.length > 0 &&
       typeof value.totalDurationSeconds === "number" &&
-      value.totalDurationSeconds > 0
+      value.totalDurationSeconds > 0 &&
+      (value.expectedChunkCount === undefined ||
+        (typeof value.expectedChunkCount === "number" && value.expectedChunkCount >= 0))
   );
 }
 
@@ -116,6 +119,7 @@ export function sendFinalizeIntentBeacon(): boolean {
       JSON.stringify({
         sessionId: pendingIntent.sessionId,
         totalDurationSeconds: pendingIntent.totalDurationSeconds,
+        expectedChunkCount: pendingIntent.expectedChunkCount,
         format: pendingIntent.format,
       }),
     ],
@@ -133,6 +137,7 @@ export async function flushPendingFinalizeIntent(): Promise<boolean> {
     {
       sessionId: pendingIntent.sessionId,
       totalDurationSeconds: pendingIntent.totalDurationSeconds,
+      expectedChunkCount: pendingIntent.expectedChunkCount,
       format: pendingIntent.format,
     },
     { keepalive: true }

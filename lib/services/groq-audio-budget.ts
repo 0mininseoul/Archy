@@ -9,6 +9,10 @@ const DEFAULT_ROLLING_WINDOW_HOURS = 24;
 const DEFAULT_BUCKET_MINUTES = 5;
 const DEFAULT_ASPD_COOLDOWN_MINUTES = 60;
 const GROQ_MINIMUM_BILLED_AUDIO_SECONDS = 10;
+const BUDGET_CIRCUIT_BREAKER_MS = 5 * 60 * 1000;
+
+let budgetCircuitOpenUntilMs = 0;
+let lastBudgetCircuitReason: string | null = null;
 
 export interface GroqAudioBudgetConfig {
   aspdCooldownMinutes: number;
@@ -39,6 +43,53 @@ interface GroqKeyHealthRow {
   last_known_audio_limit_seconds: number | null;
   last_known_audio_used_seconds: number | null;
   last_rate_limited_at: string | null;
+}
+
+function getBudgetSchemaErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const code = "code" in error ? error.code : undefined;
+  return typeof code === "string" ? code : undefined;
+}
+
+function isBudgetSchemaError(error: unknown): boolean {
+  const code = getBudgetSchemaErrorCode(error);
+  if (code && ["42P01", "42883", "PGRST202", "PGRST204", "PGRST205"].includes(code)) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message = "message" in error ? error.message : undefined;
+  return (
+    typeof message === "string" &&
+    /groq_audio_usage_buckets|groq_key_health|increment_groq_audio_usage|upsert_groq_key_health/i.test(
+      message
+    )
+  );
+}
+
+function isBudgetCircuitOpen(nowMs: number = Date.now()): boolean {
+  return budgetCircuitOpenUntilMs > nowMs;
+}
+
+function openBudgetCircuit(reason: string, error: unknown): void {
+  const nowMs = Date.now();
+  budgetCircuitOpenUntilMs = nowMs + BUDGET_CIRCUIT_BREAKER_MS;
+
+  if (lastBudgetCircuitReason === reason && isBudgetCircuitOpen(nowMs - 1)) {
+    return;
+  }
+
+  lastBudgetCircuitReason = reason;
+  console.warn(
+    `[GroqAudioBudget] Disabling budget tracking for ${BUDGET_CIRCUIT_BREAKER_MS / 1000}s (${reason}).`,
+    error
+  );
 }
 
 function parsePositiveNumber(
@@ -165,7 +216,7 @@ export async function loadGroqAudioUsageSummaries(
     }
   }
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY || sources.length === 0) {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY || sources.length === 0 || isBudgetCircuitOpen(nowMs)) {
     return summaries;
   }
 
@@ -192,14 +243,18 @@ export async function loadGroqAudioUsageSummaries(
       ]);
 
     if (bucketError) {
-      if (bucketError.code !== "42P01") {
+      if (isBudgetSchemaError(bucketError)) {
+        openBudgetCircuit("load_usage_buckets_schema_error", bucketError);
+      } else {
         console.error("[GroqAudioBudget] Failed to load usage buckets:", bucketError);
       }
       return summaries;
     }
 
     if (healthError) {
-      if (healthError.code !== "42P01") {
+      if (isBudgetSchemaError(healthError)) {
+        openBudgetCircuit("load_key_health_schema_error", healthError);
+      } else {
         console.error("[GroqAudioBudget] Failed to load key health:", healthError);
       }
       return summaries;
@@ -220,7 +275,11 @@ export async function loadGroqAudioUsageSummaries(
       summaries.set(row.key_source, current);
     }
   } catch (error) {
-    console.error("[GroqAudioBudget] Unexpected error while loading usage summaries:", error);
+    if (isBudgetSchemaError(error)) {
+      openBudgetCircuit("load_usage_unexpected_schema_error", error);
+    } else {
+      console.error("[GroqAudioBudget] Unexpected error while loading usage summaries:", error);
+    }
   }
 
   return summaries;
@@ -231,7 +290,11 @@ export async function recordGroqAudioUsage(
   audioSeconds: number,
   nowMs: number = Date.now()
 ): Promise<void> {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY || audioSeconds <= 0) {
+  if (
+    !process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    audioSeconds <= 0 ||
+    isBudgetCircuitOpen(nowMs)
+  ) {
     return;
   }
 
@@ -247,11 +310,19 @@ export async function recordGroqAudioUsage(
       p_window_start: bucketStartIso,
     });
 
-    if (error && error.code !== "42883") {
-      console.error("[GroqAudioBudget] Failed to record audio usage:", error);
+    if (error) {
+      if (isBudgetSchemaError(error)) {
+        openBudgetCircuit("record_audio_usage_schema_error", error);
+      } else {
+        console.error("[GroqAudioBudget] Failed to record audio usage:", error);
+      }
     }
   } catch (error) {
-    console.error("[GroqAudioBudget] Unexpected error while recording audio usage:", error);
+    if (isBudgetSchemaError(error)) {
+      openBudgetCircuit("record_audio_usage_unexpected_schema_error", error);
+    } else {
+      console.error("[GroqAudioBudget] Unexpected error while recording audio usage:", error);
+    }
   }
 }
 
@@ -260,7 +331,7 @@ export async function markGroqKeyAspdRateLimited(
   errorText: string,
   options: { nowMs?: number; retryAfterSeconds?: number } = {}
 ): Promise<void> {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY || isBudgetCircuitOpen(options.nowMs)) {
     return;
   }
 
@@ -284,10 +355,18 @@ export async function markGroqKeyAspdRateLimited(
       p_last_rate_limited_at: new Date(nowMs).toISOString(),
     });
 
-    if (error && error.code !== "42883") {
-      console.error("[GroqAudioBudget] Failed to mark ASPD rate limit:", error);
+    if (error) {
+      if (isBudgetSchemaError(error)) {
+        openBudgetCircuit("mark_aspd_rate_limit_schema_error", error);
+      } else {
+        console.error("[GroqAudioBudget] Failed to mark ASPD rate limit:", error);
+      }
     }
   } catch (error) {
-    console.error("[GroqAudioBudget] Unexpected error while marking ASPD limit:", error);
+    if (isBudgetSchemaError(error)) {
+      openBudgetCircuit("mark_aspd_rate_limit_unexpected_schema_error", error);
+    } else {
+      console.error("[GroqAudioBudget] Unexpected error while marking ASPD limit:", error);
+    }
   }
 }

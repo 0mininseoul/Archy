@@ -139,6 +139,7 @@ export function DashboardClient() {
                 {
                   sessionId,
                   totalDurationSeconds: totalDuration,
+                  expectedChunkCount: totalChunks,
                   format: "meeting",
                 },
                 { keepalive: true }

@@ -1,18 +1,20 @@
+import { NextResponse } from "next/server";
 import { withAuth, successResponse, errorResponse } from "@/lib/api";
+import { Recording } from "@/lib/types/database";
 import {
   GroqTranscriptionError,
-  isGroqAspdRateLimitError,
   transcribeAudio,
 } from "@/lib/services/whisper";
 import { logSttDecision } from "@/lib/services/stt-observability";
 import { getGroqBilledAudioSeconds } from "@/lib/services/groq-audio-budget";
 import { resolveGroqKeySelection } from "@/lib/services/groq-key-router";
+import {
+  beginRecordingChunkAttempt,
+  completeRecordingChunkAttempt,
+} from "@/lib/services/recording-transcription-state";
 
-// Vercel Free tier: 4.5MB limit
-// 20초 청크 (64kbps): ~160KB
-// Route segment config for body size limit
-export const maxDuration = 60; // 60 seconds timeout
-const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB
+export const maxDuration = 60;
+const MAX_CHUNK_SIZE = 4 * 1024 * 1024;
 const PRE_TRANSCRIPTION_RMS_GATE = 0.002;
 
 interface ChunkTranscriptResponse {
@@ -20,8 +22,6 @@ interface ChunkTranscriptResponse {
   chunkIndex: number;
   totalDuration: number;
 }
-
-const GROQ_ASPD_RATE_LIMIT_MESSAGE = "Groq ASPD rate limit exceeded.";
 
 function parseOptionalNumber(value: FormDataEntryValue | null): number | undefined {
   if (typeof value !== "string") {
@@ -32,54 +32,101 @@ function parseOptionalNumber(value: FormDataEntryValue | null): number | undefin
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-// POST /api/recordings/chunk - 청크 단위 전사 및 실시간 병합
-export const POST = withAuth<ChunkTranscriptResponse>(
+function getRetryableFlag(error: unknown): boolean {
+  if (error instanceof GroqTranscriptionError && error.statusCode) {
+    return error.statusCode === 408 || error.statusCode === 429 || error.statusCode >= 500;
+  }
+
+  return true;
+}
+
+function getProviderErrorCode(error: unknown): string {
+  if (!(error instanceof GroqTranscriptionError)) {
+    return "transcription_error";
+  }
+
+  if (/Audio Seconds per Day|ASPD/i.test(error.errorText ?? "")) {
+    return "groq_aspd_rate_limit";
+  }
+
+  if (error.statusCode === 429) {
+    return "groq_rate_limit";
+  }
+
+  if (error.statusCode === 503) {
+    return "groq_service_unavailable";
+  }
+
+  if (error.statusCode === 500) {
+    return "groq_internal_error";
+  }
+
+  return "groq_transcription_error";
+}
+
+function getSafeErrorMessage(error: unknown): string {
+  if (error instanceof GroqTranscriptionError) {
+    if (error.statusCode === 429) {
+      return "전사 처리량이 많아 잠시 후 다시 시도해주세요.";
+    }
+
+    if ((error.statusCode ?? 0) >= 500) {
+      return "전사 서버가 일시적으로 불안정합니다. 잠시 후 다시 시도해주세요.";
+    }
+  }
+
+  return "전사 처리에 실패했습니다.";
+}
+
+function createChunkErrorResponse(error: unknown): ReturnType<typeof errorResponse> {
+  const statusCode =
+    error instanceof GroqTranscriptionError && error.statusCode
+      ? error.statusCode
+      : 500;
+  const retryAfterSeconds =
+    error instanceof GroqTranscriptionError &&
+    Number.isFinite(error.retryAfterSeconds)
+      ? error.retryAfterSeconds
+      : undefined;
+  const response = NextResponse.json(
+    {
+      success: false,
+      error: getSafeErrorMessage(error),
+      code: getProviderErrorCode(error),
+      recoverable: getRetryableFlag(error),
+      retryAfterSeconds,
+    },
+    { status: statusCode }
+  ) as ReturnType<typeof errorResponse>;
+
+  if (Number.isFinite(retryAfterSeconds)) {
+    response.headers.set("Retry-After", String(retryAfterSeconds));
+  }
+
+  return response;
+}
+
+export const POST = withAuth(
   async ({ user, supabase, request }) => {
     const formData = await request!.formData();
     const audioChunk = formData.get("audio") as File;
-    const chunkIndex = parseInt(formData.get("chunkIndex") as string);
-    const durationSeconds = parseInt(formData.get("durationSeconds") as string);
+    const chunkIndex = parseInt(formData.get("chunkIndex") as string, 10);
+    const durationSeconds = parseInt(formData.get("durationSeconds") as string, 10);
     const sessionId = formData.get("sessionId") as string;
-    const totalDuration = parseInt(formData.get("totalDuration") as string) || 0;
+    const totalDuration = parseInt(formData.get("totalDuration") as string, 10) || 0;
     const avgRms = parseOptionalNumber(formData.get("avgRms"));
     const peakRms = parseOptionalNumber(formData.get("peakRms"));
 
-    // Validation
     if (!audioChunk) {
       return errorResponse("Audio chunk is required", 400);
     }
 
-    if (isNaN(chunkIndex) || chunkIndex < 0) {
+    if (Number.isNaN(chunkIndex) || chunkIndex < 0) {
       return errorResponse("Valid chunkIndex is required", 400);
     }
 
-    if (isNaN(durationSeconds) || durationSeconds <= 0) {
+    if (Number.isNaN(durationSeconds) || durationSeconds <= 0) {
       return errorResponse("Valid durationSeconds is required", 400);
-    }
-
-    // File size check (Minimum 1KB) - 빈 오디오나 무음 파일 방지
-    if (audioChunk.size < 1024) {
-      console.log(`[Chunk] Chunk ${chunkIndex} too small (${audioChunk.size} bytes), skipping transcription`);
-      logSttDecision({
-        pipeline: "chunk",
-        decision: "pre_gated",
-        reason: "size_too_small",
-        sessionId: sessionId || undefined,
-        chunkIndex,
-        durationSeconds,
-        audioSizeBytes: audioChunk.size,
-        textLength: 0,
-        metrics: {
-          avgRms,
-          peakRms,
-          segmentCount: 0,
-        },
-      });
-      return successResponse({
-        transcript: "",
-        chunkIndex,
-        totalDuration,
-      });
     }
 
     if (audioChunk.size > MAX_CHUNK_SIZE) {
@@ -87,15 +134,120 @@ export const POST = withAuth<ChunkTranscriptResponse>(
     }
 
     console.log(
-      `[Chunk] Processing chunk ${chunkIndex}, size: ${audioChunk.size}, duration: ${durationSeconds}s, session: ${sessionId || 'none'}`
+      `[Chunk] Processing chunk ${chunkIndex}, size: ${audioChunk.size}, duration: ${durationSeconds}s, session: ${sessionId || "none"}`
     );
+
+    const nowIso = new Date().toISOString();
+    const { data: session } = sessionId
+      ? await supabase
+          .from("recordings")
+          .select("id, status, transcript, last_chunk_index, duration_seconds")
+          .eq("id", sessionId)
+          .eq("user_id", user.id)
+          .maybeSingle<{
+            duration_seconds: number | null;
+            id: string;
+            last_chunk_index: number | null;
+            status: Recording["status"];
+            transcript: string | null;
+          }>()
+      : { data: null };
+
+    if (sessionId && session && session.status !== "recording") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "녹음 세션이 이미 종료되었습니다.",
+          code: "recording_not_active",
+          recoverable: false,
+        },
+        { status: 409 }
+      ) as ReturnType<typeof errorResponse>;
+    }
+
+    const chunkAttempt = sessionId
+      ? await beginRecordingChunkAttempt({
+          recordingId: sessionId,
+          chunkIndex,
+          durationSeconds,
+          avgRms,
+          peakRms,
+        })
+      : { attemptCount: 1, supported: false as const };
+
+    if (chunkAttempt.error) {
+      console.error(
+        `[Chunk] Failed to begin chunk attempt tracking for session ${sessionId}:`,
+        chunkAttempt.error
+      );
+    }
+
+    const updateSessionProgress = async (transcript: string): Promise<void> => {
+      if (!sessionId || !session || session.status !== "recording") {
+        return;
+      }
+
+      const progressPayload: {
+        duration_seconds: number;
+        last_activity_at: string;
+        last_chunk_index: number;
+        session_paused_at: null;
+        termination_reason: null;
+        transcript?: string;
+      } = {
+        duration_seconds: Math.max(totalDuration, session.duration_seconds ?? 0),
+        last_activity_at: nowIso,
+        last_chunk_index: Math.max(session.last_chunk_index ?? -1, chunkIndex),
+        session_paused_at: null,
+        termination_reason: null,
+      };
+
+      if (!chunkAttempt.supported && transcript.trim().length > 0) {
+        const existingTranscript = session.transcript || "";
+        if (chunkIndex > (session.last_chunk_index ?? -1)) {
+          progressPayload.transcript = existingTranscript
+            ? `${existingTranscript} ${transcript}`
+            : transcript;
+        }
+      }
+
+      const { error: sessionUpdateError } = await supabase
+        .from("recordings")
+        .update(progressPayload)
+        .eq("id", sessionId)
+        .eq("user_id", user.id)
+        .eq("status", "recording");
+
+      if (sessionUpdateError) {
+        console.error(`[Chunk] Failed to update session progress for ${sessionId}:`, sessionUpdateError);
+      }
+    };
 
     try {
       let transcript = "";
       let silenceReason: string | undefined;
 
-      // Extremely low signal chunks are skipped before STT call.
-      if (typeof avgRms === "number" && avgRms < PRE_TRANSCRIPTION_RMS_GATE) {
+      if (audioChunk.size < 1024) {
+        silenceReason = "size_too_small";
+        console.log(
+          `[Chunk] Chunk ${chunkIndex} too small (${audioChunk.size} bytes), skipping transcription`
+        );
+        logSttDecision({
+          pipeline: "chunk",
+          decision: "pre_gated",
+          reason: silenceReason,
+          sessionId: sessionId || undefined,
+          chunkIndex,
+          durationSeconds,
+          audioSizeBytes: audioChunk.size,
+          textLength: 0,
+          metrics: {
+            avgRms,
+            peakRms,
+            segmentCount: 0,
+          },
+        });
+      } else if (typeof avgRms === "number" && avgRms < PRE_TRANSCRIPTION_RMS_GATE) {
         silenceReason = "pre_gate_low_signal";
         console.log(
           `[Chunk] Chunk ${chunkIndex} skipped before transcription (avgRms=${avgRms}, peakRms=${peakRms ?? "n/a"})`
@@ -133,9 +285,7 @@ export const POST = withAuth<ChunkTranscriptResponse>(
           activeRecorderUsers: keySelection.activeRecorderUsers,
         });
         transcript = transcription.text;
-        silenceReason = transcription.isLikelySilence
-          ? transcription.reason
-          : undefined;
+        silenceReason = transcription.isLikelySilence ? transcription.reason : undefined;
 
         console.log(
           `[Chunk] Chunk ${chunkIndex} transcribed, length=${transcript.length}, avgNoSpeechProb=${transcription.metrics.avgNoSpeechProb ?? "n/a"}, avgLogprob=${transcription.metrics.avgLogprob ?? "n/a"}`
@@ -161,61 +311,25 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         });
       }
 
-      // sessionId가 있으면 실시간으로 DB에 병합
-      if (sessionId) {
-        // 현재 세션 조회
-        const { data: session } = await supabase
-          .from("recordings")
-          .select("transcript, last_chunk_index, status")
-          .eq("id", sessionId)
-          .eq("user_id", user.id)
-          .single();
+      await updateSessionProgress(transcript);
 
-        if (session && session.status === "recording") {
-          // 이미 처리된 청크인지 확인 (중복 방지)
-          if (chunkIndex > session.last_chunk_index) {
-            const updatePayload: {
-              transcript?: string;
-              last_chunk_index: number;
-              duration_seconds: number;
-              session_paused_at: null;
-              last_activity_at: string;
-              termination_reason: null;
-            } = {
-              last_chunk_index: chunkIndex,
-              duration_seconds: totalDuration,
-              session_paused_at: null,
-              last_activity_at: new Date().toISOString(),
-              termination_reason: null,
-            };
+      if (sessionId && chunkAttempt.supported) {
+        const completion = await completeRecordingChunkAttempt({
+          recordingId: sessionId,
+          chunkIndex,
+          durationSeconds,
+          avgRms,
+          peakRms,
+          attemptCount: chunkAttempt.attemptCount,
+          transcript,
+          status: "succeeded",
+        });
 
-            if (transcript.trim().length > 0) {
-              // 기존 전사본에 새 전사본 append (줄글로 이어서 작성)
-              const existingTranscript = session.transcript || "";
-              updatePayload.transcript = existingTranscript
-                ? `${existingTranscript} ${transcript}`
-                : transcript;
-            }
-
-            // DB 업데이트
-            await supabase
-              .from("recordings")
-              .update(updatePayload)
-              .eq("id", sessionId)
-              .eq("user_id", user.id);
-
-            if (transcript.trim().length > 0) {
-              console.log(
-                `[Chunk] Session ${sessionId} updated with transcript, chunk ${chunkIndex}, total duration: ${totalDuration}s`
-              );
-            } else {
-              console.log(
-                `[Chunk] Session ${sessionId} updated without transcript append, chunk ${chunkIndex}, total duration: ${totalDuration}s, reason=${silenceReason ?? "empty_transcript"}`
-              );
-            }
-          } else {
-            console.log(`[Chunk] Chunk ${chunkIndex} already processed for session ${sessionId}`);
-          }
+        if (completion.error) {
+          console.error(
+            `[Chunk] Failed to persist chunk success for session ${sessionId}, chunk ${chunkIndex}:`,
+            completion.error
+          );
         }
       }
 
@@ -225,43 +339,32 @@ export const POST = withAuth<ChunkTranscriptResponse>(
         totalDuration,
       });
     } catch (error) {
-      if (sessionId && isGroqAspdRateLimitError(error)) {
-        const nowIso = new Date().toISOString();
-        const { error: updateError } = await supabase
-          .from("recordings")
-          .update({
-            status: "failed",
-            processing_step: null,
-            error_step: "transcription",
-            error_message: GROQ_ASPD_RATE_LIMIT_MESSAGE,
-            termination_reason: "processing_error",
-            session_paused_at: nowIso,
-            last_activity_at: nowIso,
-          })
-          .eq("id", sessionId)
-          .eq("user_id", user.id)
-          .eq("status", "recording");
+      await updateSessionProgress("");
 
-        if (updateError) {
+      if (sessionId && chunkAttempt.supported) {
+        const completion = await completeRecordingChunkAttempt({
+          recordingId: sessionId,
+          chunkIndex,
+          durationSeconds,
+          avgRms,
+          peakRms,
+          attemptCount: chunkAttempt.attemptCount,
+          providerErrorCode: getProviderErrorCode(error),
+          providerStatusCode:
+            error instanceof GroqTranscriptionError ? error.statusCode : undefined,
+          status: "failed",
+        });
+
+        if (completion.error) {
           console.error(
-            `[Chunk] Failed to persist ASPD rate limit failure for session ${sessionId}:`,
-            updateError
+            `[Chunk] Failed to persist chunk failure for session ${sessionId}, chunk ${chunkIndex}:`,
+            completion.error
           );
         }
-
-        console.error(
-          `[Chunk] Session ${sessionId} failed due to Groq ASPD rate limit on chunk ${chunkIndex}`
-        );
-        return errorResponse(GROQ_ASPD_RATE_LIMIT_MESSAGE, 409);
       }
 
       console.error(`[Chunk] Transcription failed for chunk ${chunkIndex}:`, error);
-      return errorResponse(
-        `Transcription failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        error instanceof GroqTranscriptionError && error.statusCode
-          ? error.statusCode
-          : 500
-      );
+      return createChunkErrorResponse(error);
     }
   }
 );

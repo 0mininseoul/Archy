@@ -15,6 +15,8 @@ import { createGoogleDoc, getValidAccessToken } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
 import { logSttDecision } from "@/lib/services/stt-observability";
 import { hasMeaningfulTranscript, sanitizeTranscriptText } from "@/lib/utils/transcript";
+import type { RecordingTranscriptionWarning } from "@/lib/services/recording-transcription-state";
+import { isTranscriptionStateSchemaError } from "@/lib/services/recording-transcription-state";
 import {
   Recording,
   User,
@@ -45,6 +47,9 @@ export interface TranscriptProcessingContext {
   duration: number;
   userData: User;
   title: string;
+  terminationReason?: Recording["termination_reason"];
+  transcriptionQualityStatus?: Recording["transcription_quality_status"];
+  transcriptionWarnings?: RecordingTranscriptionWarning[];
 }
 
 export interface ProcessingResult {
@@ -683,18 +688,26 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
 export async function processFromTranscripts(
   ctx: TranscriptProcessingContext
 ): Promise<ProcessingResult> {
-  const { recordingId, transcript, format, duration, userData, title } = ctx;
+  const {
+    recordingId,
+    transcript,
+    format,
+    duration,
+    userData,
+    title,
+    terminationReason = "user_stop",
+    transcriptionQualityStatus = "ok",
+    transcriptionWarnings = [],
+  } = ctx;
   const supabase = createProcessingClient();
   const normalizedTranscript = sanitizeTranscriptText(transcript);
 
   log(recordingId, "Starting processing from pre-transcribed chunks...");
 
-  if (normalizedTranscript !== transcript) {
-    await supabase
-      .from("recordings")
-      .update({ transcript: normalizedTranscript })
-      .eq("id", recordingId);
-  }
+  await supabase
+    .from("recordings")
+    .update({ transcript: normalizedTranscript })
+    .eq("id", recordingId);
 
   // Skip Step 1 (transcription already done)
   // Step 2: Format
@@ -791,7 +804,7 @@ export async function processFromTranscripts(
       status: "completed" as const,
       processing_step: null,
       last_activity_at: new Date().toISOString(),
-      termination_reason: "user_stop",
+      termination_reason: terminationReason,
     }
     : {
       status: "completed" as const,
@@ -799,12 +812,28 @@ export async function processFromTranscripts(
       error_step: null,
       error_message: null,
       last_activity_at: new Date().toISOString(),
-      termination_reason: "user_stop",
+      termination_reason: terminationReason,
     };
-  await supabase
+  const completionWithMetadata = {
+    ...completionPayload,
+    transcription_quality_status: transcriptionQualityStatus,
+    transcription_warnings: transcriptionWarnings,
+  };
+  const { error: completionError } = await supabase
     .from("recordings")
-    .update(completionPayload)
+    .update(completionWithMetadata)
     .eq("id", recordingId);
+
+  if (completionError) {
+    if (!isTranscriptionStateSchemaError(completionError)) {
+      throw completionError;
+    }
+
+    await supabase
+      .from("recordings")
+      .update(completionPayload)
+      .eq("id", recordingId);
+  }
 
   // Step 6: Push notification (after marking complete)
   await stepPushNotify(recordingId, userData, finalTitle, notionUrl, googleDocUrl);

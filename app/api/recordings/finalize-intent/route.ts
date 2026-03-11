@@ -4,6 +4,7 @@ import { Recording } from "@/lib/types/database";
 import { finalizeRecordingSession } from "@/lib/services/recording-finalizer";
 
 interface FinalizeIntentRequest {
+  expectedChunkCount?: number;
   sessionId: string;
   totalDurationSeconds: number;
   format?: Recording["format"];
@@ -17,7 +18,7 @@ interface FinalizeIntentResponse {
 export const POST = withAuth<FinalizeIntentResponse>(
   async ({ user, request }) => {
     const body: FinalizeIntentRequest = await request!.json();
-    const { sessionId, totalDurationSeconds, format } = body;
+    const { sessionId, totalDurationSeconds, expectedChunkCount, format } = body;
 
     if (!sessionId) {
       return errorResponse("Session ID is required", 400);
@@ -31,6 +32,7 @@ export const POST = withAuth<FinalizeIntentResponse>(
       const result = await finalizeRecordingSession({
         recordingId: sessionId,
         totalDurationSeconds,
+        expectedChunkCount,
         userId: user.id,
         format,
       });

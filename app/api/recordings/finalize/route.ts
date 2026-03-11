@@ -18,6 +18,7 @@ interface ChunkTranscript {
 }
 
 interface FinalizeRequest {
+  expectedChunkCount?: number;
   sessionId?: string;
   transcripts?: ChunkTranscript[];
   totalDurationSeconds: number;
@@ -33,7 +34,7 @@ interface FinalizeResponse {
 export const POST = withAuth<FinalizeResponse>(
   async ({ user, supabase, request }) => {
     const body: FinalizeRequest = await request!.json();
-    const { sessionId, transcripts, totalDurationSeconds, format } = body;
+    const { sessionId, transcripts, totalDurationSeconds, expectedChunkCount, format } = body;
 
     if (!totalDurationSeconds || totalDurationSeconds <= 0) {
       return errorResponse("Valid totalDurationSeconds is required", 400);
@@ -43,6 +44,7 @@ export const POST = withAuth<FinalizeResponse>(
       const result = await finalizeRecordingSession({
         recordingId: sessionId,
         totalDurationSeconds,
+        expectedChunkCount,
         userId: user.id,
         format: (format as Recording["format"] | undefined) || undefined,
       });

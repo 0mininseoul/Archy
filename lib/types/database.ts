@@ -106,6 +106,7 @@ export type TerminationReason =
   | "stale_timeout"
   | "manual_discard"
   | "processing_error";
+export type TranscriptionQualityStatus = "ok" | "degraded";
 
 export interface Recording {
   id: string;
@@ -125,6 +126,9 @@ export interface Recording {
   error_step?: ErrorStep | null;
   last_activity_at?: string | null;
   termination_reason?: TerminationReason | null;
+  expected_chunk_count?: number | null;
+  transcription_quality_status?: TranscriptionQualityStatus;
+  transcription_warnings?: Array<Record<string, unknown>> | null;
   is_hidden?: boolean;
   is_pinned?: boolean;
   created_at: string;
@@ -170,6 +174,9 @@ export interface RecordingUpdate {
   google_doc_url?: string | null;
   error_message?: string | null;
   error_step?: ErrorStep | null;
+  expected_chunk_count?: number | null;
+  transcription_quality_status?: TranscriptionQualityStatus;
+  transcription_warnings?: Array<Record<string, unknown>> | null;
   is_hidden?: boolean;
 }
 
