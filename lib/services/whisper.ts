@@ -89,6 +89,12 @@ export const SILENCE_FILTER_THRESHOLDS = {
   allSegmentNoSpeechProb: 0.8,
   suspiciousShortTextMaxChars: 12,
   longChunkMinSeconds: 10,
+  repetitiveTokenMinOccurrences: 4,
+  repetitiveTokenRatio: 0.3,
+  repetitiveConsecutiveTokenMin: 3,
+  mixedScriptFamilyMin: 3,
+  mixedScriptShortTextMaxChars: 48,
+  mixedScriptShortTextMaxTokens: 8,
 } as const;
 
 // Keep this list narrow and always combine with signal/confidence checks.
@@ -152,6 +158,79 @@ function isLikelyOutroHallucination(text: string): boolean {
   );
 
   return stripped.length <= 8;
+}
+
+function extractWordTokens(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function hasSuspiciousTokenRepetition(text: string): boolean {
+  const tokens = extractWordTokens(text);
+  if (tokens.length < 8) {
+    return false;
+  }
+
+  const counts = new Map<string, number>();
+  let maxTokenCount = 0;
+  let consecutiveRepeats = 0;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const nextCount = (counts.get(token) ?? 0) + 1;
+    counts.set(token, nextCount);
+    if (nextCount > maxTokenCount) {
+      maxTokenCount = nextCount;
+    }
+
+    if (index > 0 && token === tokens[index - 1]) {
+      consecutiveRepeats += 1;
+    }
+  }
+
+  return (
+    consecutiveRepeats >= SILENCE_FILTER_THRESHOLDS.repetitiveConsecutiveTokenMin ||
+    (
+      maxTokenCount >= SILENCE_FILTER_THRESHOLDS.repetitiveTokenMinOccurrences &&
+      maxTokenCount / tokens.length >= SILENCE_FILTER_THRESHOLDS.repetitiveTokenRatio
+    )
+  );
+}
+
+function countScriptFamilies(text: string): number {
+  let families = 0;
+
+  if (/[\p{Script=Hangul}]/u.test(text)) {
+    families += 1;
+  }
+  if (/[\p{Script=Latin}]/u.test(text)) {
+    families += 1;
+  }
+  if (/[\p{Script=Cyrillic}]/u.test(text)) {
+    families += 1;
+  }
+  if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)) {
+    families += 1;
+  }
+
+  return families;
+}
+
+function isSuspiciousMixedScriptGibberish(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (trimmed.includes("�")) {
+    return true;
+  }
+
+  const tokens = extractWordTokens(trimmed);
+  return (
+    trimmed.length <= SILENCE_FILTER_THRESHOLDS.mixedScriptShortTextMaxChars &&
+    tokens.length <= SILENCE_FILTER_THRESHOLDS.mixedScriptShortTextMaxTokens &&
+    countScriptFamilies(trimmed) >= SILENCE_FILTER_THRESHOLDS.mixedScriptFamilyMin
+  );
 }
 
 function analyzeSilence(
@@ -221,6 +300,25 @@ function analyzeSilence(
     isLikelyOutroHallucination(text)
   ) {
     return { isLikelySilence: true, reason: "rule_e_long_chunk_outro_hallucination" };
+  }
+
+  // Rule F: weak-signal chunk dominated by repeated tokens.
+  if (
+    hasRms &&
+    avgRms! < SILENCE_FILTER_THRESHOLDS.weakSignalRms &&
+    (options.durationSeconds ?? 0) >= SILENCE_FILTER_THRESHOLDS.longChunkMinSeconds &&
+    hasSuspiciousTokenRepetition(text)
+  ) {
+    return { isLikelySilence: true, reason: "rule_f_low_signal_repetition" };
+  }
+
+  // Rule G: weak-signal chunk with obvious encoding/script corruption.
+  if (
+    hasRms &&
+    avgRms! < SILENCE_FILTER_THRESHOLDS.weakSignalRms &&
+    isSuspiciousMixedScriptGibberish(text)
+  ) {
+    return { isLikelySilence: true, reason: "rule_g_low_signal_mixed_script_gibberish" };
   }
 
   return { isLikelySilence: false };
