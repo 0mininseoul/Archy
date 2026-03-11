@@ -1551,7 +1551,7 @@ const notionMetricsDataSourceCache = {
 const NOTION_METRIC_PROPERTY_ALIASES = Object.freeze({
   totalSignups: ["유저 수"],
   dailyRecordings: ["녹음 횟수", "금일 녹음 횟수"],
-  dailyRecordingUsers: ["녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"],
+  dailyRecordingUsers: ["DAU", "녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"],
   conversionRate: ["가입전환율"],
   onboarding: ["온보딩율"],
   pwa: ["PWA 설치율"],
@@ -1888,7 +1888,7 @@ export async function getNotionMetricsByLabel(label) {
     label,
     totalSignups: getNumber("totalSignups", ["유저 수"]),
     dailyRecordings: getNumber("dailyRecordings", ["녹음 횟수", "금일 녹음 횟수"]),
-    dailyRecordingUsers: getNumber("dailyRecordingUsers", ["녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"]),
+    dailyRecordingUsers: getNumber("dailyRecordingUsers", ["DAU", "녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"]),
     conversionRate: getNumber("conversionRate", ["가입전환율"]),
     onboardingRate: getNumber("onboarding", ["온보딩율"]),
     pwaRate: getNumber("pwa", ["PWA 설치율"]),
