@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "analyze:recording-summaries": "node scripts/analyze-recording-summary-compression.mjs",
     "backfill:groq-audio-budget": "node scripts/backfill-groq-audio-budget.mjs",
     "backfill:amplitude-signup-mappings": "node scripts/backfill-amplitude-signup-mappings.mjs",
     "backfill:notion-engagement-metrics": "node scripts/backfill-notion-engagement-metrics.mjs",

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { buildUniversalPrompt } from "@/lib/prompts";
+import { buildUniversalPrompt, getSummaryDetailRequirements } from "@/lib/prompts";
 import { sanitizeTranscriptText } from "@/lib/utils/transcript";
 
 export interface FormatResult {
@@ -58,6 +58,33 @@ const PROBLEMATIC_RESPONSE_PATTERNS = {
   ],
 };
 
+function normalizeInlineText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getMinimumDetailedContentLength(transcriptLength: number): number {
+  return getSummaryDetailRequirements(transcriptLength).minContentLength;
+}
+
+function buildShortResponseRetryPrompt(
+  basePrompt: string,
+  transcriptLength: number,
+  actualContentLength: number
+): string {
+  const requirements = getSummaryDetailRequirements(transcriptLength);
+
+  return `${basePrompt}
+
+## 재작성 지시
+이전 응답은 ${actualContentLength}자로 너무 짧았습니다. 이번에는 아래 조건을 반드시 지키세요.
+- [CONTENT] 본문은 최소 ${requirements.minContentLength}자 이상으로 작성하세요.
+- "## 핵심 요약"은 ${requirements.coreBulletCount} bullet 이상으로 작성하세요.
+- 본문은 ${requirements.bodySectionCount} 섹션 이상으로 구성하세요.
+- 각 섹션에는 ${requirements.perSectionBulletCount}개의 구체 bullet 또는 그에 준하는 상세 설명을 포함하세요.
+- 일반적인 결론, 당위, 감상, 메타 코멘트로 분량을 채우지 말고 날짜, 수치, 규칙, 예시, 절차, 예외를 더 많이 보존하세요.
+- 강의/전문 설명이면 개념 정의, 원리, 단계, 계산 예시를 더 자세히 적고, 회의/브레인스토밍이면 결정 배경, 비용, 리스크, 다음 액션을 더 구체적으로 적으세요.`;
+}
+
 /**
  * Check if the AI response is problematic and needs retry
  */
@@ -68,6 +95,9 @@ function isProblematicResponse(
 ): { isProblematic: boolean; reason: string } {
   const trimmedTitle = title.trim();
   const trimmedContent = content.trim();
+  const normalizedTranscript = normalizeInlineText(originalTranscript);
+  const normalizedContentLength = normalizeInlineText(trimmedContent).length;
+  const minimumDetailedContentLength = getMinimumDetailedContentLength(normalizedTranscript.length);
 
   // Check for placeholder text
   for (const pattern of PROBLEMATIC_RESPONSE_PATTERNS.placeholder) {
@@ -99,11 +129,10 @@ function isProblematicResponse(
 
   // Check if content is just raw transcript copy
   const normalizedContent = trimmedContent
-    .replace(/^###\s*📌\s*(3줄\s*)?핵심\s*요약\s*\n+/i, "")
+    .replace(/^(###\s*📌\s*(3줄\s*)?핵심\s*요약|##\s*핵심\s*요약)\s*\n+/i, "")
     .replace(/^##\s*.*\n+/gm, "")
     .replace(/^-\s*/gm, "")
     .trim();
-  const normalizedTranscript = originalTranscript.trim();
 
   if (
     normalizedContent === normalizedTranscript ||
@@ -120,6 +149,14 @@ function isProblematicResponse(
     normalizedTitleCheck.length > 10
   ) {
     return { isProblematic: true, reason: "title_is_transcript" };
+  }
+
+  if (
+    minimumDetailedContentLength > 0 &&
+    normalizedTranscript.length >= 1200 &&
+    normalizedContentLength < minimumDetailedContentLength
+  ) {
+    return { isProblematic: true, reason: "too_short_for_transcript" };
   }
 
   return { isProblematic: false, reason: "" };
@@ -171,8 +208,9 @@ function parseResponse(fullResponse: string): { title: string; content: string }
 
   // If content still starts with tags, extract just the content part
   if (content.startsWith("[")) {
-    const contentStart = content.indexOf("### ");
-    if (contentStart !== -1) {
+    const contentHeadingMatch = content.match(/(^|\n)(##+\s+)/);
+    if (contentHeadingMatch && typeof contentHeadingMatch.index === "number") {
+      const contentStart = contentHeadingMatch.index + contentHeadingMatch[1].length;
       content = content.substring(contentStart);
     }
   }
@@ -192,7 +230,8 @@ async function callOpenAI(
     messages: [
       {
         role: "system",
-        content: `당신은 녹취록을 분석하고 구조화된 문서로 정리하는 전문가입니다.
+        content: `당신은 녹취록을 분석해 실무에서 다시 참고할 수 있는 구조화 문서로 정리하는 전문가입니다.
+과도하게 압축하지 말고, 긴 녹취와 전문 지식 설명은 충분히 상세하게 정리하세요.
 사용자가 제공하는 프롬프트의 지시사항을 정확히 따라 [TITLE]과 [CONTENT] 형식으로 응답하세요.`,
       },
       {
@@ -301,9 +340,10 @@ export async function formatDocument(
     console.log("[Formatting] Using universal prompt");
   }
 
-  const MAX_RETRIES = 2;
+  const MAX_RETRIES = 3;
   let lastError: Error | null = null;
   let lastReason = "";
+  let attemptPrompt = prompt;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -321,7 +361,7 @@ export async function formatDocument(
 
       // Call OpenAI with timeout
       const fullResponse = await Promise.race([
-        callOpenAI(openai, prompt),
+        callOpenAI(openai, attemptPrompt),
         timeoutPromise,
       ]);
 
@@ -351,6 +391,13 @@ export async function formatDocument(
         lastReason = reason;
 
         if (attempt < MAX_RETRIES) {
+          if (reason === "too_short_for_transcript") {
+            attemptPrompt = buildShortResponseRetryPrompt(
+              prompt,
+              trimmedTranscript.length,
+              normalizeInlineText(content).length
+            );
+          }
           // Wait before retrying
           await new Promise((resolve) => setTimeout(resolve, 2000));
           continue;
