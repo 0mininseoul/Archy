@@ -1,15 +1,23 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n";
 import { useState } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
+import { USAGE_RESET_TIME_ZONE } from "@/lib/usage-cycle";
 
 interface AccountSectionProps {
   email: string;
   name?: string | null;
   avatarUrl?: string | null;
-  usage: { used: number; limit: number | null; isPro?: boolean; proDaysRemaining?: number | null };
+  usage: {
+    used: number;
+    limit: number | null;
+    isPro?: boolean;
+    proDaysRemaining?: number | null;
+    nextResetAt?: string | null;
+  };
 }
 
 const PlanManagementModal = dynamic(
@@ -17,9 +25,27 @@ const PlanManagementModal = dynamic(
   { ssr: false }
 );
 
+function formatNextResetAt(nextResetAt: string, locale: Locale): string {
+  return new Intl.DateTimeFormat(locale === "ko" ? "ko-KR" : "en-US", {
+    timeZone: USAGE_RESET_TIME_ZONE,
+    month: locale === "ko" ? "long" : "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).format(new Date(nextResetAt));
+}
+
 export function AccountSection({ email, name, avatarUrl, usage }: AccountSectionProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const nextResetLabel = usage.nextResetAt
+    ? t.settings.account.nextReset.replace(
+        "{date}",
+        formatNextResetAt(usage.nextResetAt, locale)
+      )
+    : null;
 
   return (
     <>
@@ -84,10 +110,15 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
         <div className="mt-6">
           {usage.isPro ? (
             // Pro users - show unlimited
-            <div className="flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl">
-              <span className="text-lg">✨</span>
-              <span className="text-sm font-medium text-purple-700">{t.settings.account.unlimited}</span>
-            </div>
+            <>
+              <div className="flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl">
+                <span className="text-lg">✨</span>
+                <span className="text-sm font-medium text-purple-700">{t.settings.account.unlimited}</span>
+              </div>
+              {nextResetLabel && (
+                <p className="mt-3 text-center text-xs text-slate-500">{nextResetLabel}</p>
+              )}
+            </>
           ) : (
             // Free users - show usage bar
             <>
@@ -101,6 +132,9 @@ export function AccountSection({ email, name, avatarUrl, usage }: AccountSection
                 <span>{usage.used}분 사용</span>
                 <span className="text-slate-500">{usage.limit}분 사용가능</span>
               </div>
+              {nextResetLabel && (
+                <p className="mt-3 text-xs text-slate-500">{nextResetLabel}</p>
+              )}
             </>
           )}
         </div>

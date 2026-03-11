@@ -3,6 +3,7 @@ import { MONTHLY_MINUTES_LIMIT } from "@/lib/types/database";
 import { formatKSTDate } from "@/lib/utils";
 import { hasUnlimitedUsage } from "@/lib/promo";
 import { cleanupStaleRecordings } from "@/lib/services/stale-recordings";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 
 interface StartSessionResponse {
   sessionId: string;
@@ -35,7 +36,17 @@ export const POST = withAuth<StartSessionResponse>(
 
     // 유저 데이터와 기존 세션을 병렬로 조회 (속도 최적화)
     const [userResult, sessionResult] = await Promise.all([
-      supabase.from("users").select("monthly_minutes_used, bonus_minutes, promo_expires_at").eq("id", user.id).single(),
+      loadUserWithUsageReset<{
+        monthly_minutes_used: number;
+        bonus_minutes: number;
+        promo_expires_at?: string | null;
+        last_reset_at: string;
+        created_at: string;
+      }>(
+        supabase,
+        user.id,
+        "monthly_minutes_used, bonus_minutes, promo_expires_at, last_reset_at, created_at"
+      ),
       supabase
         .from("recordings")
         .select("id, duration_seconds, last_chunk_index, session_paused_at")
@@ -48,6 +59,11 @@ export const POST = withAuth<StartSessionResponse>(
 
     const userData = userResult.data;
     const existingSession = sessionResult.data;
+
+    if (userResult.error) {
+      console.error("[StartSession] Failed to load user:", userResult.error);
+      return errorResponse("Failed to load user", 500);
+    }
 
     if (!userData) {
       return errorResponse("User not found", 404);

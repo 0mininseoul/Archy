@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { getProStatus } from "@/lib/promo";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 
 export const runtime = "edge";
 
@@ -17,11 +18,17 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: userData, error } = await supabase
-      .from("users")
-      .select("monthly_minutes_used, last_reset_at, bonus_minutes, promo_expires_at")
-      .eq("id", user.id)
-      .single();
+    const { data: userData, error, usageCycle } = await loadUserWithUsageReset<{
+      monthly_minutes_used: number;
+      last_reset_at: string;
+      bonus_minutes: number;
+      promo_expires_at?: string | null;
+      created_at: string;
+    }>(
+      supabase,
+      user.id,
+      "monthly_minutes_used, last_reset_at, bonus_minutes, promo_expires_at, created_at"
+    );
 
     if (error || !userData) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -33,6 +40,7 @@ export async function GET() {
       used: userData.monthly_minutes_used,
       limit: proStatus.isPro ? null : 350 + (userData.bonus_minutes || 0),
       lastReset: userData.last_reset_at,
+      nextReset: usageCycle?.nextResetAtIso || null,
       isPro: proStatus.isPro,
       proDaysRemaining: proStatus.daysRemaining,
     });

@@ -209,6 +209,7 @@ export const en = {
         used: "Used",
         proExpires: "Expires in {days} days",
         unlimited: "Unlimited usage",
+        nextReset: "Next reset: {date}",
       },
       invite: {
         title: "Invite Friends",

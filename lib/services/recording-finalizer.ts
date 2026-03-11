@@ -5,6 +5,7 @@ import {
   processFromTranscripts,
 } from "@/lib/services/recording-processor";
 import { hasUnlimitedUsage } from "@/lib/promo";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 
 type FinalizeSessionStatus = Extract<
   Recording["status"],
@@ -121,7 +122,7 @@ export async function finalizeRecordingSession(
 
   const [{ data: userData, error: userError }, { data: session, error: sessionError }] =
     await Promise.all([
-      supabase.from("users").select("*").eq("id", userId).single(),
+      loadUserWithUsageReset<User>(supabase, userId, "*"),
       supabase
         .from("recordings")
         .select("id, title, status, transcript, last_chunk_index, format")

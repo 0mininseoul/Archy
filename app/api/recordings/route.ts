@@ -3,16 +3,22 @@ import { Recording, RecordingListItem, User, MONTHLY_MINUTES_LIMIT } from "@/lib
 import { processRecording, handleProcessingError } from "@/lib/services/recording-processor";
 import { formatKSTDate } from "@/lib/utils";
 import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 
 // POST /api/recordings - Upload and process recording
 export const POST = withAuth<{ recording: Pick<Recording, "id" | "title" | "status"> }>(
   async ({ user, supabase, request }) => {
     // Get user data
-    const { data: userData } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+    const { data: userData, error: userError } = await loadUserWithUsageReset<User>(
+      supabase,
+      user.id,
+      "*"
+    );
+
+    if (userError) {
+      console.error("[Recordings API] Failed to load user:", userError);
+      return errorResponse("Failed to load user", 500);
+    }
 
     if (!userData) {
       return errorResponse("User not found", 404);

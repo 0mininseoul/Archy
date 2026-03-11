@@ -210,6 +210,7 @@ export const ko = {
         used: "사용됨",
         proExpires: "{days}일 후 만료",
         unlimited: "무제한 사용 가능",
+        nextReset: "다음 갱신 예정: {date}",
       },
       invite: {
         title: "친구 초대",

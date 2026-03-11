@@ -1,5 +1,7 @@
 import { withAuth, successResponse } from "@/lib/api";
 import { getProStatus } from "@/lib/promo";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
+import { User } from "@/lib/types/database";
 
 export const runtime = "edge";
 
@@ -8,6 +10,27 @@ function isMissingNotionIconColumnError(error: unknown): boolean {
     const message = "message" in error ? String((error as { message?: unknown }).message || "") : "";
     return message.includes("notion_save_target_icon_") && message.includes("does not exist");
 }
+
+type UserRouteData = Pick<
+    User,
+    | "created_at"
+    | "last_reset_at"
+    | "monthly_minutes_used"
+    | "bonus_minutes"
+    | "promo_expires_at"
+    | "push_enabled"
+    | "save_audio_enabled"
+    | "notion_access_token"
+    | "notion_database_id"
+    | "notion_save_target_type"
+    | "notion_save_target_title"
+    | "notion_save_target_icon_emoji"
+    | "notion_save_target_icon_url"
+    | "slack_access_token"
+    | "google_access_token"
+    | "google_folder_id"
+    | "google_folder_name"
+>;
 
 // GET /api/user - Get comprehensive user data for caching
 export const GET = withAuth(async ({ user, supabase }) => {
@@ -26,8 +49,10 @@ export const GET = withAuth(async ({ user, supabase }) => {
       push_enabled,
       save_audio_enabled,
       monthly_minutes_used,
+      last_reset_at,
       bonus_minutes,
-      promo_expires_at
+      promo_expires_at,
+      created_at
     `;
     const selectWithoutIcon = `
       email,
@@ -42,25 +67,23 @@ export const GET = withAuth(async ({ user, supabase }) => {
       push_enabled,
       save_audio_enabled,
       monthly_minutes_used,
+      last_reset_at,
       bonus_minutes,
-      promo_expires_at
+      promo_expires_at,
+      created_at
     `;
 
-    const withIconResult = await supabase
-        .from("users")
-        .select(selectWithIcon)
-        .eq("id", user.id)
-        .single();
-    let userData = withIconResult.data as Record<string, unknown> | null;
-    let userError: unknown = withIconResult.error;
+    let { data: userData, error: userError, usageCycle } = await loadUserWithUsageReset<UserRouteData>(
+        supabase,
+        user.id,
+        selectWithIcon
+    );
+
     if (userError && isMissingNotionIconColumnError(userError)) {
-        const fallback = await supabase
-            .from("users")
-            .select(selectWithoutIcon)
-            .eq("id", user.id)
-            .single();
-        userData = fallback.data as Record<string, unknown> | null;
+        const fallback = await loadUserWithUsageReset<UserRouteData>(supabase, user.id, selectWithoutIcon);
+        userData = fallback.data;
         userError = fallback.error;
+        usageCycle = fallback.usageCycle;
     }
 
     const proStatus = getProStatus(userData || null);
@@ -83,6 +106,7 @@ export const GET = withAuth(async ({ user, supabase }) => {
         save_audio_enabled: userData?.save_audio_enabled || false,
         monthly_minutes_used: userData?.monthly_minutes_used || 0,
         bonus_minutes: userData?.bonus_minutes || 0,
+        next_reset_at: usageCycle?.nextResetAtIso || null,
         is_pro: proStatus.isPro,
         pro_days_remaining: proStatus.daysRemaining,
     });

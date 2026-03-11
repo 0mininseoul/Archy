@@ -105,7 +105,8 @@ export function SettingsClient() {
     limit: number | null;
     isPro?: boolean;
     proDaysRemaining?: number | null;
-  }>({ used: 0, limit: 350 });
+    nextResetAt?: string | null;
+  }>({ used: 0, limit: 350, nextResetAt: null });
   const [saveTarget, setSaveTarget] = useState<NotionSaveTarget | null>(null);
   const [googleFolder, setGoogleFolder] = useState<{ id: string | null; name: string | null }>({
     id: null,
@@ -152,6 +153,7 @@ export function SettingsClient() {
         limit: settings.isPro ? null : 350 + settings.bonusMinutes,
         isPro: settings.isPro,
         proDaysRemaining: settings.proDaysRemaining,
+        nextResetAt: settings.nextResetAt,
       });
       setPushEnabled(settings.pushEnabled);
       setAudioStorageEnabled(settings.saveAudioEnabled);

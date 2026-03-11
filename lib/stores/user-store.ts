@@ -20,6 +20,7 @@ interface UserSettings {
     saveAudioEnabled: boolean;
     monthlyMinutesUsed: number;
     bonusMinutes: number;
+    nextResetAt: string | null;
     notionDatabaseId: string | null;
     notionSaveTargetType: "database" | "page" | null;
     notionSaveTargetTitle: string | null;
@@ -93,6 +94,7 @@ export const useUserStore = create<UserStore>((set, get) => ({
                     saveAudioEnabled: userData.save_audio_enabled || false,
                     monthlyMinutesUsed: userData.monthly_minutes_used || 0,
                     bonusMinutes: userData.bonus_minutes || 0,
+                    nextResetAt: userData.next_reset_at || null,
                     notionDatabaseId: userData.notion_database_id || null,
                     notionSaveTargetType: userData.notion_save_target_type || null,
                     notionSaveTargetTitle: userData.notion_save_target_title || null,

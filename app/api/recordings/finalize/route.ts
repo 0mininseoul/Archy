@@ -10,6 +10,7 @@ import {
   finalizeRecordingSession,
   type FinalizeRecordingSessionResult,
 } from "@/lib/services/recording-finalizer";
+import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 
 interface ChunkTranscript {
   chunkIndex: number;
@@ -61,11 +62,16 @@ export const POST = withAuth<FinalizeResponse>(
       return errorResponse("Either sessionId or transcripts array is required", 400);
     }
 
-    const { data: userData } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+    const { data: userData, error: userError } = await loadUserWithUsageReset<User>(
+      supabase,
+      user.id,
+      "*"
+    );
+
+    if (userError) {
+      console.error("[Finalize] Failed to load user:", userError);
+      return errorResponse("Failed to load user", 500);
+    }
 
     if (!userData) {
       return errorResponse("User not found", 404);
