@@ -7,6 +7,12 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { google } from "googleapis";
 import { Client as NotionClient } from "@notionhq/client";
+import {
+  createStrategicReviewRun,
+  getActiveStrategicReviewPromptVersion,
+  logGeminiApiCall,
+  updateStrategicReviewRun,
+} from "./strategic-review-store.mjs";
 
 export const KST_TIMEZONE = "Asia/Seoul";
 export const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
@@ -2024,12 +2030,112 @@ function extractBlockText(block) {
   return "";
 }
 
+const STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS = Object.freeze({
+  OPERATOR_TASK: "operator_task",
+  INTERNAL_NOTE: "internal_note",
+  PRODUCT_WORKSPACE_NOTE: "product_workspace_note",
+});
+
+const STRATEGIC_INTERNAL_SIGNAL_PATH_TYPES = new Set([
+  "child_page",
+  "child_database",
+  "heading_1",
+  "heading_2",
+  "heading_3",
+  "toggle",
+  "callout",
+]);
+
+const STRATEGIC_INTERNAL_SIGNAL_OMIT_TYPES = new Set(["divider", "child_database"]);
+const ARCHY_PRODUCT_WORKSPACE_TITLE = "아키(archy) | ai 노트테이커";
+
+function normalizeStrategicPathTitle(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getStrategicSignalPathTitle(block, text) {
+  if (!block || !STRATEGIC_INTERNAL_SIGNAL_PATH_TYPES.has(block.type)) return "";
+  return clipText(normalizeStrategicPathTitle(text), 90);
+}
+
+function computeStrategicSignalConfidence({ pathTitles, classification, nodeType }) {
+  const depth = Array.isArray(pathTitles) ? pathTitles.length : 0;
+  if (depth === 0) return 0.35;
+  if (classification === STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.PRODUCT_WORKSPACE_NOTE) {
+    return depth >= 2 ? 0.95 : 0.85;
+  }
+  if (classification === STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.INTERNAL_NOTE) {
+    if (nodeType === "paragraph" && depth <= 1) return 0.72;
+    return depth >= 2 ? 0.84 : 0.76;
+  }
+  return 0.8;
+}
+
+function classifyStrategicReviewInternalSignal({ pathTitles = [] } = {}) {
+  const normalizedPath = pathTitles.map((title) => normalizeStrategicPathTitle(title).toLowerCase());
+  if (normalizedPath.includes(ARCHY_PRODUCT_WORKSPACE_TITLE)) {
+    return STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.PRODUCT_WORKSPACE_NOTE;
+  }
+  return STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.INTERNAL_NOTE;
+}
+
+function buildStrategicReviewInternalSignalRecord({
+  rootPage = null,
+  pathTitles = [],
+  block = null,
+  text = "",
+} = {}) {
+  const nodeType = String(block?.type || "unknown");
+  const nodeText = clipText(normalizeStrategicPathTitle(text), 180);
+  if (!nodeText && STRATEGIC_INTERNAL_SIGNAL_OMIT_TYPES.has(nodeType)) {
+    return null;
+  }
+
+  const cleanPathTitles = pathTitles
+    .map((item) => clipText(normalizeStrategicPathTitle(item), 90))
+    .filter(Boolean);
+  const classification = classifyStrategicReviewInternalSignal({ pathTitles: cleanPathTitles });
+  const confidence = computeStrategicSignalConfidence({
+    pathTitles: cleanPathTitles,
+    classification,
+    nodeType,
+  });
+
+  return {
+    rootId: rootPage?.id || null,
+    rootTitle: rootPage?.title || "",
+    pathTitles: cleanPathTitles,
+    nodeType,
+    nodeText,
+    lastEdited: block?.last_edited_time || null,
+    classification,
+    allowedUse:
+      classification === STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.PRODUCT_WORKSPACE_NOTE
+        ? ["operator_context", "product_workspace_preparation", "internal_review_topic"]
+        : ["operator_context", "document_organization_context", "internal_review_topic"],
+    forbiddenUse: [
+      "customer_usage_evidence",
+      "product_demand_evidence",
+      "why_now_without_kpi_or_operator_task",
+    ],
+    confidence: Number(confidence.toFixed(2)),
+  };
+}
+
 async function collectRecentEditedBlocks(
   notion,
-  rootBlockId,
+  rootPage,
   { limit = 8, maxBlocks = 400, maxDepth = 6 } = {}
 ) {
-  const queue = [{ blockId: rootBlockId, depth: 0 }];
+  const queue = [
+    {
+      blockId: rootPage?.id,
+      depth: 0,
+      pathTitles: rootPage?.title ? [rootPage.title] : [],
+    },
+  ];
   const collected = [];
   let scanned = 0;
 
@@ -2048,15 +2154,29 @@ async function collectRecentEditedBlocks(
       for (const block of result.results) {
         scanned += 1;
         const text = extractBlockText(block);
-        collected.push({
-          id: block.id,
-          type: block.type,
-          text: text || `(텍스트 없음: ${block.type})`,
-          lastEdited: block.last_edited_time || null,
+        const blockPathTitle = getStrategicSignalPathTitle(block, text);
+        const nextPathTitles = blockPathTitle
+          ? [...current.pathTitles, blockPathTitle]
+          : [...current.pathTitles];
+        const record = buildStrategicReviewInternalSignalRecord({
+          rootPage,
+          pathTitles: nextPathTitles,
+          block,
+          text,
         });
+        if (record) {
+          collected.push({
+            id: block.id,
+            ...record,
+          });
+        }
 
         if (block.has_children && current.depth < maxDepth && scanned < maxBlocks) {
-          queue.push({ blockId: block.id, depth: current.depth + 1 });
+          queue.push({
+            blockId: block.id,
+            depth: current.depth + 1,
+            pathTitles: nextPathTitles,
+          });
         }
         if (scanned >= maxBlocks) break;
       }
@@ -2120,7 +2240,7 @@ async function getAscentumRecentEditContext(notion) {
       };
     }
 
-    const recentEdits = await collectRecentEditedBlocks(notion, page.id, {
+    const recentSignals = await collectRecentEditedBlocks(notion, page, {
       limit: 8,
       maxBlocks: 350,
       maxDepth: 6,
@@ -2131,29 +2251,33 @@ async function getAscentumRecentEditContext(notion) {
     if (page.lastEdited) {
       lines.push(`Ascentum 페이지 최근 수정: ${page.lastEdited}`);
     }
-    if (recentEdits.length > 0) {
-      lines.push("Ascentum 최근 편집 블록:");
+    if (recentSignals.length > 0) {
+      lines.push("Ascentum 최근 내부 신호:");
       lines.push(
-        ...recentEdits.map(
-          (edit, idx) =>
-            `${idx + 1}. [${edit.lastEdited}] (${edit.type}) ${String(edit.text || "").slice(0, 140)}`
+        ...recentSignals.map(
+          (signal, idx) =>
+            `${idx + 1}. [${signal.lastEdited}] (${signal.classification}/${signal.nodeType}) ${clipText(
+              signal.pathTitles.join(" > "),
+              120
+            )}${signal.nodeText ? ` :: ${clipText(signal.nodeText, 80)}` : ""}`
         )
       );
     } else {
-      lines.push("Ascentum 최근 편집 블록을 찾지 못했습니다.");
+      lines.push("Ascentum 최근 내부 신호를 찾지 못했습니다.");
     }
 
     return {
       found: true,
       page,
-      edits: recentEdits,
+      signals: recentSignals,
+      edits: recentSignals,
       text: lines.join("\n"),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
       found: false,
-      text: `Ascentum 최근 편집 조회 실패: ${message}`,
+      text: `Ascentum 최근 내부 신호 조회 실패: ${message}`,
       edits: [],
     };
   }
@@ -2164,12 +2288,16 @@ export async function getWorkProgressContext(targetYmd) {
   const page = await readWorkDbTargetPage(notion, targetYmd);
   const ascentum = await getAscentumRecentEditContext(notion);
   if (!page) {
-    const missingText = ["업무 DB 페이지를 찾지 못했습니다.", "", `[Ascentum 맥락]\n${ascentum.text}`].join("\n");
+    const missingText = ["업무 DB 페이지를 찾지 못했습니다.", "", `[내부 Notion 신호]\n${ascentum.text}`].join(
+      "\n"
+    );
     return {
       found: false,
       text: missingText,
+      summaryText: "업무 DB 페이지를 찾지 못했습니다.",
       completed: [],
       pending: [],
+      internalSignals: ascentum?.signals || [],
       ascentum,
     };
   }
@@ -2194,17 +2322,17 @@ export async function getWorkProgressContext(targetYmd) {
     lines.push(...pending.slice(0, 20).map((item, idx) => `${idx + 1}. ${item}`));
   }
 
-  lines.push("");
-  lines.push("[Ascentum 맥락]");
-  lines.push(ascentum.text);
+  const summaryText = lines.join("\n");
 
   return {
     found: true,
     page,
     completed,
     pending,
+    internalSignals: ascentum?.signals || [],
     ascentum,
-    text: lines.join("\n"),
+    summaryText,
+    text: [summaryText, "", "[내부 Notion 신호]", ascentum.text].join("\n"),
   };
 }
 
@@ -2267,16 +2395,18 @@ export async function generateGeminiText({
   timeoutMs = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 90000),
   maxRetries = Number(process.env.GEMINI_REQUEST_MAX_RETRIES || 1),
   onResponseMeta = null,
+  logContext = null,
 }) {
   const apiKey = getEnv("GEMINI_API_KEY");
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
-  )}:generateContent?key=${apiKey}`;
+  )}:generateContent`;
   const retries = Number.isFinite(maxRetries) && maxRetries >= 0 ? Math.floor(maxRetries) : 1;
   const normalizedThinkingLevel = normalizeThinkingLevel(thinkingLevel, null);
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     let statusCode = null;
+    const startedAtMs = Date.now();
     try {
       const generationConfig = {
         temperature,
@@ -2294,30 +2424,60 @@ export async function generateGeminiText({
         generationConfig.responseJsonSchema = responseJsonSchema;
       }
 
+      const requestBody = {
+        model: `models/${model}`,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: userPrompt }],
+          },
+        ],
+        generationConfig,
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
+      };
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
         signal: AbortSignal.timeout(timeoutMs),
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemInstruction }],
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: userPrompt }],
-            },
-          ],
-          generationConfig,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       statusCode = response.status;
       if (!response.ok) {
         const body = await response.text();
         const httpError = new Error(`Gemini API failed (${response.status}): ${body}`);
+        try {
+          await logGeminiApiCall({
+            component: logContext?.component || "ops-agent",
+            flow: logContext?.flow || "general",
+            tag: logContext?.tag || null,
+            runId: logContext?.runId || null,
+            model,
+            status: "error",
+            systemInstruction,
+            requestJson: requestBody,
+            responseJson: {
+              statusCode: response.status,
+              body,
+            },
+            errorMessage: httpError.message,
+            latencyMs: Date.now() - startedAtMs,
+            metadata: {
+              ...(logContext?.metadata || {}),
+              attempt: attempt + 1,
+              maxAttempts: retries + 1,
+            },
+          });
+        } catch {
+          // Logging must not break the primary request flow.
+        }
+        httpError.loggedToStore = true;
         if (attempt < retries && isRetryableGeminiFailure(httpError, response.status)) {
           const retryDelayMs = getGeminiRetryDelayMs(attempt);
           logDailyEvent("gemini.retry", {
@@ -2341,6 +2501,29 @@ export async function generateGeminiText({
         .join("\n");
       const finishReason = data?.candidates?.[0]?.finishReason || null;
       const usageMetadata = data?.usageMetadata || null;
+      try {
+        await logGeminiApiCall({
+          component: logContext?.component || "ops-agent",
+          flow: logContext?.flow || "general",
+          tag: logContext?.tag || null,
+          runId: logContext?.runId || null,
+          model,
+          status: "success",
+          systemInstruction,
+          requestJson: requestBody,
+          responseJson: data,
+          finishReason,
+          usageMetadata,
+          latencyMs: Date.now() - startedAtMs,
+          metadata: {
+            ...(logContext?.metadata || {}),
+            attempt: attempt + 1,
+            maxAttempts: retries + 1,
+          },
+        });
+      } catch {
+        // Logging must not break the primary request flow.
+      }
       if (typeof onResponseMeta === "function") {
         try {
           onResponseMeta({
@@ -2357,6 +2540,51 @@ export async function generateGeminiText({
 
       return text || "";
     } catch (error) {
+      if (!error?.loggedToStore) {
+        try {
+          await logGeminiApiCall({
+            component: logContext?.component || "ops-agent",
+            flow: logContext?.flow || "general",
+            tag: logContext?.tag || null,
+            runId: logContext?.runId || null,
+            model,
+            status: "error",
+            systemInstruction,
+            requestJson: {
+              model: `models/${model}`,
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: userPrompt }],
+                },
+              ],
+              generationConfig: {
+                temperature,
+                maxOutputTokens,
+                ...(normalizedThinkingLevel
+                  ? { thinkingConfig: { thinkingLevel: normalizedThinkingLevel } }
+                  : {}),
+                ...(responseMimeType ? { responseMimeType } : {}),
+                ...(responseJsonSchema ? { responseJsonSchema } : {}),
+              },
+              systemInstruction: {
+                parts: [{ text: systemInstruction }],
+              },
+            },
+            responseJson: statusCode ? { statusCode } : null,
+            errorMessage: safeErrorMessage(error),
+            latencyMs: Date.now() - startedAtMs,
+            metadata: {
+              ...(logContext?.metadata || {}),
+              attempt: attempt + 1,
+              maxAttempts: retries + 1,
+              phase: "catch",
+            },
+          });
+        } catch {
+          // Logging must not break the primary request flow.
+        }
+      }
       if (attempt < retries && isRetryableGeminiFailure(error, statusCode)) {
         const retryDelayMs = getGeminiRetryDelayMs(attempt);
         logDailyEvent("gemini.retry", {
@@ -2403,6 +2631,7 @@ async function generateStrategicReviewText({
   maxRetries,
   stageLabel = "strategic_review",
   profileId = "unknown",
+  runId = null,
 }) {
   let responseMeta = null;
   const text = await generateGeminiText({
@@ -2435,10 +2664,21 @@ async function generateStrategicReviewText({
         responseMimeType,
       });
     },
+    logContext: {
+      component: "daily-runner",
+      flow: "strategic_review_generation",
+      tag: stageLabel,
+      runId,
+      metadata: {
+        profileId,
+        responseMimeType,
+      },
+    },
   });
 
   const usageMetadata = responseMeta?.usageMetadata || null;
   return {
+    rawText: text || "",
     text: text || "",
     model,
     finishReason: responseMeta?.finishReason ?? null,
@@ -2477,58 +2717,81 @@ function buildStrategicReviewInput({
   const previousRates = previousMetrics?.rates || {};
   const completed = Array.isArray(workProgress?.completed) ? workProgress.completed : [];
   const pending = Array.isArray(workProgress?.pending) ? workProgress.pending : [];
-  const ascentumEdits = Array.isArray(workProgress?.ascentum?.edits)
-    ? workProgress.ascentum.edits
-    : [];
+  const internalSignals = Array.isArray(workProgress?.internalSignals)
+    ? workProgress.internalSignals
+    : Array.isArray(workProgress?.ascentum?.signals)
+      ? workProgress.ascentum.signals
+      : Array.isArray(workProgress?.ascentum?.edits)
+        ? workProgress.ascentum.edits
+        : [];
+  const workSummary = String(
+    workProgress?.summaryText || workProgress?.taskSummary || workProgress?.text || ""
+  ).trim();
 
-  const compactEdits = ascentumEdits.slice(0, profile.editLimit).map((edit) => {
-    const when = edit?.lastEdited ? String(edit.lastEdited) : "";
-    const text = clipText(edit?.text || "", profile.editChars);
-    return when ? `[${when}] ${text}` : text;
-  });
+  const compactSignals = internalSignals.slice(0, profile.editLimit).map((signal) => ({
+    rootId: signal?.rootId || null,
+    rootTitle: clipText(signal?.rootTitle || "", 90),
+    pathTitles: Array.isArray(signal?.pathTitles)
+      ? signal.pathTitles.map((item) => clipText(item, 90)).filter(Boolean)
+      : [],
+    nodeType: String(signal?.nodeType || "unknown"),
+    nodeText: clipText(signal?.nodeText || "", profile.editChars),
+    lastEdited: signal?.lastEdited ? String(signal.lastEdited) : null,
+    classification: String(signal?.classification || STRATEGIC_INTERNAL_SIGNAL_CLASSIFICATIONS.INTERNAL_NOTE),
+    allowedUse: Array.isArray(signal?.allowedUse) ? signal.allowedUse.slice(0, 3) : [],
+    forbiddenUse: Array.isArray(signal?.forbiddenUse) ? signal.forbiddenUse.slice(0, 3) : [],
+    confidence:
+      Number.isFinite(Number(signal?.confidence)) ? Number(Number(signal.confidence).toFixed(2)) : null,
+  }));
 
   const input = {
     date: targetYmd,
-    kpis: {
-      totalSignups: buildStrategicReviewDeltaSnapshot(
-        metrics?.counts?.totalSignups,
-        previousCounts.totalSignups
-      ),
-      signupConversionRate: buildStrategicReviewDeltaSnapshot(
-        amplitudeConversion?.currentRate,
-        amplitudeConversion?.previousRate
-      ),
-      onboardingRate: buildStrategicReviewDeltaSnapshot(
-        metrics?.rates?.onboarding,
-        previousRates.onboarding
-      ),
-      pwaRate: buildStrategicReviewDeltaSnapshot(metrics?.rates?.pwa, previousRates.pwa),
-      integrationRate: buildStrategicReviewDeltaSnapshot(
-        metrics?.rates?.integrationAny,
-        previousRates.integrationAny
-      ),
-      activationRate30d: buildStrategicReviewDeltaSnapshot(
-        metrics?.rates?.activation30d,
-        previousRates.activation30d
-      ),
-      paymentRate: buildStrategicReviewDeltaSnapshot(metrics?.rates?.payment, previousRates.payment),
-    },
-    activity: {
-      dailyNewUsers: metrics?.counts?.dailyNewUsers ?? null,
-      dailyRecordings: metrics?.counts?.dailyRecordings ?? null,
-      heavyUsersTop3: (metrics?.heavyUserTop3 || []).slice(0, 3).map((item) => ({
-        name: item?.name || "unknown",
-        count: item?.count ?? 0,
-      })),
+    metrics: {
+      kpis: {
+        totalSignups: buildStrategicReviewDeltaSnapshot(
+          metrics?.counts?.totalSignups,
+          previousCounts.totalSignups
+        ),
+        signupConversionRate: buildStrategicReviewDeltaSnapshot(
+          amplitudeConversion?.currentRate,
+          amplitudeConversion?.previousRate
+        ),
+        onboardingRate: buildStrategicReviewDeltaSnapshot(
+          metrics?.rates?.onboarding,
+          previousRates.onboarding
+        ),
+        pwaRate: buildStrategicReviewDeltaSnapshot(metrics?.rates?.pwa, previousRates.pwa),
+        integrationRate: buildStrategicReviewDeltaSnapshot(
+          metrics?.rates?.integrationAny,
+          previousRates.integrationAny
+        ),
+        activationRate30d: buildStrategicReviewDeltaSnapshot(
+          metrics?.rates?.activation30d,
+          previousRates.activation30d
+        ),
+        paymentRate: buildStrategicReviewDeltaSnapshot(
+          metrics?.rates?.payment,
+          previousRates.payment
+        ),
+      },
+      activity: {
+        dailyNewUsers: metrics?.counts?.dailyNewUsers ?? null,
+        dailyRecordings: metrics?.counts?.dailyRecordings ?? null,
+        heavyUsersTop3: (metrics?.heavyUserTop3 || []).slice(0, 3).map((item) => ({
+          name: item?.name || "unknown",
+          count: item?.count ?? 0,
+        })),
+      },
     },
     workProgress: {
       completedCount: completed.length,
       pendingCount: pending.length,
       completedTop: completed.slice(0, profile.completedLimit),
       pendingTop: pending.slice(0, profile.pendingLimit),
-      recentEditsTop: compactEdits,
-      summary: clipText(workProgress?.text || "", profile.workSummaryChars),
+      summary: clipText(workSummary, profile.workSummaryChars),
+      summaryScope: "todo_db_only",
     },
+    internalSignals: compactSignals,
   };
 
   return {
@@ -2538,13 +2801,34 @@ function buildStrategicReviewInput({
   };
 }
 
-function buildStrategicReviewPrompt({ strategicInput }) {
+function buildStrategicReviewSystemInstruction({ promptVersion = null } = {}) {
+  const base = [
+    "너는 Archy 서비스의 전략 자문 에이전트다.",
+    "숫자 근거 중심으로 판단하며 과장/추측을 금지한다.",
+    "출력은 지정된 JSON 스키마만 반환한다.",
+    "전략 리뷰 입력의 internalSignals는 provenance가 붙은 운영자 내부 노션 신호다.",
+    "classification이 product_workspace_note여도 고객 사용 데이터나 제품 수요 증거로 오인하지 마라.",
+  ];
+  const suffix = String(promptVersion?.system_instruction_suffix || "").trim();
+  if (suffix) base.push(suffix);
+  return base.join(" ");
+}
+
+function buildStrategicReviewPrompt({ strategicInput, promptVersion = null }) {
   const lines = [
     "[프로젝트 맥락]",
     strategicInput.projectContext || "(없음)",
     "",
     "[운영 데이터(JSON)]",
     JSON.stringify(strategicInput.input, null, 2),
+    "",
+    "[Provenance 해석 규칙]",
+    "- internalSignals는 rootTitle/pathTitles/classification/allowedUse/forbiddenUse가 붙은 내부 신호다.",
+    "- internalSignals는 운영자 준비 중 주제, 내부 검토 흔적, 문서 정리 맥락으로만 사용할 수 있다.",
+    "- classification이 product_workspace_note여도 고객 사용량, 유저가 생성한 문서 누적, 실제 강의/미팅 데이터 축적의 근거로 해석하면 안 된다.",
+    "- '유저 데이터가 쌓이고 있다', '강의/미팅 텍스트가 제품에 누적되고 있다', '지금 테스트 적기' 같은 결론은 KPI 또는 product-side evidence 없이는 금지다.",
+    "- why_now는 metrics 또는 workProgress의 명시 작업과 직접 연결해야 하며, internalSignals 단독 근거를 금지한다.",
+    "- 근거가 부족하면 priority_actions 대신 data_check_requests로 넘겨라.",
     "",
     "[출력 규칙]",
     "아래 스키마의 JSON 객체만 출력해라. 코드펜스/설명문 금지.",
@@ -2564,10 +2848,16 @@ function buildStrategicReviewPrompt({ strategicInput }) {
     "- 과장 표현/추측 금지, 수치 근거 중심으로 명확하게 작성",
     "- 지나친 단문 압축 금지: 각 항목은 핵심 판단 + 근거를 함께 제시",
     "- 단순 나열 금지: 최소 2개 이상 지표를 서로 연결해 원인-결과 형태로 설명",
-    "- 업무 진행상황(summary/완료/미완료/최근편집)에서 최소 1개 이상을 근거로 반영",
-    "- 가능하면 완료/미완료 작업의 고유 작업명(또는 최근 편집 키워드)을 1개 이상 직접 언급",
+    "- workProgress(summary/completedTop/pendingTop)에서 최소 1개 이상을 근거로 반영",
+    "- 가능하면 완료/미완료 작업의 고유 작업명을 1개 이상 직접 언급",
+    "- internalSignals는 고객 사용 증거가 아니라 내부 준비/메모 맥락으로만 제한적으로 사용",
+    "- why_now는 metrics 또는 명시된 업무 항목과 직접 연결해야 하며, internalSignals 단독 근거를 금지",
     "- 상투적 표현(예: '지속 개선 필요')만 단독 사용 금지, 반드시 오늘 데이터 근거를 붙일 것",
   ];
+  const suffix = String(promptVersion?.prompt_instruction_suffix || "").trim();
+  if (suffix) {
+    lines.push("", "[추가 운영 지침]", suffix);
+  }
   return lines.join("\n");
 }
 
@@ -2717,6 +3007,9 @@ function renderStrategicReviewMarkdown(data) {
 
 export const strategicReviewInternals = Object.freeze({
   buildStrategicReviewInput,
+  buildStrategicReviewInternalSignalRecord,
+  classifyStrategicReviewInternalSignal,
+  buildStrategicReviewSystemInstruction,
   buildStrategicReviewPrompt,
   parseStrategicReviewJson,
   renderStrategicReviewMarkdown,
@@ -2796,6 +3089,8 @@ export async function generateDailyStrategicReview({
   previousMetrics,
   workProgress,
   targetYmd,
+  runId = null,
+  runYmd = null,
 }) {
   const startedAtMs = Date.now();
   const slaMs = toPositiveInt(process.env.GEMINI_STRATEGIC_REVIEW_SLA_MS, 300000, {
@@ -2849,11 +3144,24 @@ export async function generateDailyStrategicReview({
     "high"
   );
   const projectContext = await loadProjectContext();
-  const systemInstruction = [
-    "너는 Archy 서비스의 전략 자문 에이전트다.",
-    "숫자 근거 중심으로 판단하며 과장/추측을 금지한다.",
-    "출력은 지정된 JSON 스키마만 반환한다.",
-  ].join(" ");
+  const promptVersion = await getActiveStrategicReviewPromptVersion();
+  const systemInstruction = buildStrategicReviewSystemInstruction({ promptVersion });
+  const reviewRunKey = runId || `strategic_review_${targetYmd}_${randomUUID().slice(0, 8)}`;
+  const feedbackWindowEndAt = new Date(startedAtMs + 23 * 60 * 60 * 1000);
+  let reviewRunRecord = await createStrategicReviewRun({
+    runId: reviewRunKey,
+    runYmd: runYmd || targetYmd,
+    targetYmd,
+    status: "started",
+    promptVersionId: promptVersion?.id || null,
+    promptVersionLabel: promptVersion?.version_label || "v1_base",
+    systemInstruction,
+    feedbackWindowEndAt,
+    metadata: {
+      source: "daily_pipeline",
+      promptVersionLabel: promptVersion?.version_label || "v1_base",
+    },
+  });
 
   const profiles = [
     {
@@ -2900,6 +3208,7 @@ export async function generateDailyStrategicReview({
   let timeoutCount = 0;
   let lastFailure = null;
   let lastValidationReasons = [];
+  let lastAttemptContext = null;
 
   for (const profile of profiles) {
     const remainingMs = deadlineMs - Date.now();
@@ -2918,8 +3227,36 @@ export async function generateDailyStrategicReview({
       projectContext,
       contextProfile: profile.contextProfile,
     });
-    const userPrompt = buildStrategicReviewPrompt({ strategicInput });
+    const userPrompt = buildStrategicReviewPrompt({ strategicInput, promptVersion });
     const effectiveTimeoutMs = Math.max(1000, Math.min(profile.timeoutMs, remainingMs - 500));
+    lastAttemptContext = {
+      model: profile.model,
+      contextProfile: profile.contextProfile,
+      userPrompt,
+      inputPayload: strategicInput,
+      metadata: {
+        source: "daily_pipeline",
+        promptVersionLabel: promptVersion?.version_label || "v1_base",
+        profileId: profile.id,
+        contextProfile: profile.contextProfile,
+      },
+    };
+
+    if (reviewRunRecord) {
+      reviewRunRecord =
+        (await updateStrategicReviewRun(reviewRunKey, {
+          status: "started",
+          promptVersionId: promptVersion?.id || null,
+          promptVersionLabel: promptVersion?.version_label || "v1_base",
+          model: profile.model,
+          contextProfile: profile.contextProfile,
+          systemInstruction,
+          userPrompt,
+          inputPayload: strategicInput,
+          feedbackWindowEndAt,
+          metadata: lastAttemptContext.metadata,
+        })) || reviewRunRecord;
+    }
 
     logDailyEvent("strategic_review.profile_start", {
       profileId: profile.id,
@@ -2944,6 +3281,7 @@ export async function generateDailyStrategicReview({
         maxRetries,
         stageLabel: `strategic_review.${profile.id}`,
         profileId: profile.id,
+        runId: reviewRunKey,
       });
     } catch (error) {
       const message = safeErrorMessage(error).toLowerCase();
@@ -3016,6 +3354,7 @@ export async function generateDailyStrategicReview({
               maxRetries,
               stageLabel: `strategic_review.${profile.id}.retry_boost`,
               profileId: `${profile.id}_retry`,
+              runId: reviewRunKey,
             });
             const retryCandidateTokens = toFiniteNumber(retryResult?.candidateTokens, null);
             if (
@@ -3062,12 +3401,41 @@ export async function generateDailyStrategicReview({
               continue;
             }
 
+            if (reviewRunRecord) {
+              reviewRunRecord =
+                (await updateStrategicReviewRun(reviewRunKey, {
+                  status: "completed",
+                  model: profile.model,
+                  contextProfile: profile.contextProfile,
+                  systemInstruction,
+                  userPrompt,
+                  inputPayload: strategicInput,
+                  rawOutput: retryResult.rawText || retryResult.text,
+                  renderedOutput: retryRendered,
+                  usageMetadata: retryResult.usageMetadata,
+                  finishReason: retryResult.finishReason,
+                  feedbackWindowEndAt,
+                  metadata: {
+                    source: "daily_pipeline",
+                    promptVersionLabel: promptVersion?.version_label || "v1_base",
+                    profileId: `${profile.id}_retry`,
+                    contextProfile: profile.contextProfile,
+                    retryKind: "json_parse_after_max_tokens",
+                  },
+                })) || reviewRunRecord;
+            }
+
             logDailyEvent("strategic_review.profile_success", {
               profileId: `${profile.id}_retry`,
               durationMs: Date.now() - startedAtMs,
               reviewLength: retryRendered.length,
             });
-            return retryRendered;
+            return {
+              markdown: retryRendered,
+              reviewRunId: reviewRunRecord?.id || null,
+              promptVersionId: promptVersion?.id || null,
+              promptVersionLabel: promptVersion?.version_label || "v1_base",
+            };
           } catch (error) {
             const message = safeErrorMessage(error).toLowerCase();
             if (message.includes("timeout") || message.includes("aborted")) {
@@ -3095,9 +3463,32 @@ export async function generateDailyStrategicReview({
         profileId: profile.id,
         reasons: analysis.reasons,
         reviewLength: analysis.length,
-        actionCount: analysis.actionCount,
-      });
+      actionCount: analysis.actionCount,
+    });
       continue;
+    }
+
+    if (reviewRunRecord) {
+      reviewRunRecord =
+        (await updateStrategicReviewRun(reviewRunKey, {
+          status: "completed",
+          model: profile.model,
+          contextProfile: profile.contextProfile,
+          systemInstruction,
+          userPrompt,
+          inputPayload: strategicInput,
+          rawOutput: modelResult.rawText || modelResult.text,
+          renderedOutput: rendered,
+          usageMetadata: modelResult.usageMetadata,
+          finishReason: modelResult.finishReason,
+          feedbackWindowEndAt,
+          metadata: {
+            source: "daily_pipeline",
+            promptVersionLabel: promptVersion?.version_label || "v1_base",
+            profileId: profile.id,
+            contextProfile: profile.contextProfile,
+          },
+        })) || reviewRunRecord;
     }
 
     logDailyEvent("strategic_review.profile_success", {
@@ -3105,7 +3496,12 @@ export async function generateDailyStrategicReview({
       durationMs: Date.now() - startedAtMs,
       reviewLength: rendered.length,
     });
-    return rendered;
+    return {
+      markdown: rendered,
+      reviewRunId: reviewRunRecord?.id || null,
+      promptVersionId: promptVersion?.id || null,
+      promptVersionLabel: promptVersion?.version_label || "v1_base",
+    };
   }
 
   let errorCode = STRATEGIC_REVIEW_ERROR_CODES.UNKNOWN;
@@ -3137,6 +3533,28 @@ export async function generateDailyStrategicReview({
     minLength: STRATEGIC_REVIEW_MIN_LENGTH,
     durationMs: Date.now() - startedAtMs,
   });
+
+  if (reviewRunRecord) {
+    await updateStrategicReviewRun(reviewRunKey, {
+      status: "failed",
+      promptVersionId: promptVersion?.id || null,
+      promptVersionLabel: promptVersion?.version_label || "v1_base",
+      model: lastAttemptContext?.model || null,
+      contextProfile: lastAttemptContext?.contextProfile || null,
+      systemInstruction,
+      userPrompt: lastAttemptContext?.userPrompt || null,
+      inputPayload: lastAttemptContext?.inputPayload || {},
+      errorCode,
+      errorMessage: reason,
+      feedbackWindowEndAt,
+      metadata: {
+        source: "daily_pipeline",
+        promptVersionLabel: promptVersion?.version_label || "v1_base",
+        lastValidationReasons,
+      },
+    });
+  }
+
   throw createStrategicReviewError(errorCode, reason, {
     maxTokensShortCount,
     schemaInvalidCount,
@@ -3334,18 +3752,27 @@ export async function runDailyPipeline({
     }
 
     let strategicReview = null;
+    let strategicReviewRunId = null;
+    let strategicReviewPromptVersionId = null;
+    let strategicReviewPromptVersionLabel = null;
     let strategicReviewError = null;
     let strategicReviewErrorCode = null;
     if (!skipStrategicReview) {
       const strategicReviewStartedAt = Date.now();
       try {
-        strategicReview = await generateDailyStrategicReview({
+        const strategicReviewResult = await generateDailyStrategicReview({
           metrics,
           amplitudeConversion,
           previousMetrics,
           workProgress,
           targetYmd,
+          runId,
+          runYmd,
         });
+        strategicReview = strategicReviewResult?.markdown || null;
+        strategicReviewRunId = strategicReviewResult?.reviewRunId || null;
+        strategicReviewPromptVersionId = strategicReviewResult?.promptVersionId || null;
+        strategicReviewPromptVersionLabel = strategicReviewResult?.promptVersionLabel || null;
         logDailyEvent("step.done", {
           runId,
           step: "generate_strategic_review",
@@ -3387,6 +3814,9 @@ export async function runDailyPipeline({
       workProgress,
       workProgressError,
       strategicReview,
+      strategicReviewRunId,
+      strategicReviewPromptVersionId,
+      strategicReviewPromptVersionLabel,
       strategicReviewError,
       strategicReviewErrorCode,
     };

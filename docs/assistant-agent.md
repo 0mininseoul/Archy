@@ -83,6 +83,7 @@ npm run agent:discord
 `.env.example`에 추가된 키를 설정하세요.
 - Gemini: `GEMINI_API_KEY`
 - Gemini 재시도/타임아웃(옵션): `GEMINI_REQUEST_TIMEOUT_MS`, `GEMINI_REQUEST_MAX_RETRIES`, `GEMINI_REQUEST_RETRY_BASE_MS`, `GEMINI_REQUEST_RETRY_CAP_MS`, `GEMINI_STRATEGIC_REVIEW_SLA_MS`, `GEMINI_STRATEGIC_REVIEW_TEMPERATURE`, `GEMINI_STRATEGIC_REVIEW_PRO_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_FLASH_MAX_OUTPUT_TOKENS`, `GEMINI_STRATEGIC_REVIEW_PRO_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FLASH_TIMEOUT_MS`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_PRO`, `GEMINI_STRATEGIC_REVIEW_FORCE_THINKING_LEVEL_FLASH`, `GEMINI_STRATEGIC_REVIEW_MIN_CANDIDATE_TOKENS`, `GEMINI_STRATEGIC_REVIEW_MAX_RETRIES`
+- Gemini 로그/전략 리뷰 개선 루프(옵션): `GEMINI_LOGGING_ENABLED`, `GEMINI_LOGGING_REDACTION_ENABLED`, `GEMINI_LOGGING_MAX_TEXT_CHARS`, `ARCHY_STRATEGIC_REVIEW_OPTIMIZATION_ENABLED`, `ARCHY_STRATEGIC_REVIEW_FEEDBACK_WINDOW_HOURS`
 - Discord: `DISCORD_BOT_TOKEN`, `DISCORD_DAILY_CHANNEL_ID`, `DISCORD_GUILD_ID`
 - Discord 채팅 채널 제한(옵션): `DISCORD_CHAT_CHANNEL_IDS` (alias: `DISCORD_CHANNEL_IDS`)
 - Google Sheets: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `ARCHY_USER_SHEET_ID`, `ARCHY_USER_SHEET_TAB_NAME`
@@ -110,6 +111,7 @@ npm run agent:discord
 - 전략 리뷰 출력은 과도한 장문을 피하도록 압축 지시가 적용되어 있으며, 액션 항목은 상황에 따라 `1~5개`를 유동적으로 제안합니다.
 - 전략 리뷰는 `Pro(full) -> Pro(compact) -> Flash(compact) -> Flash(ultra)` 프로파일 순서로 재생성하며, 최대 `300초` SLA 내에서 시도합니다.
 - 전략 리뷰 생성은 구조화 JSON 응답을 먼저 받고, 내부 렌더러로 최종 Markdown 형식을 고정해 섹션 누락을 방지합니다.
+- 전략 리뷰 입력에는 업무 DB와 Ascentum 최근 편집이 함께 들어가지만, Ascentum 최근 편집은 운영자 내부 노션 편집 흔적으로만 해석해야 하며 고객 사용 데이터 근거로 쓰면 안 됩니다.
 - 생성된 리뷰가 형식/길이 검증(필수 섹션, 액션 개수, 최소 길이)을 통과하지 못하면 불완전 텍스트를 보내지 않고 생략 처리합니다.
 - Pro+Flash 모두 실패하면:
   - 데일리 리포트는 정상 전송
@@ -117,5 +119,9 @@ npm run agent:discord
 - 긴 전략 리뷰는 Discord 길이 제한(2000자) 대응을 위해 자동 분할 전송합니다.
 - 멘션 응답도 길이 제한(2000자)을 고려해 자동 분할 전송하며, `reply.chunk.sent/fail` 로그로 추적합니다.
 - 업무 맥락은 멘션 응답 시 실시간으로 Notion에서 조회되고, 요약값은 Supabase `agent_memory_facts`에도 저장됩니다.
+- Gemini 호출의 `systemInstruction / input / output / usageMetadata`는 `agent_llm_logs`에 저장할 수 있습니다.
+- 전략 리뷰는 `strategic_review_runs`, 사용자 피드백은 `strategic_review_feedback`, 평가/제안/프롬프트 버전은 `strategic_review_evaluations`, `strategic_review_improvement_proposals`, `strategic_review_prompt_versions`에 저장됩니다.
+- 전략 리뷰 자가 개선 평가는 기본적으로 매일 `23:15 Asia/Seoul`에 실행되며, 최근 `23시간` 내 Discord 피드백을 반영합니다.
+- 개선이 필요하면 데일리 채널에 `As-Is / To-Be` embed 제안을 보내고, 멘션 명령 `제안 승인|보류|반려 <id>` 로 처리합니다.
 - Railway 로그에는 `scope=daily-runner|discord-bot` JSON 구조 로그가 남아 run/step 단위 추적이 가능합니다.
 - 슬래시 명령 반영이 늦으면 봇 재초대(Scopes: `bot`, `applications.commands`) 후 확인하세요.

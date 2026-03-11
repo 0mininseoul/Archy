@@ -1,8 +1,12 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
   Events,
   GatewayIntentBits,
   Partials,
+  PermissionsBitField,
   EmbedBuilder,
   REST,
   Routes,
@@ -34,6 +38,30 @@ import {
   saveConversationTurn,
   upsertMemoryFacts,
 } from "./memory-store.mjs";
+import {
+  classifyStrategicReviewFeedback,
+  parseStrategicReviewProposalDecision,
+  runStrategicReviewOptimizationCycle,
+} from "./strategic-review-optimizer.mjs";
+import {
+  applyStrategicReviewProposal,
+  attachStrategicReviewDiscordMessages,
+  findProposalByDiscordMessageId,
+  getLatestCompletedStrategicReviewRun,
+  getLatestStrategicReviewEvaluation,
+  getOpenStrategicReviewProposal,
+  getStrategicReviewProposalById,
+  getStrategicReviewRunByPrimaryMessageId,
+  getStrategicReviewRunById,
+  markStrategicReviewProposalMessage,
+  saveStrategicReviewFeedback,
+  updateStrategicReviewProposalStatus,
+} from "./strategic-review-store.mjs";
+import {
+  buildStrategicReviewProposalButtonCustomId,
+  getStrategicReviewProposalStatusMeta,
+  parseStrategicReviewProposalButtonCustomId,
+} from "./strategic-review-proposal-ui.mjs";
 
 function getEnv(name, { optional = false, fallback = undefined, aliases = [] } = {}) {
   for (const key of [name, ...aliases]) {
@@ -1903,6 +1931,13 @@ const TOOL_PLANNER_TIMEOUT_MS = getPositiveInt(process.env.ARCHY_TOOL_PLANNER_TI
 const TOOL_PLANNER_MAX_RETRIES = getNonNegativeInt(process.env.ARCHY_TOOL_PLANNER_MAX_RETRIES, 1);
 const TOOL_SUMMARY_TIMEOUT_MS = getPositiveInt(process.env.ARCHY_TOOL_SUMMARY_TIMEOUT_MS, 30_000);
 const TOOL_SUMMARY_MAX_RETRIES = getNonNegativeInt(process.env.ARCHY_TOOL_SUMMARY_MAX_RETRIES, 1);
+const STRATEGIC_REVIEW_OPTIMIZATION_ENABLED =
+  String(process.env.ARCHY_STRATEGIC_REVIEW_OPTIMIZATION_ENABLED || "true").toLowerCase() !==
+  "false";
+const STRATEGIC_REVIEW_FEEDBACK_WINDOW_HOURS = getPositiveInt(
+  process.env.ARCHY_STRATEGIC_REVIEW_FEEDBACK_WINDOW_HOURS,
+  23
+);
 const DEFAULT_SPREADSHEET_ID = process.env.ARCHY_USER_SHEET_ID || "";
 const DEFAULT_NOTION_PARENT_PAGE_ID = process.env.NOTION_DEFAULT_PARENT_PAGE_ID || "";
 const DEFAULT_NOTION_DATA_SOURCE_ID = process.env.NOTION_DEFAULT_DATA_SOURCE_ID || "";
@@ -2086,6 +2121,7 @@ async function sendLongMessage(channel, content, options = {}) {
   const { withSequence = false, maxSendRetries = 2, traceId = null } = options;
   const chunks = splitMessage(content);
   const total = chunks.length;
+  const sentMessages = [];
 
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
@@ -2095,7 +2131,8 @@ async function sendLongMessage(channel, content, options = {}) {
     let lastError = null;
     for (let attempt = 0; attempt <= maxSendRetries; attempt += 1) {
       try {
-        await channel.send({ content: decorated });
+        const sentMessage = await channel.send({ content: decorated });
+        sentMessages.push(sentMessage);
         logBotEvent("reply.chunk.sent", {
           traceId,
           chunkIndex: i + 1,
@@ -2125,6 +2162,8 @@ async function sendLongMessage(channel, content, options = {}) {
   return {
     chunkCount: total,
     textLength: String(content || "").length,
+    primaryMessageId: sentMessages[0]?.id || null,
+    messageIds: sentMessages.map((item) => item.id),
   };
 }
 
@@ -2264,6 +2303,275 @@ function buildStatsEmbed({ report, asOfDate }) {
   return embed;
 }
 
+function truncateProposalField(value, max = 280) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+}
+
+function hasStrategicReviewProposalAuthorityFromPermissions(permissions) {
+  return Boolean(permissions?.has?.(PermissionsBitField.Flags.Administrator));
+}
+
+function hasStrategicReviewProposalAuthorityForMessage(message) {
+  return hasStrategicReviewProposalAuthorityFromPermissions(message?.member?.permissions);
+}
+
+function hasStrategicReviewProposalAuthorityForInteraction(interaction) {
+  return hasStrategicReviewProposalAuthorityFromPermissions(interaction?.memberPermissions);
+}
+
+function buildStrategicReviewProposalComponents(proposal, { disabled = false } = {}) {
+  const buttonsDisabled = disabled || String(proposal?.status || "pending") !== "pending";
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(buildStrategicReviewProposalButtonCustomId("apply", proposal.id))
+        .setLabel("승인")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(buttonsDisabled),
+      new ButtonBuilder()
+        .setCustomId(buildStrategicReviewProposalButtonCustomId("hold", proposal.id))
+        .setLabel("보류")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(buttonsDisabled),
+      new ButtonBuilder()
+        .setCustomId(buildStrategicReviewProposalButtonCustomId("reject", proposal.id))
+        .setLabel("반려")
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(buttonsDisabled)
+    ),
+  ];
+}
+
+function buildStrategicReviewProposalEmbed({ proposal, reviewRun, evaluation }) {
+  const statusMeta = getStrategicReviewProposalStatusMeta(proposal?.status);
+  const score = evaluation?.total_score ?? proposal?.evaluation_score ?? null;
+  const evidence = Array.isArray(proposal?.evidence) ? proposal.evidence : [];
+  const embed = new EmbedBuilder()
+    .setColor(statusMeta.color)
+    .setTitle(`🛠 전략 리뷰 프롬프트 개선 제안 #${proposal.id}`)
+    .setDescription(`상태: **${statusMeta.label}**\n내일 데일리 전략 리뷰에 반영할지 확인해 주세요.`)
+    .addFields(
+      {
+        name: "문제",
+        value: truncateProposalField(proposal.problem_summary, 320),
+        inline: false,
+      },
+      {
+        name: "As-Is",
+        value: truncateProposalField(proposal.as_is, 260),
+        inline: false,
+      },
+      {
+        name: "To-Be",
+        value: truncateProposalField(proposal.to_be, 260),
+        inline: false,
+      },
+      {
+        name: "기대효과",
+        value: truncateProposalField(proposal.expected_effect, 260),
+        inline: false,
+      },
+      {
+        name: "근거",
+        value:
+          evidence.length > 0
+            ? truncateProposalField(evidence.slice(0, 3).join("\n"), 320)
+            : truncateProposalField(evaluation?.summary || "운영 로그와 사용자 피드백 기반", 320),
+        inline: false,
+      }
+    )
+    .setFooter({
+      text: [
+        `상태 ${statusMeta.label}`,
+        score !== null ? `평가점수 ${score}점` : null,
+        reviewRun?.target_ymd ? `대상일 ${reviewRun.target_ymd}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    })
+    .setTimestamp(new Date());
+
+  return embed;
+}
+
+function buildStrategicReviewProposalMessagePayload({
+  proposal,
+  reviewRun = null,
+  evaluation = null,
+  botUserId = null,
+} = {}) {
+  const statusMeta = getStrategicReviewProposalStatusMeta(proposal?.status);
+  const lines = [`전략 리뷰 프롬프트 개선 제안 상태: **${statusMeta.label}**`];
+  if (String(proposal?.status || "pending") === "pending" && botUserId) {
+    lines.push("버튼으로 결정하거나 아래 텍스트 명령을 사용할 수 있어요.");
+    lines.push(`<@${botUserId}> 제안 승인 ${proposal.id}`);
+    lines.push(`<@${botUserId}> 제안 보류 ${proposal.id}`);
+    lines.push(`<@${botUserId}> 제안 반려 ${proposal.id}`);
+  } else if (String(proposal?.status || "") === "held" && botUserId) {
+    lines.push("버튼은 잠겼고, 필요하면 텍스트 명령으로 다시 결정할 수 있어요.");
+    lines.push(`<@${botUserId}> 제안 승인 ${proposal.id}`);
+    lines.push(`<@${botUserId}> 제안 반려 ${proposal.id}`);
+  }
+
+  return {
+    content: lines.join("\n"),
+    embeds: [
+      buildStrategicReviewProposalEmbed({
+        proposal,
+        reviewRun,
+        evaluation,
+      }),
+    ],
+    components: buildStrategicReviewProposalComponents(proposal),
+  };
+}
+
+async function resolveStrategicReviewProposalForDecision({
+  proposalId = null,
+  replyMessageId = null,
+} = {}) {
+  return (
+    (proposalId ? await getStrategicReviewProposalById(proposalId) : null) ||
+    (replyMessageId ? await findProposalByDiscordMessageId(replyMessageId) : null) ||
+    (await getOpenStrategicReviewProposal())
+  );
+}
+
+async function syncStrategicReviewProposalMessage({
+  proposal,
+  reviewRun = null,
+  evaluation = null,
+} = {}) {
+  if (!proposal?.discord_channel_id || !proposal?.discord_message_id) return null;
+
+  const channel = await client.channels.fetch(proposal.discord_channel_id).catch(() => null);
+  if (!channel?.isTextBased?.()) return null;
+  const message = await channel.messages.fetch(proposal.discord_message_id).catch(() => null);
+  if (!message) return null;
+
+  const resolvedReviewRun =
+    reviewRun || (proposal.review_run_id ? await getStrategicReviewRunById(proposal.review_run_id) : null);
+  const resolvedEvaluation =
+    evaluation ||
+    (proposal.review_run_id ? await getLatestStrategicReviewEvaluation(proposal.review_run_id) : null);
+  const payload = buildStrategicReviewProposalMessagePayload({
+    proposal,
+    reviewRun: resolvedReviewRun,
+    evaluation: resolvedEvaluation,
+    botUserId: client.user?.id || null,
+  });
+  await message.edit(payload);
+  return message;
+}
+
+async function executeStrategicReviewProposalDecision({
+  proposal,
+  action,
+  approvedByUserId,
+  decisionReason = null,
+  traceId = null,
+} = {}) {
+  if (!proposal) {
+    return {
+      handled: true,
+      changed: false,
+      replyText: "처리할 전략 리뷰 개선 제안을 찾지 못했어요.",
+      proposal: null,
+      version: null,
+    };
+  }
+
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  const desiredStatus =
+    normalizedAction === "apply" ? "applied" : normalizedAction === "hold" ? "held" : "rejected";
+
+  if (proposal.status === desiredStatus) {
+    return {
+      handled: true,
+      changed: false,
+      replyText: `전략 리뷰 개선 제안 #${proposal.id} 는 이미 ${getStrategicReviewProposalStatusMeta(
+        proposal.status
+      ).label} 상태예요.`,
+      proposal,
+      version: null,
+    };
+  }
+
+  if (["applied", "rejected"].includes(String(proposal.status || ""))) {
+    return {
+      handled: true,
+      changed: false,
+      replyText: `전략 리뷰 개선 제안 #${proposal.id} 는 이미 ${getStrategicReviewProposalStatusMeta(
+        proposal.status
+      ).label} 상태라 다시 처리하지 않았어요.`,
+      proposal,
+      version: null,
+    };
+  }
+
+  if (normalizedAction === "apply") {
+    const version = await applyStrategicReviewProposal({
+      proposalId: proposal.id,
+      approvedByUserId,
+      decisionReason,
+    });
+    const updatedProposal = await getStrategicReviewProposalById(proposal.id);
+    logBotEvent("strategic_review.proposal_applied", {
+      traceId,
+      proposalId: proposal.id,
+      promptVersionLabel: version?.version_label || null,
+    });
+    return {
+      handled: true,
+      changed: true,
+      proposal: updatedProposal || proposal,
+      version,
+      replyText: `전략 리뷰 프롬프트 개선안을 적용했어요. 새 버전: \`${version?.version_label || "unknown"}\``,
+    };
+  }
+
+  if (normalizedAction === "hold") {
+    const updatedProposal = await updateStrategicReviewProposalStatus({
+      proposalId: proposal.id,
+      status: "held",
+      approvedByUserId,
+      decisionReason,
+    });
+    logBotEvent("strategic_review.proposal_held", {
+      traceId,
+      proposalId: updatedProposal?.id || proposal.id,
+    });
+    return {
+      handled: true,
+      changed: true,
+      proposal: updatedProposal || proposal,
+      version: null,
+      replyText: `전략 리뷰 개선 제안 #${proposal.id} 를 보류했어요.`,
+    };
+  }
+
+  const updatedProposal = await updateStrategicReviewProposalStatus({
+    proposalId: proposal.id,
+    status: "rejected",
+    approvedByUserId,
+    decisionReason,
+  });
+  logBotEvent("strategic_review.proposal_rejected", {
+    traceId,
+    proposalId: updatedProposal?.id || proposal.id,
+  });
+  return {
+    handled: true,
+    changed: true,
+    proposal: updatedProposal || proposal,
+    version: null,
+    replyText: `전략 리뷰 개선 제안 #${proposal.id} 를 반려했어요.`,
+  };
+}
+
 function buildStrategicReviewSkipMessage(errorCode, errorMessage) {
   const code = String(errorCode || "unknown");
   const safeReason = String(errorMessage || "").slice(0, 220);
@@ -2280,6 +2588,160 @@ function buildStrategicReviewSkipMessage(errorCode, errorMessage) {
     return `전략 리뷰는 형식/품질 검증을 통과하지 못해 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
   }
   return `전략 리뷰는 내부 생성 오류로 이번 배치에서 생략됐어요. 코드: \`${code}\` / 사유: ${safeReason}`;
+}
+
+async function resolveStrategicReviewRunForMessage(message) {
+  const replyMessageId =
+    message.reference?.messageId || message.reference?.message_id || message.reference?.messageID || null;
+  if (replyMessageId) {
+    const byReply = await getStrategicReviewRunByPrimaryMessageId(replyMessageId);
+    if (byReply) return byReply;
+  }
+  return getLatestCompletedStrategicReviewRun({
+    withinHours: STRATEGIC_REVIEW_FEEDBACK_WINDOW_HOURS,
+  });
+}
+
+async function maybeHandleStrategicReviewFeedbackMessage(message, question, { traceId = null } = {}) {
+  const reviewRun = await resolveStrategicReviewRunForMessage(message);
+  if (!reviewRun) return { handled: false };
+
+  const isReplyToReview = Boolean(
+    message.reference?.messageId || message.reference?.message_id || message.reference?.messageID
+  );
+  const classification = await classifyStrategicReviewFeedback({
+    text: question,
+    reviewRun,
+    isReplyToReview,
+  });
+  if (!classification?.isFeedback) return { handled: false };
+
+  const saved = await saveStrategicReviewFeedback({
+    reviewRunId: reviewRun.id,
+    guildId: message.guild.id,
+    channelId: message.channelId,
+    userId: message.author.id,
+    sourceMessageId: message.id,
+    feedbackText: question,
+    sentiment: classification.sentiment,
+    feedbackSummary: classification.summary,
+    classification: {
+      categories: classification.categories,
+      requestedChanges: classification.requestedChanges,
+      confidence: classification.confidence,
+      raw: classification.raw,
+    },
+  });
+
+  logBotEvent("strategic_review.feedback_saved", {
+    traceId,
+    reviewRunId: reviewRun.id,
+    saved: Boolean(saved),
+    sentiment: classification.sentiment,
+    categories: classification.categories,
+  });
+
+  await message.reply(
+    [
+      "전략 리뷰 피드백으로 저장했어요.",
+      classification.summary ? `요약: ${classification.summary}` : null,
+      STRATEGIC_REVIEW_OPTIMIZATION_ENABLED
+        ? "오늘 23:15 KST 개선 평가에 반영할게요."
+        : "다음 전략 리뷰 개선 작업에 참고할 수 있도록 남겨둘게요.",
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+  return { handled: true, reviewRun, classification };
+}
+
+async function maybeHandleStrategicReviewProposalDecision(message, question, { traceId = null } = {}) {
+  const decision = parseStrategicReviewProposalDecision(question);
+  if (!decision?.action) return { handled: false };
+  if (!hasStrategicReviewProposalAuthorityForMessage(message)) {
+    await message.reply("전략 리뷰 개선 제안 승인/보류/반려는 서버 관리자만 할 수 있어요.");
+    return { handled: true, unauthorized: true };
+  }
+
+  const replyMessageId =
+    message.reference?.messageId || message.reference?.message_id || message.reference?.messageID || null;
+  const proposal = await resolveStrategicReviewProposalForDecision({
+    proposalId: decision.proposalId,
+    replyMessageId,
+  });
+  const result = await executeStrategicReviewProposalDecision({
+    proposal,
+    action: decision.action,
+    approvedByUserId: message.author.id,
+    decisionReason: decision.reason,
+    traceId,
+  });
+  if (result?.proposal) {
+    await syncStrategicReviewProposalMessage({ proposal: result.proposal }).catch((error) => {
+      console.warn("strategic review proposal sync failed:", error);
+    });
+  }
+  await message.reply(result?.replyText || "전략 리뷰 개선 제안을 처리했어요.");
+  return {
+    handled: true,
+    proposalId: result?.proposal?.id || proposal?.id || null,
+    version: result?.version || null,
+  };
+}
+
+let strategicReviewOptimizationInFlight = null;
+
+async function runStrategicReviewOptimizationAndPost({ trigger = "schedule" } = {}) {
+  if (!STRATEGIC_REVIEW_OPTIMIZATION_ENABLED) {
+    return { status: "skipped", reason: "optimization_disabled" };
+  }
+  if (strategicReviewOptimizationInFlight) {
+    return strategicReviewOptimizationInFlight;
+  }
+
+  strategicReviewOptimizationInFlight = (async () => {
+    logBotEvent("strategic_review.optimization_start", { trigger });
+    const result = await runStrategicReviewOptimizationCycle();
+
+    if (result?.status === "proposal_created" && result?.proposal) {
+      const channel = await client.channels.fetch(DAILY_CHANNEL_ID);
+      if (!channel || !channel.isTextBased()) {
+        throw new Error("Daily channel is missing or not text-based");
+      }
+
+      const payload = buildStrategicReviewProposalMessagePayload({
+        proposal: result.proposal,
+        reviewRun: result.reviewRun,
+        evaluation: result.evaluation,
+        botUserId: client.user?.id || null,
+      });
+      const sentMessage = await channel.send(payload);
+      await markStrategicReviewProposalMessage({
+        proposalId: result.proposal.id,
+        channelId: channel.id,
+        messageId: sentMessage.id,
+      });
+      logBotEvent("strategic_review.proposal_sent", {
+        trigger,
+        proposalId: result.proposal.id,
+        reviewRunId: result.reviewRun?.id || null,
+        channelId: channel.id,
+        messageId: sentMessage.id,
+      });
+    } else {
+      logBotEvent("strategic_review.optimization_done", {
+        trigger,
+        status: result?.status || "unknown",
+        reason: result?.reason || null,
+      });
+    }
+
+    return result;
+  })().finally(() => {
+    strategicReviewOptimizationInFlight = null;
+  });
+
+  return strategicReviewOptimizationInFlight;
 }
 
 async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {}) {
@@ -2332,12 +2794,21 @@ async function runDailyAndPost({ trigger = "unknown", requestedBy = null } = {})
           withSequence: true,
           traceId: report?.runId ?? null,
         });
+        if (report?.strategicReviewRunId) {
+          await attachStrategicReviewDiscordMessages({
+            runId: report.runId,
+            channelId: channel.id,
+            primaryMessageId: reviewSend?.primaryMessageId || null,
+            messageIds: reviewSend?.messageIds || [],
+          });
+        }
         logBotEvent("daily.review_sent", {
           trigger,
           requestedBy,
           runId: report?.runId ?? null,
           reviewLength: report?.strategicReview?.length ?? 0,
           chunkCount: reviewSend?.chunkCount ?? 1,
+          reviewRunId: report?.strategicReviewRunId ?? null,
         });
       } catch (error) {
         logBotEvent("daily.review_send_error", {
@@ -2764,13 +3235,71 @@ client.on(Events.ClientReady, async () => {
     }
   );
 
+  if (STRATEGIC_REVIEW_OPTIMIZATION_ENABLED) {
+    cron.schedule(
+      "15 23 * * *",
+      async () => {
+        try {
+          await runStrategicReviewOptimizationAndPost({ trigger: "schedule" });
+        } catch (error) {
+          console.error("Scheduled strategic review optimization failed:", error);
+        }
+      },
+      {
+        timezone: "Asia/Seoul",
+      }
+    );
+  }
+
   console.log("Scheduled daily pipeline at 00:05 Asia/Seoul");
+  if (STRATEGIC_REVIEW_OPTIMIZATION_ENABLED) {
+    console.log("Scheduled strategic review optimization at 23:15 Asia/Seoul");
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    if (!interaction.isChatInputCommand()) return;
     if (GUILD_ID && interaction.guildId !== GUILD_ID) return;
+
+    if (interaction.isButton()) {
+      const parsed = parseStrategicReviewProposalButtonCustomId(interaction.customId);
+      if (!parsed) return;
+
+      if (!hasStrategicReviewProposalAuthorityForInteraction(interaction)) {
+        await interaction.reply({
+          flags: MessageFlags.Ephemeral,
+          content: "전략 리뷰 개선 제안 승인/보류/반려는 서버 관리자만 할 수 있어요.",
+        });
+        return;
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const proposal = await getStrategicReviewProposalById(parsed.proposalId);
+      if (proposal && String(proposal.status || "pending") !== "pending") {
+        await interaction.editReply(
+          `전략 리뷰 개선 제안 #${proposal.id} 는 이미 ${getStrategicReviewProposalStatusMeta(
+            proposal.status
+          ).label} 상태예요.`
+        );
+        return;
+      }
+      const result = await executeStrategicReviewProposalDecision({
+        proposal,
+        action: parsed.action,
+        approvedByUserId: interaction.user?.id || null,
+        decisionReason: `button:${interaction.customId}`,
+        traceId: randomUUID(),
+      });
+      if (result?.proposal) {
+        await syncStrategicReviewProposalMessage({ proposal: result.proposal }).catch((error) => {
+          console.warn("strategic review proposal button sync failed:", error);
+        });
+      }
+      await interaction.editReply(result?.replyText || "전략 리뷰 개선 제안을 처리했어요.");
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === "help") {
       await interaction.reply({
@@ -2855,8 +3384,7 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     const isMentioned = message.mentions.has(client.user?.id || "");
-    const inChatChannel = CHAT_CHANNEL_IDS.size === 0 || CHAT_CHANNEL_IDS.has(message.channelId);
-    if (!isMentioned || !inChatChannel) return;
+    if (!isMentioned) return;
 
     const question = message.content.replace(new RegExp(`<@!?${client.user?.id}>`, "g"), "").trim();
     if (!question) {
@@ -2873,6 +3401,22 @@ client.on(Events.MessageCreate, async (message) => {
       questionLength: question.length,
       questionPreview: truncate(question, 120),
     });
+
+    const proposalDecision = await maybeHandleStrategicReviewProposalDecision(message, question, {
+      traceId,
+    });
+    if (proposalDecision?.handled) return;
+
+    const feedbackSave = await maybeHandleStrategicReviewFeedbackMessage(message, question, {
+      traceId,
+    });
+    if (feedbackSave?.handled) return;
+
+    const inChatChannel = CHAT_CHANNEL_IDS.size === 0 || CHAT_CHANNEL_IDS.has(message.channelId);
+    if (!inChatChannel) {
+      await message.reply("전략 리뷰 피드백/개선 제안 처리는 됐어요. 일반 질의는 지정된 채팅 채널에서만 답변할게요.");
+      return;
+    }
 
     await answerAdvisorQuestion(message, question, { traceId });
   } catch (error) {

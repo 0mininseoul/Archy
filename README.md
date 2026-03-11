@@ -94,6 +94,7 @@ STT 다중 키 라우팅(선택):
 
 Ops Agent / 데일리 배치를 함께 돌릴 경우 추가:
 - Discord/Gemini: `GEMINI_API_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_DAILY_CHANNEL_ID`
+- Gemini 로그/전략 리뷰 개선 루프(옵션): `GEMINI_LOGGING_ENABLED`, `GEMINI_LOGGING_REDACTION_ENABLED`, `GEMINI_LOGGING_MAX_TEXT_CHARS`, `ARCHY_STRATEGIC_REVIEW_OPTIMIZATION_ENABLED`, `ARCHY_STRATEGIC_REVIEW_FEEDBACK_WINDOW_HOURS`
 - Google Sheets(Service Account): `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `ARCHY_USER_SHEET_ID`, `ARCHY_USER_SHEET_TAB_NAME`
 - Notion Internal Integration: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`, `NOTION_WORK_DB_DATA_SOURCE_ID`
 
@@ -105,6 +106,7 @@ Ops Agent / 데일리 배치를 함께 돌릴 경우 추가:
 - 신규 환경은 `database/schema.sql` 실행 후 `database/migrations/`의 최신 목록을 모두 반영해야 합니다.
 - 현재 필수 마이그레이션 목록과 권장 순서는 [SETUP.md](./SETUP.md)에 정리돼 있습니다.
 - 특히 현재 앱은 `recording_chunks`, 녹음 라이프사이클 필드, 동의 로그, Groq 오디오 예산 추적, 결제/운영 메모리 테이블에 의존합니다.
+- Ops Agent의 Gemini 로그/전략 리뷰 개선 루프를 쓰려면 `database/migrations/add_strategic_review_optimization_tables.sql` 도 반영해야 합니다.
 
 ## API 개요
 
