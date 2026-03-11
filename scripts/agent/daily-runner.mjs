@@ -553,6 +553,7 @@ export function buildMetricsForDate(snapshot, targetYmd) {
       notionIntegrations: notionCount,
       googleIntegrations: googleCount,
       slackIntegrations: slackCount,
+      mau: activation30dCount,
       activated30d: activation30dCount,
       activatedAllTime: activationAllTimeCount,
       customFormatUsers: customFormatCount,
@@ -1552,6 +1553,7 @@ const NOTION_METRIC_PROPERTY_ALIASES = Object.freeze({
   totalSignups: ["유저 수"],
   dailyRecordings: ["녹음 횟수", "금일 녹음 횟수"],
   dailyRecordingUsers: ["DAU", "녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"],
+  mau: ["MAU"],
   conversionRate: ["가입전환율"],
   onboarding: ["온보딩율"],
   pwa: ["PWA 설치율"],
@@ -1706,6 +1708,11 @@ function buildNotionMetricProperties(label, metrics, conversionRate, notionPrope
   );
   assignNotionNumberMetric(
     properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "mau"),
+    metrics.counts.mau
+  );
+  assignNotionNumberMetric(
+    properties,
     getConfiguredNotionMetricPropertyName(notionProperties, "conversionRate"),
     conversionRate
   );
@@ -1775,6 +1782,11 @@ function buildNotionEngagementMetricProperties(metrics, notionProperties = {}) {
     properties,
     getConfiguredNotionMetricPropertyName(notionProperties, "dailyRecordingUsers"),
     metrics.counts.dailyRecordingUsers
+  );
+  assignNotionNumberMetric(
+    properties,
+    getConfiguredNotionMetricPropertyName(notionProperties, "mau"),
+    metrics.counts.mau
   );
   assignNotionNumberMetric(
     properties,
@@ -1889,6 +1901,7 @@ export async function getNotionMetricsByLabel(label) {
     totalSignups: getNumber("totalSignups", ["유저 수"]),
     dailyRecordings: getNumber("dailyRecordings", ["녹음 횟수", "금일 녹음 횟수"]),
     dailyRecordingUsers: getNumber("dailyRecordingUsers", ["DAU", "녹음 유저", "금일 녹음한 유저 수", "금일 녹음 유저 수"]),
+    mau: getNumber("mau", ["MAU"]),
     conversionRate: getNumber("conversionRate", ["가입전환율"]),
     onboardingRate: getNumber("onboarding", ["온보딩율"]),
     pwaRate: getNumber("pwa", ["PWA 설치율"]),
@@ -3408,6 +3421,7 @@ export function buildDiscordMetricText(report) {
   const prevDailyRecordings = previous?.dailyRecordings ?? previousCounts.dailyRecordings ?? null;
   const prevDailyRecordingUsers =
     previous?.dailyRecordingUsers ?? previousCounts.dailyRecordingUsers ?? null;
+  const prevMau = previous?.mau ?? previousCounts.mau ?? previousCounts.activated30d ?? null;
   const prevOnboarding = previous?.onboardingRate ?? previousRates.onboarding ?? null;
   const prevPwa = previous?.pwaRate ?? previousRates.pwa ?? null;
   const prevIntegration = previous?.integrationRate ?? previousRates.integrationAny ?? null;
@@ -3431,6 +3445,7 @@ export function buildDiscordMetricText(report) {
       report.counts.dailyRecordingUsers,
       prevDailyRecordingUsers
     )}`,
+    `**MAU**: ${summarizeDiffCount(report.counts.mau, prevMau)}`,
     `**가입전환율**: ${compareNotionMetric(report.amplitudeConversion.currentRate, prevConversion)}${conversionUnavailableSuffix}`,
     `**온보딩율**: ${compareNotionMetric(report.rates.onboarding, prevOnboarding)}`,
     `**PWA 설치율**: ${compareNotionMetric(report.rates.pwa, prevPwa)}`,

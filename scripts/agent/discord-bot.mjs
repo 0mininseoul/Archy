@@ -2149,6 +2149,7 @@ function buildMetricComparisonContext(report) {
     prevDailyRecordings: previous?.dailyRecordings ?? fallbackCounts.dailyRecordings ?? null,
     prevDailyRecordingUsers:
       previous?.dailyRecordingUsers ?? fallbackCounts.dailyRecordingUsers ?? null,
+    prevMau: previous?.mau ?? fallbackCounts.mau ?? fallbackCounts.activated30d ?? null,
     prevOnboarding: previous?.onboardingRate ?? fallbackRates.onboarding ?? null,
     prevPwa: previous?.pwaRate ?? fallbackRates.pwa ?? null,
     prevIntegration: previous?.integrationRate ?? fallbackRates.integrationAny ?? null,
@@ -2184,6 +2185,7 @@ function buildDailyEmbed({ report, asOfDate }) {
         value: formatCountCard(report.counts.dailyRecordingUsers, ctx.prevDailyRecordingUsers),
         inline: true,
       },
+      { name: "📅 MAU", value: formatCountCard(report.counts.mau, ctx.prevMau), inline: true },
       {
         name: "🔁 가입전환율",
         value: ctx.conversionMissing
@@ -2235,6 +2237,7 @@ function buildStatsEmbed({ report, asOfDate }) {
         value: formatCountCard(report.counts.dailyRecordingUsers, ctx.prevDailyRecordingUsers),
         inline: true,
       },
+      { name: "📅 MAU", value: formatCountCard(report.counts.mau, ctx.prevMau), inline: true },
       {
         name: "🔁 가입전환율",
         value: ctx.conversionMissing
