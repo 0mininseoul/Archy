@@ -126,7 +126,12 @@ function canRecoverFailedSession(session: FinalizeSessionRow): boolean {
 
   return (
     hasMeaningfulTranscript(session.transcript) &&
-    (session.termination_reason === "stale_timeout" || session.error_step === "abandoned")
+    (
+      session.termination_reason === "stale_timeout" ||
+      session.termination_reason === "processing_error" ||
+      session.error_step === "abandoned" ||
+      session.error_step === "transcription"
+    )
   );
 }
 
@@ -448,7 +453,7 @@ export async function finalizeRecordingSession(
 
   if (recoverFailedSession) {
     warningAdditions.push(
-      createTranscriptionWarning("recovered_after_stale_timeout", {
+      createTranscriptionWarning("recovered_after_terminal_failure", {
         priorErrorStep: session.error_step ?? null,
         priorTerminationReason: session.termination_reason ?? null,
       })

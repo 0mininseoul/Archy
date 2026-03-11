@@ -29,16 +29,24 @@ function roundMaybe(value: number | undefined): number | undefined {
 }
 
 export function logSttDecision(input: SttDecisionLogInput): void {
+  const sessionLabel = [
+    input.sessionId ? `session=${input.sessionId}` : null,
+    typeof input.chunkIndex === "number" ? `chunk=${input.chunkIndex}` : null,
+    `decision=${input.decision}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
   const payload = {
     event: "stt_transcription_decision",
     schema_version: 1,
+    session_label: sessionLabel || null,
+    session_id: input.sessionId,
+    recording_id: input.recordingId,
+    chunk_index: input.chunkIndex,
     timestamp: new Date().toISOString(),
     pipeline: input.pipeline,
     decision: input.decision,
     reason: input.reason,
-    session_id: input.sessionId,
-    recording_id: input.recordingId,
-    chunk_index: input.chunkIndex,
     duration_seconds: input.durationSeconds,
     audio_size_bytes: input.audioSizeBytes,
     text_length: input.textLength ?? 0,
@@ -56,5 +64,5 @@ export function logSttDecision(input: SttDecisionLogInput): void {
     },
   };
 
-  console.log(JSON.stringify(payload));
+  console.log(`[SttDecision ${sessionLabel || "session=none"}] ${JSON.stringify(payload)}`);
 }

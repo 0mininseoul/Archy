@@ -2,6 +2,8 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { GROQ_API_KEY_SOURCES, type GroqApiKeySource } from "@/lib/services/groq-key-types";
 
 const DEFAULT_DAILY_LIMIT_SECONDS = 28_800;
+const DEFAULT_HOURLY_LIMIT_SECONDS = 7_200;
+const DEFAULT_HOURLY_RISK_THRESHOLD_RATIO = 0.9;
 const DEFAULT_RISK_THRESHOLD_RATIO = 0.9;
 const DEFAULT_FIXED_BUFFER_SECONDS = 300;
 const DEFAULT_PER_ACTIVE_RECORDER_BUFFER_SECONDS = 40;
@@ -19,6 +21,8 @@ export interface GroqAudioBudgetConfig {
   bucketMinutes: number;
   dailyLimitSeconds: number;
   fixedSafetyBufferSeconds: number;
+  hourlyLimitSeconds: number;
+  hourlyRiskThresholdRatio: number;
   perActiveRecorderBufferSeconds: number;
   riskThresholdRatio: number;
   rollingWindowHours: number;
@@ -29,12 +33,14 @@ export interface GroqAudioUsageSummary {
   lastKnownAudioLimitSeconds: number | null;
   lastKnownAudioUsedSeconds: number | null;
   lastRateLimitedAt: string | null;
+  rollingAudioSecondsLastHour: number;
   rollingAudioSeconds: number;
 }
 
 interface GroqAudioUsageBucketRow {
   audio_seconds: number | null;
   key_source: GroqApiKeySource;
+  window_start: string;
 }
 
 interface GroqKeyHealthRow {
@@ -124,6 +130,16 @@ export function getGroqAudioBudgetConfig(): GroqAudioBudgetConfig {
       DEFAULT_DAILY_LIMIT_SECONDS,
       { min: 60 }
     ),
+    hourlyLimitSeconds: parsePositiveNumber(
+      process.env.GROQ_AUDIO_SECONDS_HOURLY_LIMIT,
+      DEFAULT_HOURLY_LIMIT_SECONDS,
+      { min: 60 }
+    ),
+    hourlyRiskThresholdRatio: parsePositiveNumber(
+      process.env.GROQ_AUDIO_SECONDS_HOURLY_RISK_THRESHOLD_RATIO,
+      DEFAULT_HOURLY_RISK_THRESHOLD_RATIO,
+      { min: 0.5, max: 1 }
+    ),
     riskThresholdRatio: parsePositiveNumber(
       process.env.GROQ_AUDIO_SECONDS_DAILY_RISK_THRESHOLD_RATIO,
       DEFAULT_RISK_THRESHOLD_RATIO,
@@ -177,6 +193,7 @@ function getBucketStartIso(
 function createEmptyUsageSummary(): GroqAudioUsageSummary {
   return {
     rollingAudioSeconds: 0,
+    rollingAudioSecondsLastHour: 0,
     cooldownUntil: null,
     lastRateLimitedAt: null,
     lastKnownAudioLimitSeconds: null,
@@ -189,7 +206,7 @@ export function parseGroqAspdRateLimit(errorText: string): {
   usedSeconds?: number;
 } {
   const matched = errorText.match(
-    /Audio Seconds per Day \(ASPD\): Limit (\d+), Used (\d+)/i
+    /(?:Audio Seconds per Day|seconds of audio per day)\s*\(ASPD\):\s*Limit (\d+),\s*Used (\d+)/i
   );
 
   if (!matched) {
@@ -224,6 +241,7 @@ export async function loadGroqAudioUsageSummaries(
   const windowStartIso = new Date(
     nowMs - rollingWindowHours * 60 * 60 * 1000
   ).toISOString();
+  const hourStartMs = nowMs - 60 * 60 * 1000;
 
   try {
     const supabase = createServiceRoleClient();
@@ -231,7 +249,7 @@ export async function loadGroqAudioUsageSummaries(
       await Promise.all([
         supabase
           .from("groq_audio_usage_buckets")
-          .select("key_source,audio_seconds")
+          .select("key_source,audio_seconds,window_start")
           .in("key_source", sources)
           .gte("window_start", windowStartIso),
         supabase
@@ -263,6 +281,12 @@ export async function loadGroqAudioUsageSummaries(
     for (const row of (bucketRows as GroqAudioUsageBucketRow[] | null) ?? []) {
       const current = summaries.get(row.key_source) ?? createEmptyUsageSummary();
       current.rollingAudioSeconds += row.audio_seconds ?? 0;
+      const windowStartMs = Number.isFinite(new Date(row.window_start).getTime())
+        ? new Date(row.window_start).getTime()
+        : Number.NaN;
+      if (Number.isFinite(windowStartMs) && windowStartMs >= hourStartMs) {
+        current.rollingAudioSecondsLastHour += row.audio_seconds ?? 0;
+      }
       summaries.set(row.key_source, current);
     }
 

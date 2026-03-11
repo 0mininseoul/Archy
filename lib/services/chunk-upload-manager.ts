@@ -29,11 +29,32 @@ export interface ChunkSignalMetrics {
   peakRms?: number;
 }
 
+export type ChunkUploadSessionStatus =
+  | "recording"
+  | "processing"
+  | "completed"
+  | "failed";
+
+export interface ChunkUploadFailure {
+  code?: string;
+  message: string;
+  recoverable: boolean;
+  retryAfterSeconds?: number;
+  sessionStatus?: ChunkUploadSessionStatus;
+  statusCode?: number;
+  terminal?: boolean;
+}
+
+export interface ChunkUploadTerminalSession extends ChunkUploadFailure {
+  failedChunkIndex: number;
+}
+
 export interface ChunkUploadCallbacks {
   onChunkUploaded?: (result: ChunkTranscriptResult) => void;
-  onChunkFailed?: (chunkIndex: number, error: string) => void;
+  onChunkFailed?: (chunkIndex: number, error: ChunkUploadFailure) => void;
   onRetrying?: (chunkIndex: number, retryCount: number) => void;
   onNetworkStatusChange?: (isOnline: boolean) => void;
+  onSessionTerminated?: (error: ChunkUploadTerminalSession) => void;
 }
 
 export interface ChunkUploadOptions {
@@ -46,14 +67,16 @@ const INITIAL_RETRY_DELAY = 1000; // 1초
 const MAX_RETRY_DELAY = 30000; // 30초
 
 class ChunkUploadError extends Error {
+  readonly failure: ChunkUploadFailure;
   readonly retryable: boolean;
   readonly retryAfterSeconds?: number;
 
-  constructor(message: string, retryable: boolean, retryAfterSeconds?: number) {
-    super(message);
+  constructor(failure: ChunkUploadFailure) {
+    super(failure.message);
     this.name = "ChunkUploadError";
-    this.retryable = retryable;
-    this.retryAfterSeconds = retryAfterSeconds;
+    this.failure = failure;
+    this.retryable = failure.recoverable;
+    this.retryAfterSeconds = failure.retryAfterSeconds;
   }
 }
 
@@ -78,12 +101,17 @@ export class ChunkUploadManager {
   private isOnline: boolean = true;
   private retryTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private sessionId: string | null = null;
+  private terminalSessionError: ChunkUploadTerminalSession | null = null;
   private totalDuration: number = 0;
 
   constructor(options?: ChunkUploadOptions | ChunkUploadCallbacks) {
     // 레거시 지원: callbacks만 전달된 경우
     if (options) {
-      if ('onChunkUploaded' in options || 'onChunkFailed' in options) {
+      if (
+        "onChunkUploaded" in options ||
+        "onChunkFailed" in options ||
+        "onSessionTerminated" in options
+      ) {
         this.callbacks = options as ChunkUploadCallbacks;
       } else {
         const opts = options as ChunkUploadOptions;
@@ -104,6 +132,9 @@ export class ChunkUploadManager {
   }
 
   setSessionId(sessionId: string): void {
+    if (this.sessionId !== sessionId) {
+      this.terminalSessionError = null;
+    }
     this.sessionId = sessionId;
   }
 
@@ -136,6 +167,13 @@ export class ChunkUploadManager {
     durationSeconds: number,
     signalMetrics?: ChunkSignalMetrics
   ): Promise<ChunkTranscriptResult | null> {
+    if (this.terminalSessionError) {
+      console.warn(
+        `[ChunkManager] Session ${this.sessionId ?? "unknown"} already terminated, skipping chunk ${chunkIndex}`
+      );
+      return null;
+    }
+
     const chunkId = `chunk-${chunkIndex}-${Date.now()}`;
 
     // 대기 목록에 추가
@@ -157,6 +195,10 @@ export class ChunkUploadManager {
   private async attemptUpload(
     chunk: PendingChunk
   ): Promise<ChunkTranscriptResult | null> {
+    if (this.terminalSessionError) {
+      return null;
+    }
+
     // 오프라인이면 대기
     if (!this.isOnline) {
       console.log(`[ChunkManager] Offline, queueing chunk ${chunk.chunkIndex}`);
@@ -190,43 +232,53 @@ export class ChunkUploadManager {
       });
 
       if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}`;
-        let retryable = isRetryableStatus(response.status);
-        let retryAfterSeconds: number | undefined;
+        let failure: ChunkUploadFailure = {
+          message: `HTTP ${response.status}`,
+          recoverable: isRetryableStatus(response.status),
+          statusCode: response.status,
+        };
 
         try {
           const errorData = await response.json();
           if (errorData?.error) {
-            errorMessage = errorData.error;
+            failure.message = errorData.error;
+          }
+          if (typeof errorData?.code === "string") {
+            failure.code = errorData.code;
           }
           if (typeof errorData?.recoverable === "boolean") {
-            retryable = errorData.recoverable;
+            failure.recoverable = errorData.recoverable;
+          }
+          if (typeof errorData?.terminal === "boolean") {
+            failure.terminal = errorData.terminal;
+          }
+          if (
+            typeof errorData?.sessionStatus === "string" &&
+            ["recording", "processing", "completed", "failed"].includes(errorData.sessionStatus)
+          ) {
+            failure.sessionStatus = errorData.sessionStatus as ChunkUploadSessionStatus;
           }
           if (
             typeof errorData?.retryAfterSeconds === "number" &&
             Number.isFinite(errorData.retryAfterSeconds)
           ) {
-            retryAfterSeconds = errorData.retryAfterSeconds;
+            failure.retryAfterSeconds = errorData.retryAfterSeconds;
           }
         } catch {
           // Ignore JSON parsing errors and fall back to the HTTP status.
         }
 
-        if (!retryAfterSeconds) {
+        if (!failure.retryAfterSeconds) {
           const retryAfterHeader = response.headers.get("Retry-After");
           if (retryAfterHeader) {
             const parsedRetryAfter = Number.parseInt(retryAfterHeader, 10);
             if (Number.isFinite(parsedRetryAfter)) {
-              retryAfterSeconds = parsedRetryAfter;
+              failure.retryAfterSeconds = parsedRetryAfter;
             }
           }
         }
 
-        throw new ChunkUploadError(
-          errorMessage,
-          retryable,
-          retryAfterSeconds
-        );
+        throw new ChunkUploadError(failure);
       }
 
       const data = await response.json();
@@ -253,23 +305,35 @@ export class ChunkUploadManager {
 
       return result;
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      const failure =
+        error instanceof ChunkUploadError
+          ? error.failure
+          : {
+              message: error instanceof Error ? error.message : "Unknown error",
+              recoverable: true,
+            };
       const retryable =
         !(error instanceof ChunkUploadError) || error.retryable;
       console.error(
         `[ChunkManager] Chunk ${chunk.chunkIndex} upload failed:`,
-        errorMessage
+        failure.message
       );
+
+      if (this.isTerminalSessionFailure(failure)) {
+        this.pendingChunks.delete(chunk.id);
+        this.clearRetryTimeout(chunk.id);
+        this.abortSessionUploads(failure, chunk.chunkIndex);
+        return null;
+      }
 
       // 재시도 로직
       if (retryable && chunk.retryCount < MAX_RETRIES) {
         chunk.retryCount++;
         const retryAfterDelay =
           error instanceof ChunkUploadError &&
-          typeof error.retryAfterSeconds === "number" &&
-          error.retryAfterSeconds > 0
-            ? error.retryAfterSeconds * 1000
+          typeof failure.retryAfterSeconds === "number" &&
+          failure.retryAfterSeconds > 0
+            ? failure.retryAfterSeconds * 1000
             : null;
         const delay = retryAfterDelay
           ? Math.min(retryAfterDelay, MAX_RETRY_DELAY)
@@ -298,16 +362,48 @@ export class ChunkUploadManager {
             ? `[ChunkManager] Chunk ${chunk.chunkIndex} failed after ${MAX_RETRIES} retries`
             : `[ChunkManager] Chunk ${chunk.chunkIndex} failed with a non-retryable error`
         );
-        this.callbacks.onChunkFailed?.(chunk.chunkIndex, errorMessage);
+        this.callbacks.onChunkFailed?.(chunk.chunkIndex, failure);
         return null;
       }
     }
+  }
+
+  private isTerminalSessionFailure(failure: ChunkUploadFailure): boolean {
+    return Boolean(
+      failure.terminal ||
+      failure.code === "recording_not_active" ||
+      (failure.sessionStatus && failure.sessionStatus !== "recording")
+    );
+  }
+
+  private abortSessionUploads(
+    failure: ChunkUploadFailure,
+    failedChunkIndex: number
+  ): void {
+    const terminalFailure: ChunkUploadTerminalSession = {
+      ...failure,
+      failedChunkIndex,
+      terminal: true,
+    };
+    this.terminalSessionError = terminalFailure;
+
+    for (const timeout of this.retryTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.retryTimeouts.clear();
+    this.pendingChunks.clear();
+
+    this.callbacks.onSessionTerminated?.(terminalFailure);
   }
 
   /**
    * 대기 중인 모든 청크 재시도
    */
   private retryAllPendingChunks(): void {
+    if (this.terminalSessionError) {
+      return;
+    }
+
     console.log(
       `[ChunkManager] Retrying ${this.pendingChunks.size} pending chunks`
     );
@@ -416,6 +512,9 @@ export class ChunkUploadManager {
     // 상태 초기화
     this.pendingChunks.clear();
     this.transcribedChunks.clear();
+    this.sessionId = null;
+    this.totalDuration = 0;
+    this.terminalSessionError = null;
   }
 
   /**

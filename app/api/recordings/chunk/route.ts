@@ -78,7 +78,13 @@ function getSafeErrorMessage(error: unknown): string {
   return "전사 처리에 실패했습니다.";
 }
 
-function createChunkErrorResponse(error: unknown): ReturnType<typeof errorResponse> {
+function createChunkErrorResponse(
+  error: unknown,
+  options: {
+    sessionStatus?: Recording["status"];
+    terminal?: boolean;
+  } = {}
+): ReturnType<typeof errorResponse> {
   const statusCode =
     error instanceof GroqTranscriptionError && error.statusCode
       ? error.statusCode
@@ -95,6 +101,8 @@ function createChunkErrorResponse(error: unknown): ReturnType<typeof errorRespon
       code: getProviderErrorCode(error),
       recoverable: getRetryableFlag(error),
       retryAfterSeconds,
+      sessionStatus: options.sessionStatus,
+      terminal: options.terminal ?? false,
     },
     { status: statusCode }
   ) as ReturnType<typeof errorResponse>;
@@ -133,8 +141,10 @@ export const POST = withAuth(
       return errorResponse("Chunk size exceeds 4MB limit", 413);
     }
 
+    const chunkLogPrefix = `[Chunk session=${sessionId || "none"} chunk=${chunkIndex} user=${user.id}]`;
+
     console.log(
-      `[Chunk] Processing chunk ${chunkIndex}, size: ${audioChunk.size}, duration: ${durationSeconds}s, session: ${sessionId || "none"}`
+      `${chunkLogPrefix} Processing size=${audioChunk.size} duration=${durationSeconds}s`
     );
 
     const nowIso = new Date().toISOString();
@@ -160,6 +170,8 @@ export const POST = withAuth(
           error: "녹음 세션이 이미 종료되었습니다.",
           code: "recording_not_active",
           recoverable: false,
+          sessionStatus: session.status,
+          terminal: true,
         },
         { status: 409 }
       ) as ReturnType<typeof errorResponse>;
@@ -219,7 +231,7 @@ export const POST = withAuth(
         .eq("status", "recording");
 
       if (sessionUpdateError) {
-        console.error(`[Chunk] Failed to update session progress for ${sessionId}:`, sessionUpdateError);
+        console.error(`${chunkLogPrefix} Failed to update session progress:`, sessionUpdateError);
       }
     };
 
@@ -230,7 +242,7 @@ export const POST = withAuth(
       if (audioChunk.size < 1024) {
         silenceReason = "size_too_small";
         console.log(
-          `[Chunk] Chunk ${chunkIndex} too small (${audioChunk.size} bytes), skipping transcription`
+          `${chunkLogPrefix} Skipping transcription because chunk is too small (${audioChunk.size} bytes)`
         );
         logSttDecision({
           pipeline: "chunk",
@@ -250,7 +262,7 @@ export const POST = withAuth(
       } else if (typeof avgRms === "number" && avgRms < PRE_TRANSCRIPTION_RMS_GATE) {
         silenceReason = "pre_gate_low_signal";
         console.log(
-          `[Chunk] Chunk ${chunkIndex} skipped before transcription (avgRms=${avgRms}, peakRms=${peakRms ?? "n/a"})`
+          `${chunkLogPrefix} Pre-transcription gate avgRms=${avgRms} peakRms=${peakRms ?? "n/a"}`
         );
         logSttDecision({
           pipeline: "chunk",
@@ -270,9 +282,12 @@ export const POST = withAuth(
         });
       } else {
         const estimatedAudioSeconds = getGroqBilledAudioSeconds(durationSeconds);
-        const keySelection = await resolveGroqKeySelection({ estimatedAudioSeconds });
+        const keySelection = await resolveGroqKeySelection({
+          estimatedAudioSeconds,
+          routingKey: sessionId || `${user.id}:${chunkIndex}`,
+        });
         console.log(
-          `[Chunk] Key routing for chunk ${chunkIndex}: activeRecorders=${keySelection.activeRecorderUsers}, keySource=${keySelection.source}, routingReason=${keySelection.routingReason}, recordedLast24h=${keySelection.recordedAudioSecondsLast24h}, projectedLast24h=${keySelection.projectedAudioSecondsLast24h}, riskThreshold=${keySelection.dailyAudioRiskThresholdSeconds}, aspdCooldownUntil=${keySelection.aspdCooldownUntil ?? "none"}`
+          `${chunkLogPrefix} Key routing activeRecorders=${keySelection.activeRecorderUsers} keySource=${keySelection.source} routingReason=${keySelection.routingReason} recordedLastHour=${keySelection.recordedAudioSecondsLastHour} projectedLastHour=${keySelection.projectedAudioSecondsLastHour} hourlyRiskThreshold=${keySelection.hourlyAudioRiskThresholdSeconds} recordedLast24h=${keySelection.recordedAudioSecondsLast24h} providerReportedLast24h=${keySelection.providerReportedAudioUsedSecondsLast24h ?? "none"} effectiveLast24h=${keySelection.effectiveAudioSecondsLast24h} projectedLast24h=${keySelection.projectedAudioSecondsLast24h} dailyRiskThreshold=${keySelection.dailyAudioRiskThresholdSeconds} aspdCooldownUntil=${keySelection.aspdCooldownUntil ?? "none"}`
         );
 
         const transcription = await transcribeAudio(audioChunk, {
@@ -288,12 +303,12 @@ export const POST = withAuth(
         silenceReason = transcription.isLikelySilence ? transcription.reason : undefined;
 
         console.log(
-          `[Chunk] Chunk ${chunkIndex} transcribed, length=${transcript.length}, avgNoSpeechProb=${transcription.metrics.avgNoSpeechProb ?? "n/a"}, avgLogprob=${transcription.metrics.avgLogprob ?? "n/a"}`
+          `${chunkLogPrefix} Transcribed length=${transcript.length} avgNoSpeechProb=${transcription.metrics.avgNoSpeechProb ?? "n/a"} avgLogprob=${transcription.metrics.avgLogprob ?? "n/a"}`
         );
 
         if (transcription.isLikelySilence) {
           console.log(
-            `[Chunk] Chunk ${chunkIndex} filtered as likely silence (reason=${silenceReason}, avgRms=${avgRms ?? "n/a"})`
+            `${chunkLogPrefix} Filtered as likely silence reason=${silenceReason} avgRms=${avgRms ?? "n/a"}`
           );
         }
 
@@ -327,7 +342,7 @@ export const POST = withAuth(
 
         if (completion.error) {
           console.error(
-            `[Chunk] Failed to persist chunk success for session ${sessionId}, chunk ${chunkIndex}:`,
+            `${chunkLogPrefix} Failed to persist chunk success:`,
             completion.error
           );
         }
@@ -357,14 +372,17 @@ export const POST = withAuth(
 
         if (completion.error) {
           console.error(
-            `[Chunk] Failed to persist chunk failure for session ${sessionId}, chunk ${chunkIndex}:`,
+            `${chunkLogPrefix} Failed to persist chunk failure:`,
             completion.error
           );
         }
       }
 
-      console.error(`[Chunk] Transcription failed for chunk ${chunkIndex}:`, error);
-      return createChunkErrorResponse(error);
+      console.error(`${chunkLogPrefix} Transcription failed:`, error);
+      return createChunkErrorResponse(error, {
+        sessionStatus: session?.status,
+        terminal: false,
+      });
     }
   }
 );

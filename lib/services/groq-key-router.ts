@@ -1,6 +1,7 @@
 import { getStaleRecordingCutoffIso } from "@/lib/recording-lifecycle";
 import {
   getGroqAudioBudgetConfig,
+  type GroqAudioUsageSummary,
   loadGroqAudioUsageSummaries,
 } from "@/lib/services/groq-audio-budget";
 import {
@@ -14,7 +15,12 @@ export interface GroqKeySelection {
   apiKey: string;
   aspdCooldownUntil: string | null;
   dailyAudioRiskThresholdSeconds: number;
+  effectiveAudioSecondsLast24h: number;
+  hourlyAudioRiskThresholdSeconds: number;
+  providerReportedAudioUsedSecondsLast24h: number | null;
+  projectedAudioSecondsLastHour: number;
   projectedAudioSecondsLast24h: number;
+  recordedAudioSecondsLastHour: number;
   recordedAudioSecondsLast24h: number;
   routingReason: "active_user_threshold" | "aspd_risk" | "cooldown_fallback";
   source: GroqApiKeySource;
@@ -27,8 +33,15 @@ interface GroqConfiguredKey {
 
 interface GroqCandidate extends GroqConfiguredKey {
   aspdCooldownUntil: string | null;
+  effectiveAudioSecondsLast24h: number;
+  hourlyProjectedAudioSeconds: number;
   isWithinAspdRiskBudget: boolean;
+  isWithinHourlyRiskBudget: boolean;
+  hourlyRiskHeadroomSeconds: number;
+  priorityRank: number;
   projectedAudioSecondsLast24h: number;
+  providerReportedAudioUsedSecondsLast24h: number | null;
+  recordedAudioSecondsLastHour: number;
   recordedAudioSecondsLast24h: number;
   riskHeadroomSeconds: number;
 }
@@ -82,6 +95,64 @@ export function selectGroqApiKeyByActiveUsers(activeRecorderUsers: number): Groq
   };
 }
 
+function getEffectiveAudioUsageSeconds(
+  usage: GroqAudioUsageSummary | undefined,
+  windowStartMs: number
+): {
+  effectiveAudioSecondsLast24h: number;
+  providerReportedAudioUsedSecondsLast24h: number | null;
+  recordedAudioSecondsLast24h: number;
+} {
+  const recordedAudioSecondsLast24h = usage?.rollingAudioSeconds ?? 0;
+  const lastRateLimitedAtMs = usage?.lastRateLimitedAt
+    ? new Date(usage.lastRateLimitedAt).getTime()
+    : Number.NaN;
+  const hasFreshAspdSignal =
+    Number.isFinite(lastRateLimitedAtMs) && lastRateLimitedAtMs >= windowStartMs;
+  const providerReportedAudioUsedSecondsLast24h =
+    hasFreshAspdSignal && Number.isFinite(usage?.lastKnownAudioUsedSeconds)
+      ? usage?.lastKnownAudioUsedSeconds ?? null
+      : null;
+
+  return {
+    effectiveAudioSecondsLast24h: Math.max(
+      recordedAudioSecondsLast24h,
+      providerReportedAudioUsedSecondsLast24h ?? 0
+    ),
+    providerReportedAudioUsedSecondsLast24h,
+    recordedAudioSecondsLast24h,
+  };
+}
+
+function compareHealthyCandidates(a: GroqCandidate, b: GroqCandidate): number {
+  if (a.isWithinHourlyRiskBudget !== b.isWithinHourlyRiskBudget) {
+    return Number(b.isWithinHourlyRiskBudget) - Number(a.isWithinHourlyRiskBudget);
+  }
+
+  if (a.isWithinAspdRiskBudget !== b.isWithinAspdRiskBudget) {
+    return Number(b.isWithinAspdRiskBudget) - Number(a.isWithinAspdRiskBudget);
+  }
+
+  if (a.hourlyRiskHeadroomSeconds !== b.hourlyRiskHeadroomSeconds) {
+    return b.hourlyRiskHeadroomSeconds - a.hourlyRiskHeadroomSeconds;
+  }
+
+  if (a.riskHeadroomSeconds !== b.riskHeadroomSeconds) {
+    return b.riskHeadroomSeconds - a.riskHeadroomSeconds;
+  }
+
+  return a.priorityRank - b.priorityRank;
+}
+
+function hashRoutingKey(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
 async function buildOrderedCandidates(
   configuredKeys: GroqConfiguredKey[],
   activeRecorderUsers: number,
@@ -102,23 +173,35 @@ async function buildOrderedCandidates(
   const {
     dailyLimitSeconds,
     fixedSafetyBufferSeconds,
+    hourlyLimitSeconds,
+    hourlyRiskThresholdRatio,
     perActiveRecorderBufferSeconds,
     riskThresholdRatio,
+    rollingWindowHours,
   } = getGroqAudioBudgetConfig();
   const riskThresholdSeconds = Math.floor(dailyLimitSeconds * riskThresholdRatio);
+  const hourlyRiskThresholdSeconds = Math.floor(hourlyLimitSeconds * hourlyRiskThresholdRatio);
   const dynamicBufferSeconds =
     fixedSafetyBufferSeconds + activeRecorderUsers * perActiveRecorderBufferSeconds;
+  const windowStartMs = nowMs - rollingWindowHours * 60 * 60 * 1000;
 
-  return candidateSources.flatMap((source) => {
+  return candidateSources.flatMap((source, priorityRank) => {
     const configuredKey = configuredKeyMap.get(source);
     if (!configuredKey) {
       return [];
     }
 
     const usage = usageSummaries.get(source);
-    const recordedAudioSecondsLast24h = usage?.rollingAudioSeconds ?? 0;
+    const {
+      effectiveAudioSecondsLast24h,
+      providerReportedAudioUsedSecondsLast24h,
+      recordedAudioSecondsLast24h,
+    } = getEffectiveAudioUsageSeconds(usage, windowStartMs);
+    const recordedAudioSecondsLastHour = usage?.rollingAudioSecondsLastHour ?? 0;
+    const hourlyProjectedAudioSeconds =
+      recordedAudioSecondsLastHour + estimatedAudioSeconds + dynamicBufferSeconds;
     const projectedAudioSecondsLast24h =
-      recordedAudioSecondsLast24h + estimatedAudioSeconds + dynamicBufferSeconds;
+      effectiveAudioSecondsLast24h + estimatedAudioSeconds + dynamicBufferSeconds;
     const aspdCooldownUntil =
       usage?.cooldownUntil && new Date(usage.cooldownUntil).getTime() > nowMs
         ? usage.cooldownUntil
@@ -127,7 +210,14 @@ async function buildOrderedCandidates(
     return [{
       ...configuredKey,
       aspdCooldownUntil,
+      effectiveAudioSecondsLast24h,
+      hourlyProjectedAudioSeconds,
+      isWithinHourlyRiskBudget: hourlyProjectedAudioSeconds <= hourlyRiskThresholdSeconds,
+      hourlyRiskHeadroomSeconds: hourlyRiskThresholdSeconds - hourlyProjectedAudioSeconds,
       recordedAudioSecondsLast24h,
+      recordedAudioSecondsLastHour,
+      providerReportedAudioUsedSecondsLast24h,
+      priorityRank,
       projectedAudioSecondsLast24h,
       riskHeadroomSeconds: riskThresholdSeconds - projectedAudioSecondsLast24h,
       isWithinAspdRiskBudget: projectedAudioSecondsLast24h <= riskThresholdSeconds,
@@ -164,11 +254,19 @@ export async function countActiveRecordingUsers(): Promise<number> {
 }
 
 export async function resolveGroqKeySelection(
-  options: { estimatedAudioSeconds?: number; nowMs?: number } = {}
+  options: { estimatedAudioSeconds?: number; nowMs?: number; routingKey?: string } = {}
 ): Promise<GroqKeySelection> {
   const nowMs = options.nowMs ?? Date.now();
-  const { dailyLimitSeconds, riskThresholdRatio } = getGroqAudioBudgetConfig();
+  const {
+    dailyLimitSeconds,
+    hourlyLimitSeconds,
+    hourlyRiskThresholdRatio,
+    riskThresholdRatio,
+  } = getGroqAudioBudgetConfig();
   const dailyAudioRiskThresholdSeconds = Math.floor(dailyLimitSeconds * riskThresholdRatio);
+  const hourlyAudioRiskThresholdSeconds = Math.floor(
+    hourlyLimitSeconds * hourlyRiskThresholdRatio
+  );
   const activeRecorderUsers = await countActiveRecordingUsers();
   const estimatedAudioSeconds = Math.max(0, Math.ceil(options.estimatedAudioSeconds ?? 0));
   const configuredKeys = getConfiguredGroqKeys();
@@ -179,12 +277,25 @@ export async function resolveGroqKeySelection(
     estimatedAudioSeconds,
     nowMs
   );
-  const safeCandidate = candidates.find(
-    (candidate) => !candidate.aspdCooldownUntil && candidate.isWithinAspdRiskBudget
-  );
+  const safeCandidates = candidates
+    .filter(
+      (candidate) =>
+        !candidate.aspdCooldownUntil &&
+        candidate.isWithinAspdRiskBudget &&
+        candidate.isWithinHourlyRiskBudget
+    )
+    .sort(compareHealthyCandidates);
+  const safeCandidate =
+    safeCandidates.length > 0
+      ? safeCandidates[
+          options.routingKey
+            ? hashRoutingKey(options.routingKey) % safeCandidates.length
+            : 0
+        ]
+      : undefined;
   const bestAvailableCandidate = candidates
     .filter((candidate) => !candidate.aspdCooldownUntil)
-    .sort((a, b) => b.riskHeadroomSeconds - a.riskHeadroomSeconds)[0];
+    .sort(compareHealthyCandidates)[0];
   const leastBlockedCandidate = candidates
     .slice()
     .sort((a, b) => {
@@ -193,7 +304,7 @@ export async function resolveGroqKeySelection(
       if (aCooldown !== bCooldown) {
         return aCooldown - bCooldown;
       }
-      return b.riskHeadroomSeconds - a.riskHeadroomSeconds;
+      return compareHealthyCandidates(a, b);
     })[0];
   const selected = safeCandidate ?? bestAvailableCandidate ?? leastBlockedCandidate;
 
@@ -203,7 +314,12 @@ export async function resolveGroqKeySelection(
       apiKey: fallbackSelection.apiKey,
       aspdCooldownUntil: null,
       dailyAudioRiskThresholdSeconds,
+      effectiveAudioSecondsLast24h: 0,
+      hourlyAudioRiskThresholdSeconds,
+      providerReportedAudioUsedSecondsLast24h: null,
+      projectedAudioSecondsLastHour: estimatedAudioSeconds,
       projectedAudioSecondsLast24h: estimatedAudioSeconds,
+      recordedAudioSecondsLastHour: 0,
       recordedAudioSecondsLast24h: 0,
       routingReason: "active_user_threshold",
       source: fallbackSelection.source,
@@ -222,7 +338,13 @@ export async function resolveGroqKeySelection(
     apiKey: selected.apiKey,
     aspdCooldownUntil: selected.aspdCooldownUntil,
     dailyAudioRiskThresholdSeconds,
+    effectiveAudioSecondsLast24h: selected.effectiveAudioSecondsLast24h,
+    hourlyAudioRiskThresholdSeconds,
+    providerReportedAudioUsedSecondsLast24h:
+      selected.providerReportedAudioUsedSecondsLast24h,
+    projectedAudioSecondsLastHour: selected.hourlyProjectedAudioSeconds,
     projectedAudioSecondsLast24h: selected.projectedAudioSecondsLast24h,
+    recordedAudioSecondsLastHour: selected.recordedAudioSecondsLastHour,
     recordedAudioSecondsLast24h: selected.recordedAudioSecondsLast24h,
     routingReason,
     source: selected.source,

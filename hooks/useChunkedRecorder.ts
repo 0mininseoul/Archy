@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import {
   ChunkUploadManager,
+  type ChunkUploadTerminalSession,
   ChunkTranscriptResult,
   ChunkSignalMetrics,
 } from "@/lib/services/chunk-upload-manager";
@@ -16,6 +17,8 @@ import {
   AUTO_PAUSE_NOTICE_STORAGE_KEY,
   PauseNotifyReason,
 } from "@/lib/recording-lifecycle";
+import { submitFinalizeIntent } from "@/lib/services/finalize-intent-client";
+import type { Recording } from "@/lib/types/database";
 
 // 청크 설정
 const CHUNK_DURATION_SECONDS = 20; // 20초로 변경 (스마트 재개 시스템)
@@ -71,6 +74,13 @@ export interface ChunkedRecordingResult {
   totalDuration: number;
   totalChunks: number;
   sessionId?: string;
+}
+
+interface RecordingSessionServerState {
+  durationSeconds: number;
+  formattedContent: string | null;
+  status: Recording["status"];
+  transcriptLength: number;
 }
 
 export interface UseChunkedRecorderReturn {
@@ -189,6 +199,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const lastRecorderActionRef = useRef<RecorderAction | null>(null);
   const isBackgroundTransitioningRef = useRef<boolean>(false);
   const resumeContextRef = useRef<RecordingSession | null>(null);
+  const autoFinalizeSessionIdsRef = useRef<Set<string>>(new Set());
 
   // iOS 감지 (MP4를 사용하는 경우)
   const isIOSRef = useRef<boolean>(false);
@@ -564,6 +575,216 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       console.warn("[ChunkedRecorder] Failed to clear session:", e);
     }
   }, []);
+
+  const getCurrentDurationSeconds = useCallback((): number => {
+    const liveElapsedSeconds =
+      startTimeRef.current > 0
+        ? Math.max(0, Math.floor((Date.now() - startTimeRef.current) / 1000))
+        : 0;
+
+    return Math.max(duration, Math.floor(pausedTimeRef.current / 1000), liveElapsedSeconds);
+  }, [duration]);
+
+  const submitAutoFinalizeIntent = useCallback(
+    async (activeSessionId: string, totalDurationSeconds: number, expectedChunkCount: number) => {
+      if (totalDurationSeconds < 1 || !activeSessionId) {
+        return false;
+      }
+
+      if (autoFinalizeSessionIdsRef.current.has(activeSessionId)) {
+        return true;
+      }
+
+      autoFinalizeSessionIdsRef.current.add(activeSessionId);
+      const submitted = await submitFinalizeIntent(
+        {
+          sessionId: activeSessionId,
+          totalDurationSeconds,
+          expectedChunkCount,
+          format: "meeting",
+        },
+        { keepalive: true }
+      );
+
+      if (!submitted) {
+        console.warn(
+          `[ChunkedRecorder] Failed to submit auto-finalize intent for session ${activeSessionId}`
+        );
+      }
+
+      return submitted;
+    },
+    []
+  );
+
+  const loadRecordingSessionServerState = useCallback(
+    async (recordingId: string): Promise<RecordingSessionServerState | null> => {
+      try {
+        const response = await fetch(`/api/recordings/${recordingId}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            return null;
+          }
+
+          throw new Error(`Failed to load recording session: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const recording = data?.recording;
+        if (!recording?.id || typeof recording.status !== "string") {
+          return null;
+        }
+
+        return {
+          durationSeconds:
+            typeof recording.duration_seconds === "number" ? recording.duration_seconds : 0,
+          formattedContent:
+            typeof recording.formatted_content === "string" ? recording.formatted_content : null,
+          status: recording.status as Recording["status"],
+          transcriptLength:
+            typeof recording.transcript === "string" ? recording.transcript.length : 0,
+        };
+      } catch (error) {
+        console.warn(
+          `[ChunkedRecorder] Failed to verify server session state for ${recordingId}:`,
+          error
+        );
+        return null;
+      }
+    },
+    []
+  );
+
+  const resetRecorderState = useCallback(async () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch (error) {
+        console.warn("[ChunkedRecorder] Failed to stop recorder during reset:", error);
+      }
+    }
+    mediaRecorderRef.current = null;
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      await audioContextRef.current.close().catch((error) => {
+        console.warn("[ChunkedRecorder] Failed to close AudioContext during reset:", error);
+      });
+      audioContextRef.current = null;
+    }
+
+    analyserNodeRef.current = null;
+    setAnalyserNode(null);
+
+    if (chunkManagerRef.current) {
+      chunkManagerRef.current.cleanup();
+      chunkManagerRef.current = null;
+    }
+
+    currentChunkDataRef.current = [];
+    currentChunkRmsSamplesRef.current = [];
+    currentChunkPeakRmsRef.current = 0;
+    currentChunkIndexRef.current = 0;
+    chunkStartTimeRef.current = 0;
+    lastChunkTimeRef.current = 0;
+    pausedTimeRef.current = 0;
+    resumeContextRef.current = null;
+    sessionIdRef.current = null;
+    isBackgroundTransitioningRef.current = false;
+    isRecordingRef.current = false;
+    isPausedRef.current = false;
+
+    clearSessionFromStorage();
+    setPausedSession(null);
+    setIsBackgroundPaused(false);
+    setSessionId(null);
+    setIsRecording(false);
+    setIsPaused(false);
+    setDuration(0);
+    setPendingChunks(0);
+    setChunksTotal(0);
+    setChunksTranscribed(0);
+    setIsUploadingChunk(false);
+    setIsControlBusy(false);
+    await releaseWakeLock();
+    setRuntimeState("idle", "state_sync");
+  }, [clearSessionFromStorage, releaseWakeLock, setRuntimeState]);
+
+  const reconcileStoredSession = useCallback(
+    async (session: RecordingSession): Promise<RecordingSession | null> => {
+      const serverState = await loadRecordingSessionServerState(session.sessionId);
+      if (!serverState) {
+        return session;
+      }
+
+      if (serverState.status === "recording") {
+        return session;
+      }
+
+      console.warn(
+        `[ChunkedRecorder] Discarding local session ${session.sessionId}; server status=${serverState.status}`
+      );
+      clearSessionFromStorage();
+      setPausedSession(null);
+      setIsBackgroundPaused(false);
+
+      if (
+        serverState.status === "failed" &&
+        !serverState.formattedContent &&
+        serverState.transcriptLength > 0
+      ) {
+        await submitAutoFinalizeIntent(
+          session.sessionId,
+          Math.max(session.duration, serverState.durationSeconds),
+          Math.max(session.chunkIndex, 0)
+        );
+      }
+
+      return null;
+    },
+    [clearSessionFromStorage, loadRecordingSessionServerState, submitAutoFinalizeIntent]
+  );
+
+  const handleTerminalSessionTermination = useCallback(
+    async (terminalError: ChunkUploadTerminalSession) => {
+      const activeSessionId = sessionIdRef.current;
+      const totalDurationSeconds = getCurrentDurationSeconds();
+      const expectedChunkCount = Math.max(
+        currentChunkIndexRef.current,
+        terminalError.failedChunkIndex + 1
+      );
+
+      console.warn(
+        `[ChunkedRecorder] Terminal session rejection for ${activeSessionId ?? "none"} (status=${terminalError.sessionStatus ?? "unknown"}, code=${terminalError.code ?? "unknown"}, chunk=${terminalError.failedChunkIndex})`
+      );
+
+      await resetRecorderState();
+      setError(null);
+
+      if (activeSessionId) {
+        await submitAutoFinalizeIntent(
+          activeSessionId,
+          totalDurationSeconds,
+          expectedChunkCount
+        );
+      }
+    },
+    [getCurrentDurationSeconds, resetRecorderState, submitAutoFinalizeIntent]
+  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -949,7 +1170,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       if (document.visibilityState === "hidden") {
         // 백그라운드로 전환됨
         if (isRecording && !isPaused) {
-          handleBackgroundTransition("visibility_hidden");
+          await handleBackgroundTransition("visibility_hidden");
         }
       } else if (document.visibilityState === "visible") {
         // 포그라운드로 복귀
@@ -960,8 +1181,12 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         // 저장된 세션이 있는지 확인
         const storedSession = loadSessionFromStorage();
         if (storedSession && !isRecording) {
-          console.log("[ChunkedRecorder] Found paused session:", storedSession);
-          setPausedSession(storedSession);
+          const reconciledSession = await reconcileStoredSession(storedSession);
+          if (reconciledSession) {
+            console.log("[ChunkedRecorder] Found paused session:", reconciledSession);
+            setPausedSession(reconciledSession);
+            setIsBackgroundPaused(true);
+          }
         }
       }
     };
@@ -970,7 +1195,14 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [isRecording, isPaused, requestWakeLock, handleBackgroundTransition, loadSessionFromStorage]);
+  }, [
+    handleBackgroundTransition,
+    isPaused,
+    isRecording,
+    loadSessionFromStorage,
+    reconcileStoredSession,
+    requestWakeLock,
+  ]);
 
   /**
    * 녹음 시작
@@ -1069,7 +1301,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
                 error
               );
               setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
-              setError(`청크 ${chunkIndex} 업로드 실패`);
+              setError(
+                error.recoverable
+                  ? `청크 ${chunkIndex} 업로드 실패`
+                  : "녹음 세션 처리에 실패했습니다."
+              );
+            },
+            onSessionTerminated: (terminalError) => {
+              setPendingChunks(0);
+              void handleTerminalSessionTermination(terminalError);
             },
             onRetrying: (chunkIndex, retryCount) => {
               console.log(
@@ -1206,6 +1446,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     attachRecorderLifecycleListeners,
     clearSessionFromStorage,
     extractAndUploadChunk,
+    handleTerminalSessionTermination,
     requestWakeLock,
     sampleCurrentChunkRms,
     setRuntimeState,
@@ -1449,10 +1690,15 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
    * 저장된 세션 재개 (백그라운드에서 복귀 시)
    */
   const resumeSession = useCallback(async (session: RecordingSession) => {
-    console.log("[ChunkedRecorder] Resuming session:", session);
-    resumeContextRef.current = session;
+    const reconciledSession = await reconcileStoredSession(session);
+    if (!reconciledSession) {
+      return;
+    }
+
+    console.log("[ChunkedRecorder] Resuming session:", reconciledSession);
+    resumeContextRef.current = reconciledSession;
     await startRecording();
-  }, [startRecording]);
+  }, [reconcileStoredSession, startRecording]);
 
   /**
    * 저장된 세션 폐기
@@ -1509,12 +1755,20 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
   // 마운트 시 저장된 세션 확인
   useEffect(() => {
-    const storedSession = loadSessionFromStorage();
-    if (storedSession) {
-      console.log("[ChunkedRecorder] Found stored session on mount:", storedSession);
-      setPausedSession(storedSession);
-    }
-  }, [loadSessionFromStorage]);
+    void (async () => {
+      const storedSession = loadSessionFromStorage();
+      if (!storedSession) {
+        return;
+      }
+
+      const reconciledSession = await reconcileStoredSession(storedSession);
+      if (reconciledSession) {
+        console.log("[ChunkedRecorder] Found stored session on mount:", reconciledSession);
+        setPausedSession(reconciledSession);
+        setIsBackgroundPaused(true);
+      }
+    })();
+  }, [loadSessionFromStorage, reconcileStoredSession]);
 
   const canPause = !isControlBusy && recorderRuntimeState === "recording";
   const canResume = !isControlBusy && recorderRuntimeState === "paused";
