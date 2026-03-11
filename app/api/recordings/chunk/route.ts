@@ -287,7 +287,7 @@ export const POST = withAuth(
           routingKey: sessionId || `${user.id}:${chunkIndex}`,
         });
         console.log(
-          `${chunkLogPrefix} Key routing activeRecorders=${keySelection.activeRecorderUsers} keySource=${keySelection.source} routingReason=${keySelection.routingReason} recordedLastHour=${keySelection.recordedAudioSecondsLastHour} projectedLastHour=${keySelection.projectedAudioSecondsLastHour} hourlyRiskThreshold=${keySelection.hourlyAudioRiskThresholdSeconds} recordedLast24h=${keySelection.recordedAudioSecondsLast24h} providerReportedLast24h=${keySelection.providerReportedAudioUsedSecondsLast24h ?? "none"} effectiveLast24h=${keySelection.effectiveAudioSecondsLast24h} projectedLast24h=${keySelection.projectedAudioSecondsLast24h} dailyRiskThreshold=${keySelection.dailyAudioRiskThresholdSeconds} aspdCooldownUntil=${keySelection.aspdCooldownUntil ?? "none"}`
+          `${chunkLogPrefix} Key routing activeRecorders=${keySelection.activeRecorderUsers} keySource=${keySelection.source} routingReason=${keySelection.routingReason} recordedLastHour=${keySelection.recordedAudioSecondsLastHour} projectedLastHour=${keySelection.projectedAudioSecondsLastHour} hourlyRiskThreshold=${keySelection.hourlyAudioRiskThresholdSeconds} recordedLast24h=${keySelection.recordedAudioSecondsLast24h} providerFloorLast24h=${keySelection.providerFloorAudioUsedSecondsLast24h ?? "none"} effectiveLast24h=${keySelection.effectiveAudioSecondsLast24h} projectedLast24h=${keySelection.projectedAudioSecondsLast24h} dailyRiskThreshold=${keySelection.dailyAudioRiskThresholdSeconds} aspdCooldownUntil=${keySelection.aspdCooldownUntil ?? "none"}`
         );
 
         const transcription = await transcribeAudio(audioChunk, {
