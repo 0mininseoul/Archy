@@ -24,7 +24,7 @@
 ## 4. 솔루션 (Solution)
 
 - Session + Chunk 기반 녹음(20초 단위 업로드/재시도/복구)
-- Groq Whisper + OpenAI 포맷팅으로 빠른 전사/문서화
+- Groq Whisper + Gemini/OpenAI 포맷팅으로 빠른 전사/문서화
 - Notion/Google Docs 자동 저장 + Slack/Push 알림
 - Smart 포맷 + 커스텀 포맷 기본값 설정
 
@@ -43,7 +43,7 @@
 
 ## 7. 비용 구조 (Cost Structure)
 
-- AI API: Groq(STT), OpenAI(문서 정리)
+- AI API: Groq(STT), Gemini/OpenAI(문서 정리)
 - 인프라: Vercel + Supabase(Auth/DB/Storage)
 - 외부 연동 운영: Notion/Google/Slack OAuth 및 유지보수
 - 제품 개선/운영: 고객지원, 품질/성능 개선 비용

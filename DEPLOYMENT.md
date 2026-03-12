@@ -1,6 +1,6 @@
 # Archy 배포 가이드
 
-최종 업데이트: 2026-03-11
+최종 업데이트: 2026-03-12
 
 이 저장소는 배포 면이 둘입니다.
 
@@ -30,6 +30,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_APP_URL=https://your-domain.com
 OPENAI_API_KEY=
+# Optional until 2026-05-06 00:00:00 KST: when set, formatting prefers Gemini
+GEMINI_API_KEY=
 GROQ_API_KEY=
 CRON_SECRET=replace-with-a-random-16-plus-char-string
 NEXT_PUBLIC_SENTRY_DSN=
@@ -87,6 +89,7 @@ ADMIN_EMAILS=you@example.com
 - `database/schema.sql`만 배포 전에 적용하면 불충분합니다. 최신 마이그레이션 전체를 반영해야 합니다.
 - Sentry는 클라이언트/browser 전송에 `NEXT_PUBLIC_SENTRY_DSN`, 서버 전송에 `SENTRY_DSN`을 사용합니다. 동일 DSN이면 두 값 모두 같은 값으로 넣으면 됩니다.
 - `SENTRY_AUTH_TOKEN`은 Vercel build 시 source map 업로드용입니다. 런타임 비밀은 아니지만 저장소에는 커밋하지 마세요.
+- `GEMINI_API_KEY`가 있으면 `2026-05-06 00:00:00 KST` 이전까지 메인 앱 포맷팅이 Gemini `gemini-3.1-pro-preview`를 우선 사용합니다. 이후에는 OpenAI `gpt-4o-mini` 경로로 복귀합니다.
 
 ## 3. Supabase 설정
 
@@ -105,6 +108,7 @@ ADMIN_EMAILS=you@example.com
 ### Storage
 
 - 오디오 저장 기능을 제공할 경우 `recordings` 버킷 생성
+- 현재 session/chunk recorder는 `audio_file_path`를 채우지 않으므로, 이 버킷은 legacy direct-upload 경로나 향후 오디오 저장 확장 기준으로 보는 편이 정확합니다.
 
 ## 4. OAuth Redirect URI 정합성
 

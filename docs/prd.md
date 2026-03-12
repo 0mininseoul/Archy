@@ -42,7 +42,7 @@
 ### 4.2 문서 생성
 
 - Groq STT
-- OpenAI 포맷팅
+- Gemini/OpenAI 포맷팅
 - 제목 자동 생성
 - markdown 결과 저장
 

@@ -1,6 +1,6 @@
 # Archy LLM Context
 
-최종 업데이트: 2026-03-11
+최종 업데이트: 2026-03-12
 
 이 문서는 LLM이 Archy 코드베이스를 빠르게 이해하도록 핵심 컨텍스트만 정리한 문서입니다.
 
@@ -28,8 +28,8 @@ Archy는 음성 녹음을 자동 문서화하는 서비스입니다.
 - 인증: Supabase Auth 기반 (`withAuth` 래퍼)
 - 녹음 상태: `recording -> processing -> completed/failed`
 - 처리 단계: `transcription`, `formatting`, `saving`
-- 기본 저장 정책: 오디오 저장 안 함 (`audio_file_path` nullable)
-- 오디오 저장은 사용자 토글(`save_audio_enabled`)일 때만 시도
+- 기본 session/chunk 파이프라인은 text-first이며 `audio_file_path`는 대체로 `null`
+- legacy `POST /api/recordings` 경로만 사용자 토글(`save_audio_enabled`)일 때 오디오 저장을 시도
 - 녹음 세션은 30분 비활성 시 stale cleanup 대상이 됨 (`/api/cron/stale-recordings`)
 - chunk 단위 품질 메타데이터는 `recording_chunks`, `expected_chunk_count`, `transcription_warnings`에 반영될 수 있음
 - Slack OAuth callback은 `NEXT_PUBLIC_APP_URL/api/auth/slack/callback`에서 파생됨

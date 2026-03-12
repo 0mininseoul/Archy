@@ -112,7 +112,7 @@ export interface Recording {
   id: string;
   user_id: string;
   title: string;
-  audio_file_path?: string | null; // nullable - audio not stored
+  audio_file_path?: string | null; // nullable - usually null in the primary chunked flow
   duration_seconds: number;
   format: RecordingFormat;
   custom_format_id?: string | null;

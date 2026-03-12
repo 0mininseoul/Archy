@@ -1,6 +1,6 @@
 # Archy 로컬 개발 설정
 
-최종 업데이트: 2026-03-11
+최종 업데이트: 2026-03-12
 
 ## 1. 요구사항
 
@@ -8,6 +8,7 @@
 - npm
 - Supabase 프로젝트
 - OpenAI / Groq API 키
+- 선택: `GEMINI_API_KEY` (메인 앱 포맷팅 provider 우선순위와 `Archy Ops Agent`가 함께 사용)
 - 선택: Notion / Google / Slack / Polar / Amplitude / Kakao 설정
 - 선택: `Archy Ops Agent`까지 로컬에서 돌릴 경우 Discord Bot / Gemini / Google Service Account / Notion Internal Integration
 
@@ -33,9 +34,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 OPENAI_API_KEY=
+# Optional until 2026-05-06 00:00:00 KST: when set, formatting prefers Gemini
+GEMINI_API_KEY=
 GROQ_API_KEY=
 CRON_SECRET=replace-with-a-random-16-plus-char-string
 ```
+
+메모:
+- `OPENAI_API_KEY`는 기본/폴백 경로이므로 계속 권장됩니다.
+- `GEMINI_API_KEY`가 있으면 `2026-05-06 00:00:00 KST` 이전까지 메인 앱 포맷팅이 Gemini `gemini-3.1-pro-preview`를 우선 사용합니다.
 
 ### 3.2 녹음/STT 라우팅 옵션
 
@@ -99,7 +106,8 @@ ADMIN_EMAILS=you@example.com
 메인 웹앱만 개발한다면 이 섹션은 비워둬도 됩니다.
 
 ```env
-# Gemini / Discord
+# Shared Gemini / Discord
+# GEMINI_API_KEY is also read by the main app formatter.
 GEMINI_API_KEY=
 DISCORD_BOT_TOKEN=
 DISCORD_GUILD_ID=
@@ -190,6 +198,7 @@ TAVILY_API_KEY=
 
 - 기본 정책은 오디오 파일을 저장하지 않습니다.
 - 설정에서 오디오 저장을 켜려면 `recordings` 버킷 생성이 필요합니다.
+- 현재 session/chunk recorder는 `audio_file_path`를 채우지 않으므로, `recordings` 버킷은 legacy direct-upload 경로나 향후 오디오 저장 확장 기준으로 보는 편이 정확합니다.
 
 ### Google 로그인 (Supabase Auth)
 

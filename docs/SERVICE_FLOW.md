@@ -1,6 +1,6 @@
 # Archy 서비스 흐름
 
-최종 업데이트: 2026-03-11
+최종 업데이트: 2026-03-12
 
 ## 1. End-to-End 파이프라인
 
@@ -136,7 +136,7 @@ flowchart TD
 ## 7. 실패 처리 기준
 
 - `transcription` 실패: STT 오류, chunk 누락, recoverable retry 소진
-- `formatting` 실패: OpenAI 타임아웃 또는 문제 응답 재시도 초과
+- `formatting` 실패: 활성 formatting provider(Gemini/OpenAI) 타임아웃 또는 문제 응답 재시도 초과
 - `notion` / `google` / `slack` 실패: 연동 실패를 `error_step` / `error_message`에 기록
 - `abandoned` 실패: 30분 이상 비활성 세션이 stale cleanup에 걸린 경우
 - 클라이언트 오류: `/api/client-errors`로 recorder 상태와 함께 별도 로깅

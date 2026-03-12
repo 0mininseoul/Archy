@@ -23,6 +23,7 @@ Archy는 모바일 웹/PWA 환경에서 음성을 녹음하면,
 - Groq 다중 키 라우팅 + RMS/무음/환각 필터 + chunk 단위 품질 추적
 - Smart(범용) 포맷 + 사용자 커스텀 포맷 기본값 지정
 - Notion 저장 대상 탐색(빠른/딥 모드 + 검색)
+- 주 녹음 플로우는 text-first이며, `audio_file_path` 저장/재생 경로는 현재 legacy direct upload 레코드 기준으로 유지
 - Pro(프로모션/구독) 사용량 정책
 
 ## 주요 기능
@@ -42,7 +43,7 @@ Archy는 모바일 웹/PWA 환경에서 음성을 녹음하면,
 
 - Frontend: Next.js 16 (App Router), React 19, TypeScript 5.9, Tailwind CSS
 - Backend: Next.js Route Handlers, Supabase (Auth + Postgres + Storage)
-- AI: Groq Whisper, OpenAI Chat Completions
+- AI: Groq Whisper, Gemini API, OpenAI Chat Completions
 - Integrations: Notion API, Google Docs/Drive API, Slack API, Web Push
 - Analytics: Amplitude, Vercel Analytics/Speed Insights
 
@@ -66,6 +67,11 @@ npm run dev
 - `OPENAI_API_KEY`
 - `GROQ_API_KEY`
 - `NEXT_PUBLIC_APP_URL`
+
+포맷팅 provider 옵션:
+- `GEMINI_API_KEY`
+  - `2026-05-06 00:00:00 KST` 이전에는 설정 시 Gemini `gemini-3.1-pro-preview`를 우선 사용
+  - 이후 또는 미설정 시 OpenAI `gpt-4o-mini` 경로를 사용
 
 STT 다중 키 라우팅(선택):
 - `GROQ_API_KEY_TIER_2` (동시 녹음 유저 3명 이상일 때 사용)
@@ -98,7 +104,8 @@ STT 다중 키 라우팅(선택):
 - 크론/운영: `CRON_SECRET`
 
 Ops Agent / 데일리 배치를 함께 돌릴 경우 추가:
-- Discord/Gemini: `GEMINI_API_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_DAILY_CHANNEL_ID`
+- Shared Gemini + Discord: `GEMINI_API_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_DAILY_CHANNEL_ID`
+  - `GEMINI_API_KEY`는 메인 앱 포맷팅 경로와 `Archy Ops Agent`가 함께 사용합니다.
 - Google Sheets(Service Account): `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `ARCHY_USER_SHEET_ID`, `ARCHY_USER_SHEET_TAB_NAME`
 - Notion Internal Integration: `NOTION_INTERNAL_INTEGRATION_TOKEN`, `NOTION_USER_METRICS_DATABASE_ID`, `NOTION_WORK_DB_DATA_SOURCE_ID`
 

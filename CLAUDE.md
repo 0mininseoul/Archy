@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Archy is an automated voice documentation service built with Next.js 16 (App Router). Users record audio, which is transcribed via Groq Whisper API, formatted by OpenAI GPT-4o-mini, and saved to Notion/Google Docs with optional Slack notifications. The app is a PWA with multilingual support (Korean/English).
+Archy is an automated voice documentation service built with Next.js 16 (App Router). Users record audio in a session/chunk pipeline, each chunk is transcribed via Groq Whisper Large V3, the merged transcript is formatted by Gemini `gemini-3.1-pro-preview` while `GEMINI_API_KEY` is present before `2026-05-06 00:00:00 KST`, otherwise by OpenAI `gpt-4o-mini`, and the result can be saved to Notion/Google Docs with optional Slack and Web Push notifications. The app is a multilingual (Korean/English) PWA.
 
-**Critical: Audio files are NOT stored.** They are sent directly to Groq API for transcription, then discarded. Only text (transcripts and formatted content) is persisted in the database.
+**Important audio nuance:** The primary session/chunk recorder is text-first and normally leaves `audio_file_path` as `null`. A legacy direct-upload route (`POST /api/recordings`) can store audio in Supabase Storage when `save_audio_enabled` is true, and signed playback endpoints remain for recordings that actually have stored audio.
 
 **Source of truth note:** For the current API surface, setup, and lifecycle behavior, prefer [docs/LLMS.md](docs/LLMS.md), [docs/FEATURE_SPEC.md](docs/FEATURE_SPEC.md), [SETUP.md](SETUP.md), `app/api/**/route.ts`, and `lib/types/database.ts`. Older examples in this file may lag behind implementation details.
 
@@ -43,59 +43,71 @@ npx tsc --noEmit
 ## Code Quality Tools
 
 ### ESLint Configuration
-- Located at `.eslintrc.json`
-- Extends `next/core-web-vitals` and `@typescript-eslint/recommended`
+- Located at `eslint.config.mjs`
+- Extends `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript`
 - Rules configured:
   - Unused variables: warn (with `_` prefix ignore pattern)
   - Explicit `any`: warn
+  - `@typescript-eslint/no-require-imports`: off
   - Console statements: warn (except `console.warn` and `console.error`)
   - Prefer `const` over `let`: warn
+  - `react-hooks/immutability`: off
+  - `react-hooks/set-state-in-effect`: off
+  - `react/no-unescaped-entities`: off
+- Ignore globs: `.next/**`, `node_modules/**`, `out/**`, `build/**`, `coverage/**`, `*.tsbuildinfo`, `next-env.d.ts`
 
 ## Architecture
 
 ### Tech Stack
 - **Frontend**: Next.js 16 App Router, React 19, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes (serverless, Edge runtime where applicable)
+- **Backend**: Next.js Route Handlers (Node + Edge where explicitly set)
 - **Database**: Supabase (PostgreSQL with Row Level Security)
-- **Auth**: Supabase Auth with Google OAuth
-- **External APIs**: Groq Whisper (STT), OpenAI GPT-4o-mini (formatting), Notion API, Google Docs/Drive API, Slack API
+- **Auth**: Supabase Auth (Google sign-in) plus separate Notion / Google Docs / Slack OAuth integrations
+- **External APIs**: Groq Whisper (STT), Gemini + OpenAI (formatting), Notion API, Google Docs/Drive API, Slack API, Polar
 - **Push Notifications**: Web Push with VAPID keys
 
 ### Directory Structure
 
 ```
 app/
-├── api/                    # API Routes
-│   ├── recordings/         # Recording CRUD + processing
-│   ├── formats/            # Custom format templates
-│   ├── user/               # User data, usage, language, onboarding, referral, push
-│   ├── auth/               # OAuth callbacks (Google, Notion, Slack)
-│   ├── notion/             # Notion database/page operations
-│   └── google/             # Google Drive folder operations
-├── dashboard/              # Main recording interface
-├── history/                # Recording list with status & filters
-├── recordings/[id]/        # Recording detail page
-├── settings/               # Account, integrations, formats
-│   ├── formats/            # Custom format editor
-│   └── contact/            # Contact & account withdrawal
-│       └── withdraw/       # Withdrawal flow
+├── api/                    # Route handlers
+│   ├── recordings/         # Session lifecycle, chunk upload, finalize, CRUD
+│   ├── user/               # Profile, usage, onboarding, language, referral, data, push
+│   ├── auth/               # Supabase callback + Notion/Google/Slack OAuth
+│   ├── notion/             # Save target search + page/database helpers
+│   ├── google/             # Google Drive folder operations
+│   ├── promo/              # Promo apply/status
+│   ├── checkout/           # Polar checkout
+│   └── webhook/polar/      # Polar subscription webhook
+├── dashboard/              # Recorder entry
+│   ├── history/            # Recording list UI route
+│   ├── recordings/[id]/    # Recording detail route
+│   └── settings/           # Account / integrations / formats / contact / plan UI
 ├── onboarding/             # 2-step consent + referral flow
-├── privacy/                # Privacy policy
-└── terms/                  # Terms of service
+├── auth/auth-code-error/   # Supabase auth callback error page
+├── privacy/
+├── terms/
+└── use-of-user-data/
 
 lib/
-├── api/                    # API utilities (withAuth, response helpers)
+├── api/                    # withAuth, response helpers, retry utilities
 ├── supabase/               # Client/server/middleware for Supabase
 ├── services/               # External API integrations
 │   ├── whisper.ts          # Groq Whisper Large V3 STT
-│   ├── openai.ts           # GPT-4o-mini formatting
+│   ├── openai.ts           # Gemini/OpenAI formatting provider selection
+│   ├── recording-finalizer.ts
 │   ├── notion.ts           # Notion OAuth + page creation
+│   ├── notion-save-targets.ts
 │   ├── google.ts           # Google Docs/Drive integration
 │   ├── slack.ts            # Slack OAuth + notifications
 │   ├── push.ts             # Web push notifications
-│   └── recording-processor.ts  # Orchestrates all processing steps
+│   ├── groq-key-router.ts
+│   ├── groq-audio-budget.ts
+│   ├── recording-transcription-state.ts
+│   └── recording-processor.ts  # Formatting + external sync orchestration
 ├── i18n/                   # Korean/English translations
-├── types/                  # TypeScript types & constants
+├── monitoring/             # Sentry helpers/config
+├── stores/                 # Zustand user/recordings caches
 ├── prompts.ts              # Universal AI formatting prompt
 ├── utils.ts                # Utility functions
 └── auth.ts                 # Auth helper functions
@@ -104,6 +116,7 @@ components/
 ├── dashboard/              # Recording interface components
 ├── history/                # Recording list components
 │   └── sections/           # RecordingCard, FilterChips, EmptyState
+├── landing/                # Marketing / landing UI
 ├── navigation/             # BottomTab navigation
 ├── pwa/                    # PWA install prompts
 ├── recorder/               # Audio recording UI
@@ -112,38 +125,47 @@ components/
     └── sections/           # Account, Integrations, CustomFormats
 
 database/
-├── schema.sql              # Base schema (users, recordings, custom_formats, withdrawn_users)
+├── schema.sql              # Legacy baseline only
 └── migrations/             # Incremental migrations (run in order)
 ```
 
 ### Database Schema
 
-Four main tables (PostgreSQL with RLS):
+`database/schema.sql` is not the full current schema. Treat `lib/types/database.ts` plus `database/migrations/*` as the authoritative reference.
+
+Core tables / structures:
 
 **users**
-- Auth & profile (email, name, language, is_onboarded)
-- Notion integration (access_token, database_id, page_id, save_target_type)
-- Slack integration (access_token, channel_id)
-- Google integration (access_token, refresh_token, token_expires_at, folder_id, folder_name)
-- Push notifications (push_subscription JSONB, push_enabled)
-- Referral system (referral_code, referred_by, bonus_minutes)
-- Usage tracking (monthly_minutes_used, last_reset_at)
+- Auth/profile: `email`, `google_id`, `name`, `language`, `is_onboarded`
+- Integrations: Notion (`notion_database_id`, `notion_save_target_type`, title/icon metadata), Slack, Google Docs/Drive
+- Notifications/storage: `push_subscription`, `push_enabled`, `pwa_installed_at`, `save_audio_enabled`
+- Consent: `age_14_confirmed_at`, `terms_*`, `privacy_*`, `service_quality_opt_in`, `marketing_opt_in`
+- Usage/growth: `monthly_minutes_used`, `last_reset_at`, `referral_code`, `referred_by`, `bonus_minutes`, `promo_*`
+- Payment: `is_paid_user`, `paid_ever`, `paid_started_at`, `paid_ended_at`, `polar_customer_id`, `polar_subscription_id`
 
 **recordings**
-- Metadata (title, format_type, duration_seconds)
-- Content (transcript, formatted_content)
-- Status tracking (status, processing_step, error_step, error_message)
-- Integrations (notion_page_id, notion_page_url, google_doc_url)
-- Features (is_hidden, is_pinned)
+- Metadata: `title`, `format`, `custom_format_id`, `duration_seconds`
+- Lifecycle: `status`, `processing_step`, `error_step`, `error_message`, `last_activity_at`, `session_paused_at`, `termination_reason`, `last_chunk_index`
+- Content/results: `transcript`, `formatted_content`, `notion_page_url`, `google_doc_url`
+- Quality: `expected_chunk_count`, `transcription_quality_status`, `transcription_warnings`
+- Audio: `audio_file_path` is nullable and usually null in the primary chunked flow
+- UX: `is_hidden`, `is_pinned`
+
+**recording_chunks**
+- Chunk-level attempt tracking for the session-based recorder
+- Stores per-chunk status, retry count, provider status/error codes, duration, signal metadata
 
 **custom_formats**
-- User-defined document templates (name, prompt, is_default)
+- User-defined templates: `name`, `prompt`, `is_default`
 - Free tier limit is 1; Pro effectively uses 999
 
-**withdrawn_users**
-- Anonymized withdrawal statistics (no PII)
-- Stores withdrawal reason, account age, integration usage, referral stats
-- JSONB user_data snapshot for audit
+**Other important tables**
+- `promo_codes`
+- `user_consent_logs`
+- `withdrawn_users`
+- `amplitude_signup_identity_mappings`
+- `groq_audio_usage_buckets`, `groq_key_health`
+- `agent_memory_threads`, `agent_memory_messages`, `agent_memory_facts`
 
 ### Key Constants
 
@@ -162,11 +184,11 @@ export const REFERRAL_BONUS_MINUTES = 350;     // Bonus per successful referral
 4. `POST /api/recordings/finalize-intent`: schedule background finalize with `after()`
 5. `POST /api/recordings/finalize`: synchronous fallback / recovery path when needed
 6. Formatting + external sync:
-   - OpenAI → `formatted_content` + title
+   - Gemini (`gemini-3.1-pro-preview`) when `GEMINI_API_KEY` is present before `2026-05-06 00:00:00 KST`, otherwise OpenAI (`gpt-4o-mini`) → `formatted_content` + title
    - Notion / Google Docs / Slack / Push if configured
 7. Final status becomes `completed` or `failed`
 
-**Important**: Audio file is passed directly to `transcribeAudio()` and never written to disk/storage. After transcription, it's garbage collected.
+**Important**: The session/chunk pipeline passes chunk blobs directly to `transcribeAudio()` and does not persist chunk audio. Stored audio playback only applies to recordings that already have `audio_file_path` set (currently the legacy direct-upload route).
 
 ### Supabase Client Patterns
 
@@ -233,13 +255,12 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 - VAPID-based subscription management
 - Handles expired subscriptions gracefully
 
-### Audio Storage (Optional)
-- Users can opt-in to save audio files in Supabase Storage
-- Default is OFF (opt-in via Settings > Data Management)
-- Audio recorded at 32kbps for storage efficiency
-- Signed URLs for secure playback (1 hour expiry)
-- Old recordings without audio show "no audio" message
-- Audio deleted when recording is deleted
+### Audio Playback / Storage
+- `save_audio_enabled` exists in user settings and `/api/recordings/[id]/audio` serves signed URLs for stored audio
+- The primary session/chunk recorder still keeps `audio_file_path` null
+- The legacy direct-upload route can persist audio when enabled
+- Old recordings without audio show a "no audio" message
+- Individual recording deletion removes the stored file when `audio_file_path` exists
 
 ### Account Withdrawal (GDPR Compliant)
 - Users can withdraw with optional reason
@@ -261,7 +282,7 @@ if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
 ## Common Gotchas
 
-1. **Audio files are optional**: `audio_file_path` is nullable - only populated when user has `save_audio_enabled: true`
+1. **Audio storage is not part of the main chunked flow**: `save_audio_enabled` and signed playback routes exist, but session-based `/api/recordings/start|chunk|finalize*` recordings normally keep `audio_file_path` null; only the legacy `POST /api/recordings` path stores audio today
 2. **Background processing is not queued**: In production, replace the async `processRecording()` call with a proper queue (e.g., BullMQ, Inngest)
 3. **RLS is enabled**: Always filter by `user_id` in queries; Supabase policies enforce this
 4. **OAuth redirects**: Must match exactly in provider settings (no trailing slash differences)

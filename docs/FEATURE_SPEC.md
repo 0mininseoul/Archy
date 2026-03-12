@@ -1,7 +1,7 @@
 # Archy 기능 명세서
 
 - 버전: 2026.03
-- 최종 업데이트: 2026-03-11
+- 최종 업데이트: 2026-03-12
 
 ## 1. 서비스 요약
 
@@ -12,7 +12,7 @@ Archy는 모바일 웹/PWA 중심의 음성 자동 문서화 서비스입니다.
 2. 20초 단위 청크 전송/전사 (`/api/recordings/chunk`)
 3. 필요 시 auto-pause / session resume (`/api/recordings/pause-notify`, `/api/recordings/start`)
 4. 종료 의도 제출(`/api/recordings/finalize-intent`) 또는 직접 종료(`/api/recordings/finalize`)
-5. OpenAI 정리 + Notion / Google Docs / Slack / Push 후처리
+5. 활성 포맷팅 provider(Gemini `gemini-3.1-pro-preview` 또는 OpenAI `gpt-4o-mini`) 정리 + Notion / Google Docs / Slack / Push 후처리
 
 운영 surface:
 - `Archy`: 최종 사용자가 쓰는 제품
@@ -79,7 +79,9 @@ Archy는 모바일 웹/PWA 중심의 음성 자동 문서화 서비스입니다.
 
 ### 3.3 AI 문서 정리 및 외부 연동
 
-- 모델: OpenAI `gpt-4o-mini`
+- 모델:
+  - `GEMINI_API_KEY`가 있고 시각이 `2026-05-06 00:00:00 KST` 이전이면 Gemini `gemini-3.1-pro-preview`
+  - 그 외에는 OpenAI `gpt-4o-mini`
 - 기본 정책: Universal Prompt 기반 구조화 문서 생성
 - 커스텀 포맷:
   - `is_default` 기본 포맷 지원
@@ -112,7 +114,7 @@ Archy는 모바일 웹/PWA 중심의 음성 자동 문서화 서비스입니다.
   - `users` 스냅샷 필드 업데이트
   - `user_consent_logs`에 이벤트성 로그 저장
 - 언어 설정: `ko`, `en`
-- 오디오 저장 토글: `save_audio_enabled`
+- 오디오 저장 토글: `save_audio_enabled` (현재 `audio_file_path` 저장은 legacy direct upload path 기준)
 - Push 구독 저장/삭제: `/api/user/push-subscription`
 - PWA 설치 시각 추적: `/api/user/pwa-install`
 - 데이터 전체 삭제:
@@ -267,6 +269,7 @@ Archy는 모바일 웹/PWA 중심의 음성 자동 문서화 서비스입니다.
 
 - 녹음 UI는 120분 가이드를 표시하지만, 실제 강제 종료 기준은 별도 하드캡이 아니라 lifecycle 로직과 브라우저 상태에 좌우됩니다.
 - 오디오 저장이 꺼져 있으면 signed URL 재생 경로는 제공되지 않습니다.
+- `save_audio_enabled`와 signed playback route는 존재하지만, 현재 session/chunk recorder는 `audio_file_path`를 채우지 않습니다. 오디오 재생 경로는 주로 legacy direct-upload 녹음 기준입니다.
 - Notion deep 탐색은 sync token 기반 점진 동기화라 partial 결과가 반환될 수 있습니다.
 - `/api/recordings/finalize-intent`는 background task가 보장되지 않는 환경에서 `/api/recordings/finalize` 폴백이 필요할 수 있습니다.
 - `database/schema.sql` 단독 적용으로는 현재 코드가 기대하는 스키마를 충족하지 못합니다.
