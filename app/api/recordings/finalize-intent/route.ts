@@ -37,12 +37,15 @@ export const POST = withAuth<FinalizeIntentResponse>(
         format,
       });
 
-      if (result.error && (result.statusCode || 500) >= 500) {
-        console.error("[FinalizeIntent] Background finalize failed:", {
+      if (result.error || result.recording.status === "failed") {
+        console.error("[FinalizeIntent] Background finalize ended unsuccessfully:", {
           sessionId,
           userId: user.id,
-          error: result.error,
-          statusCode: result.statusCode,
+          recordingStatus: result.recording.status,
+          statusBefore: result.statusBefore,
+          idempotent: result.idempotent,
+          error: result.error || null,
+          statusCode: result.statusCode || null,
         });
       }
     });

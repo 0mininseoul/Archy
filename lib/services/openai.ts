@@ -117,6 +117,16 @@ function getMinimumDetailedContentLength(transcriptLength: number): number {
   return getSummaryDetailRequirements(transcriptLength).minContentLength;
 }
 
+function getMinimumAcceptableShortResponseLength(transcriptLength: number): number {
+  const targetLength = getMinimumDetailedContentLength(transcriptLength);
+
+  if (targetLength <= 0) {
+    return 0;
+  }
+
+  return Math.max(700, Math.floor(targetLength * 0.55));
+}
+
 function buildShortResponseRetryPrompt(
   basePrompt: string,
   transcriptLength: number,
@@ -485,6 +495,13 @@ ${buildResponseFormatInstructions(provider)}`;
   let lastError: Error | null = null;
   let lastReason = "";
   let attemptPrompt = prompt;
+  let lastStructuredResponse:
+    | {
+      title: string;
+      content: string;
+      normalizedContentLength: number;
+    }
+    | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -522,6 +539,12 @@ ${buildResponseFormatInstructions(provider)}`;
         throw new Error("Failed to parse title or content from response");
       }
 
+      lastStructuredResponse = {
+        title,
+        content,
+        normalizedContentLength: normalizeInlineText(content).length,
+      };
+
       // Check if response is problematic
       const { isProblematic, reason } = isProblematicResponse(
         title,
@@ -548,6 +571,25 @@ ${buildResponseFormatInstructions(provider)}`;
           await new Promise((resolve) => setTimeout(resolve, 2000));
           continue;
         } else {
+          if (reason === "too_short_for_transcript" && lastStructuredResponse) {
+            const targetMinimumLength = getMinimumDetailedContentLength(
+              trimmedTranscript.length
+            );
+            const fallbackMinimumLength = getMinimumAcceptableShortResponseLength(
+              trimmedTranscript.length
+            );
+
+            if (lastStructuredResponse.normalizedContentLength >= fallbackMinimumLength) {
+              console.warn(
+                `[Formatting] Accepting shorter-than-target response after ${MAX_RETRIES} attempts (length=${lastStructuredResponse.normalizedContentLength}, target=${targetMinimumLength}, fallback_min=${fallbackMinimumLength})`
+              );
+              return {
+                title: lastStructuredResponse.title,
+                content: lastStructuredResponse.content,
+              };
+            }
+          }
+
           // All retries exhausted with problematic responses
           throw new Error(
             `AI가 올바른 요약을 생성하지 못했습니다 (${reason}). 다시 시도해주세요.`

@@ -529,11 +529,25 @@ export async function finalizeRecordingSession(
     return null;
   });
 
+  if (!result?.success) {
+    return {
+      recording: {
+        id: recordingId,
+        title: result?.title || session.title,
+        status: "failed",
+      },
+      idempotent: false,
+      statusBefore,
+      error: result?.error?.message || "Failed to process recording",
+      statusCode: 500,
+    };
+  }
+
   return {
     recording: {
       id: recordingId,
-      title: result?.title || session.title,
-      status: result?.success ? "completed" : "failed",
+      title: result.title || session.title,
+      status: "completed",
     },
     idempotent: false,
     statusBefore,
