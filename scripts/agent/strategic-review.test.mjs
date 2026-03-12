@@ -5,6 +5,10 @@ import { strategicReviewInternals } from "./daily-runner.mjs";
 
 const {
   buildStrategicReviewInput,
+  buildStrategicReviewInternalSignalRecord,
+  classifyStrategicReviewInternalSignal,
+  buildStrategicReviewSystemInstruction,
+  buildStrategicReviewPrompt,
   parseStrategicReviewJson,
   renderStrategicReviewMarkdown,
   analyzeStrategicReview,
@@ -122,23 +126,163 @@ test("buildStrategicReviewInput keeps compressed limits", () => {
     workProgress: {
       completed: ["a", "b", "c", "d", "e", "f"],
       pending: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
-      ascentum: {
-        edits: [
-          { text: "edit1", lastEdited: "2026-03-06T00:00:00.000Z" },
-          { text: "edit2", lastEdited: "2026-03-06T00:01:00.000Z" },
-          { text: "edit3", lastEdited: "2026-03-06T00:02:00.000Z" },
-          { text: "edit4", lastEdited: "2026-03-06T00:03:00.000Z" },
-          { text: "edit5", lastEdited: "2026-03-06T00:04:00.000Z" },
-        ],
-      },
+      summaryText: "업무 요약",
+      internalSignals: [
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum"],
+          nodeType: "paragraph",
+          nodeText: "edit1",
+          lastEdited: "2026-03-06T00:00:00.000Z",
+          classification: "internal_note",
+          allowedUse: ["operator_context"],
+          forbiddenUse: ["customer_usage_evidence"],
+          confidence: 0.76,
+        },
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum", "아키(Archy) | AI 노트테이커"],
+          nodeType: "child_page",
+          nodeText: "edit2",
+          lastEdited: "2026-03-06T00:01:00.000Z",
+          classification: "product_workspace_note",
+          allowedUse: ["operator_context"],
+          forbiddenUse: ["customer_usage_evidence"],
+          confidence: 0.95,
+        },
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum"],
+          nodeType: "paragraph",
+          nodeText: "edit3",
+          lastEdited: "2026-03-06T00:02:00.000Z",
+          classification: "internal_note",
+          allowedUse: ["operator_context"],
+          forbiddenUse: ["customer_usage_evidence"],
+          confidence: 0.76,
+        },
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum"],
+          nodeType: "paragraph",
+          nodeText: "edit4",
+          lastEdited: "2026-03-06T00:03:00.000Z",
+          classification: "internal_note",
+          allowedUse: ["operator_context"],
+          forbiddenUse: ["customer_usage_evidence"],
+          confidence: 0.76,
+        },
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum"],
+          nodeType: "paragraph",
+          nodeText: "edit5",
+          lastEdited: "2026-03-06T00:04:00.000Z",
+          classification: "internal_note",
+          allowedUse: ["operator_context"],
+          forbiddenUse: ["customer_usage_evidence"],
+          confidence: 0.76,
+        },
+      ],
     },
     targetYmd: "2026-03-05",
     projectContext: "x".repeat(10000),
     contextProfile: "compact",
   });
 
+  assert.equal(input.input.metrics.kpis.totalSignups.current, 100);
   assert.equal(input.input.workProgress.completedTop.length, 5);
   assert.equal(input.input.workProgress.pendingTop.length, 8);
-  assert.equal(input.input.workProgress.recentEditsTop.length, 4);
+  assert.equal(input.input.internalSignals.length, 4);
+  assert.equal(input.input.workProgress.summary, "업무 요약");
+  assert.equal(input.input.workProgress.summaryScope, "todo_db_only");
   assert.ok(input.projectContext.length <= 3203);
+});
+
+test("strategic review prompt guards against misreading internal edits as user data", () => {
+  const strategicInput = buildStrategicReviewInput({
+    metrics: {
+      counts: { totalSignups: 10, dailyNewUsers: 1, dailyRecordings: 2 },
+      rates: {
+        onboarding: 0.8,
+        pwa: 0.4,
+        integrationAny: 0.2,
+        activation30d: 0.3,
+        payment: 0,
+      },
+      heavyUserTop3: [],
+    },
+    amplitudeConversion: {
+      currentRate: 0.1,
+      previousRate: 0.09,
+    },
+    previousMetrics: {
+      counts: { totalSignups: 9 },
+      rates: {
+        onboarding: 0.79,
+        pwa: 0.39,
+        integrationAny: 0.21,
+        activation30d: 0.29,
+        payment: 0,
+      },
+    },
+    workProgress: {
+      completed: ["0312 이민섭교수님 미팅 준비"],
+      pending: ["요약문 내용 퀄리티 up"],
+      summaryText: "업무 페이지 요약",
+      internalSignals: [
+        {
+          rootId: "root-1",
+          rootTitle: "Ascentum",
+          pathTitles: ["Ascentum", "아키(Archy) | AI 노트테이커", "이민섭교수님 미팅 0312"],
+          nodeType: "child_page",
+          nodeText: "이민섭교수님 미팅 0312",
+          lastEdited: "2026-03-11T13:51:00.000Z",
+          classification: "product_workspace_note",
+          allowedUse: ["operator_context", "product_workspace_preparation"],
+          forbiddenUse: ["customer_usage_evidence", "why_now_without_kpi_or_operator_task"],
+          confidence: 0.95,
+        },
+      ],
+    },
+    targetYmd: "2026-03-11",
+    projectContext: "context",
+  });
+
+  const systemInstruction = buildStrategicReviewSystemInstruction();
+  const prompt = buildStrategicReviewPrompt({ strategicInput });
+
+  assert.match(systemInstruction, /internalSignals는 provenance가 붙은 운영자 내부 노션 신호/);
+  assert.match(prompt, /classification이 product_workspace_note여도 고객 사용량/);
+  assert.match(prompt, /internalSignals 단독 근거를 금지/);
+});
+
+test("internal signal classification keeps product workspace note separate from customer evidence", () => {
+  const classification = classifyStrategicReviewInternalSignal({
+    pathTitles: ["Ascentum", "아키(Archy) | AI 노트테이커", "이민섭교수님 미팅 0312"],
+  });
+  assert.equal(classification, "product_workspace_note");
+
+  const record = buildStrategicReviewInternalSignalRecord({
+    rootPage: { id: "root-1", title: "Ascentum" },
+    pathTitles: ["Ascentum", "아키(Archy) | AI 노트테이커", "이민섭교수님 미팅 0312"],
+    block: {
+      type: "child_page",
+      last_edited_time: "2026-03-11T13:51:00.000Z",
+    },
+    text: "이민섭교수님 미팅 0312",
+  });
+
+  assert.equal(record.classification, "product_workspace_note");
+  assert.ok(record.forbiddenUse.includes("customer_usage_evidence"));
+  assert.deepEqual(record.pathTitles, [
+    "Ascentum",
+    "아키(Archy) | AI 노트테이커",
+    "이민섭교수님 미팅 0312",
+  ]);
 });
