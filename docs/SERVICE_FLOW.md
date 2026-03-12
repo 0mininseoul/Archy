@@ -17,7 +17,7 @@ flowchart TD
     H --> I[후처리 필터: silence / hallucination / repetition]
     G --> J[(recording_chunks upsert)]
     I --> J
-    J --> K[(last_chunk_index / last_activity_at / transcript 갱신)]
+    J --> K[(last_chunk_index / last_activity_at / duration_seconds 갱신)]
 
     K --> L{사용자 상태}
     L -->|background / route leave| M[/api/recordings/pause-notify]
@@ -26,20 +26,21 @@ flowchart TD
     L -->|stop| N[/api/recordings/finalize-intent]
 
     N --> O[after() background finalize]
-    O --> P[transcript 안정화 대기]
-    P --> Q[(status=processing)]
-    Q --> R[Gemini 3.1 Pro Preview 포맷팅, 2026-05-06 KST 이후 OpenAI gpt-4o-mini 복귀]
-    R --> S[(formatted_content + title 저장)]
-    S --> T[(processing_step=saving)]
+    O --> P[legacy transcript 안정화 대기]
+    P --> Q[recording_chunks assemble]
+    Q --> R[(status=processing)]
+    R --> S[Gemini 3.1 Pro Preview 포맷팅, 2026-05-06 KST 이후 OpenAI gpt-4o-mini 복귀]
+    S --> T[(formatted_content + title 저장)]
+    T --> U[(processing_step=saving)]
 
-    T --> U{외부 연동}
-    U -->|Notion| V[page/db 저장]
-    U -->|Google| W[Docs 생성]
-    U -->|Slack| X[알림 전송]
-    V --> Y[(status=completed)]
-    W --> Y
-    X --> Y
-    Y --> Z[Web Push]
+    U --> V{외부 연동}
+    V -->|Notion| W[page/db 저장]
+    V -->|Google| X[Docs 생성]
+    V -->|Slack| Y[알림 전송]
+    W --> Z[(status=completed)]
+    X --> Z
+    Y --> Z
+    Z --> AA[Web Push]
 ```
 
 ## 2. 세션/상태 전이
@@ -60,7 +61,7 @@ stateDiagram-v2
     processing --> completed: save success
     recording --> failed: stale cleanup / terminal error
     processing --> failed: formatting/save error
-    failed --> processing: recovery finalize (transcript exists)
+    failed --> processing: recovery finalize (merged transcript exists)
     completed --> [*]
     failed --> [*]
 ```
@@ -81,12 +82,13 @@ sequenceDiagram
     Router-->>API: primary / tier_2 / tier_3
     API->>STT: 전사 요청
     STT-->>API: text + metrics
-    API->>DB: chunk status, provider code, transcript, warnings 저장
-    API->>DB: recordings 진행상황(last_chunk_index, transcript 등) 갱신
+    API->>DB: recording_chunks에 chunk status, provider code, transcript, warnings 저장
+    API->>DB: recordings 진행상황(last_chunk_index, last_activity_at, duration_seconds 등) 갱신
     API-->>Client: success or retryable failure
 
     Note over Client: 실패 시 exponential backoff (최대 5회)
     Note over Client: offline 상태면 pending queue 유지 후 online 시 재시도
+    Note over DB: 녹음 중 실시간 transcript source of truth는 recording_chunks
     Note over API: terminal 세션이면 409 + sessionStatus 반환
 ```
 
@@ -100,7 +102,7 @@ flowchart TD
     D --> E{성공?}
     E -->|yes| F[processing -> completed]
     E -->|no or unsupported| G[/api/recordings/finalize]
-    G --> H[동기 finalize / transcript 기반 복구]
+    G --> H[동기 finalize / chunk assembly 기반 복구]
     H --> F
 ```
 
@@ -111,7 +113,7 @@ flowchart TD
     A[Scheduler / manual call] --> B[/api/cron/stale-recordings]
     B --> C[CRON_SECRET 검증]
     C --> D[status=recording and last_activity_at < 30m 조회]
-    D --> E{transcript 존재 & formatted_content 없음?}
+    D --> E{복구 가능한 transcript 존재 & formatted_content 없음?}
     E -->|yes| F[failed + degraded + stale_timeout_recovery_candidate]
     E -->|no| G[failed + abandoned]
     F --> H[나중에 finalize 복구 가능]

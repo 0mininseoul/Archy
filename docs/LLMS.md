@@ -31,6 +31,7 @@ Archy는 음성 녹음을 자동 문서화하는 서비스입니다.
 - 기본 session/chunk 파이프라인은 text-first이며 `audio_file_path`는 대체로 `null`
 - legacy `POST /api/recordings` 경로만 사용자 토글(`save_audio_enabled`)일 때 오디오 저장을 시도
 - 녹음 세션은 30분 비활성 시 stale cleanup 대상이 됨 (`/api/cron/stale-recordings`)
+- 녹음 중 실시간 transcript source of truth는 `recording_chunks`이며, `recordings.transcript`는 finalize/recovery 시 합본으로 정규화됨
 - chunk 단위 품질 메타데이터는 `recording_chunks`, `expected_chunk_count`, `transcription_warnings`에 반영될 수 있음
 - Slack OAuth callback은 `NEXT_PUBLIC_APP_URL/api/auth/slack/callback`에서 파생됨
 - `database/schema.sql`만으로는 현재 앱 스키마가 완성되지 않으며 `database/migrations/*`가 필수
@@ -84,12 +85,12 @@ scripts/
 - 세션 필드: `last_chunk_index`, `session_paused_at`
 - 라이프사이클 필드: `last_activity_at`, `termination_reason`, `expected_chunk_count`
 - 품질 필드: `transcription_quality_status`, `transcription_warnings`
-- 결과 필드: `transcript`, `formatted_content`, `notion_page_url`, `google_doc_url`
+- 결과 필드: `transcript`(finalize/recovery 후 합본), `formatted_content`, `notion_page_url`, `google_doc_url`
 - UX 필드: `is_hidden`, `is_pinned`
 
 ### 기타
 
-- `recording_chunks`: chunk 단위 전사 상태/재시도/신호 메타데이터
+- `recording_chunks`: chunk 단위 전사 상태/재시도/신호 메타데이터, 녹음 중 실시간 transcript 원본
 - `custom_formats`: 사용자 포맷
 - `promo_codes`: 프로모션
 - `user_consent_logs`: 동의 이력
@@ -103,7 +104,7 @@ scripts/
 ### 녹음
 
 - `POST /api/recordings/start`: 활성 세션 생성/재사용
-- `POST /api/recordings/chunk`: 청크 전사 + transcript append
+- `POST /api/recordings/chunk`: 청크 전사 + `recording_chunks` 저장 + 세션 진행상황 갱신
 - `POST /api/recordings/pause-notify`: auto-pause 상태 반영 + push 알림
 - `POST /api/recordings/finalize-intent`: background finalize 예약 (`202 Accepted`)
 - `POST /api/recordings/finalize`: 세션 종료 후 동기 처리/복구
