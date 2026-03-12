@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(",") || [];
 
-// POST /api/admin/impersonate - Generate a magic link to log in as a specific user
+// POST /api/admin/impersonate - Switch session to target user
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -51,18 +51,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate magic link for the target user
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      "http://localhost:3000";
+    // Generate magic link to get OTP token
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
         type: "magiclink",
         email: targetEmail,
-        options: {
-          redirectTo: `${siteUrl}/api/auth/callback?next=/dashboard`,
-        },
       });
 
     if (linkError || !linkData) {
@@ -73,13 +66,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // action_link is the Supabase-hosted verification URL
-    // When visited, Supabase verifies the token and redirects to our callback with a code
-    const actionLink = linkData.properties?.action_link;
-
-    if (!actionLink) {
+    const emailOtp = linkData.properties?.email_otp;
+    if (!emailOtp) {
       return NextResponse.json(
-        { error: "Failed to generate action link" },
+        { error: "Failed to generate OTP" },
+        { status: 500 }
+      );
+    }
+
+    // Verify OTP on the cookie-based client to create session as target user
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      email: targetEmail,
+      token: emailOtp,
+      type: "magiclink",
+    });
+
+    if (verifyError) {
+      console.error("[Admin Impersonate] verifyOtp error:", verifyError);
+      return NextResponse.json(
+        { error: verifyError.message },
         { status: 500 }
       );
     }
@@ -88,11 +93,7 @@ export async function POST(request: NextRequest) {
       `[Admin Impersonate] Admin ${user.email} impersonating ${targetEmail}`
     );
 
-    return NextResponse.json({
-      success: true,
-      targetEmail,
-      url: actionLink,
-    });
+    return NextResponse.json({ success: true, targetEmail });
   } catch (error) {
     console.error("[Admin Impersonate] Error:", error);
     return NextResponse.json(

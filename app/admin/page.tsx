@@ -31,8 +31,8 @@ export default function AdminPage() {
         return;
       }
 
-      // Open impersonation link - replaces current tab so admin session switches
-      window.location.href = data.url;
+      // Session cookies are now set to the target user - navigate to dashboard
+      window.location.href = "/dashboard";
     } catch {
       setError("네트워크 오류");
     } finally {
