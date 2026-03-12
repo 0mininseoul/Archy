@@ -29,7 +29,7 @@ Archy는 모바일 웹/PWA 환경에서 음성을 녹음하면,
 
 - 실시간 녹음: 웹 MediaRecorder 기반, 세션 재개/이어녹음
 - 청크 전사: Groq Whisper Large V3 (`whisper-large-v3`)
-- AI 정리: OpenAI `gpt-4o-mini` + 구조화된 마크다운 출력
+- AI 정리: Gemini `gemini-3.1-pro-preview` 사용 후 `2026-05-06 00:00:00 KST`부터 OpenAI `gpt-4o-mini`로 자동 복귀
 - 문서 저장: Notion 페이지/DB, Google Docs 자동 생성
 - 알림: Slack DM/채널 알림 + Web Push 알림
 - 설정: 저장 위치 선택, 언어(ko/en), 오디오 저장 토글, Push/PWA 설치 추적

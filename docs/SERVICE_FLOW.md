@@ -28,7 +28,7 @@ flowchart TD
     N --> O[after() background finalize]
     O --> P[transcript 안정화 대기]
     P --> Q[(status=processing)]
-    Q --> R[OpenAI gpt-4o-mini 포맷팅]
+    Q --> R[Gemini 3.1 Pro Preview 포맷팅, 2026-05-06 KST 이후 OpenAI gpt-4o-mini 복귀]
     R --> S[(formatted_content + title 저장)]
     S --> T[(processing_step=saving)]
 

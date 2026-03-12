@@ -9,6 +9,15 @@ export interface FormatResult {
 
 const TRANSCRIPT_PLACEHOLDER_REGEX = /\{\{\s*transcript\s*\}\}/gi;
 const TRANSCRIPT_PLACEHOLDER_DETECT_REGEX = /\{\{\s*transcript\s*\}\}/i;
+const OPENAI_SUMMARY_MODEL = "gpt-4o-mini";
+const GEMINI_SUMMARY_MODEL = "gemini-3.1-pro-preview";
+const GEMINI_SUMMARY_CUTOFF_AT_MS = Date.parse("2026-05-05T15:00:00.000Z"); // 2026-05-06 00:00:00 KST
+const FORMATTING_MAX_OUTPUT_TOKENS = 4000;
+const FORMATTING_REQUEST_TIMEOUT_MS = 90_000;
+const GEMINI_SUMMARY_THINKING_LEVEL = "high";
+
+type FormattingProvider = "openai" | "gemini";
+type ParsedFormatResponse = { title: string; content: string };
 
 // Patterns that indicate AI returned a problematic response
 const PROBLEMATIC_RESPONSE_PATTERNS = {
@@ -60,6 +69,48 @@ const PROBLEMATIC_RESPONSE_PATTERNS = {
 
 function normalizeInlineText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function buildFormattingSystemPrompt(): string {
+  return `당신은 녹취록을 분석해 실무에서 다시 참고할 수 있는 구조화 문서로 정리하는 전문가입니다.
+과도하게 압축하지 말고, 긴 녹취와 전문 지식 설명은 충분히 상세하게 정리하세요.
+사용자가 제공하는 프롬프트의 지시사항과 응답 형식을 정확히 따르세요.`;
+}
+
+function buildResponseFormatInstructions(provider: FormattingProvider): string {
+  if (provider === "gemini") {
+    return `## 응답 형식 (반드시 준수)
+아래 형식으로 응답하세요. 태그는 반드시 포함해야 합니다.
+- 코드펜스와 JSON 래퍼는 출력하지 마세요.
+- [CONTENT] 본문은 반드시 "## 핵심 요약"으로 시작하세요.
+
+[TITLE]
+맥락을 반영한 제목 (한 줄)
+[/TITLE]
+[CONTENT]
+정리된 내용 (마크다운 형식)
+[/CONTENT]`;
+  }
+
+  return `## 응답 형식 (반드시 준수)
+아래 형식으로 응답하세요. 태그는 반드시 포함해야 합니다.
+
+[TITLE]
+맥락을 반영한 제목 (한 줄)
+[/TITLE]
+[CONTENT]
+정리된 내용 (마크다운 형식)
+[/CONTENT]`;
+}
+
+function getFormattingProvider(nowMs = Date.now()): FormattingProvider {
+  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+  if (hasGeminiKey && nowMs < GEMINI_SUMMARY_CUTOFF_AT_MS) {
+    return "gemini";
+  }
+
+  return "openai";
 }
 
 function getMinimumDetailedContentLength(transcriptLength: number): number {
@@ -165,7 +216,7 @@ function isProblematicResponse(
 /**
  * Parse title and content from AI response
  */
-function parseResponse(fullResponse: string): { title: string; content: string } {
+function parseOpenAIResponse(fullResponse: string): ParsedFormatResponse {
   let title = "";
   let content = fullResponse;
 
@@ -218,6 +269,13 @@ function parseResponse(fullResponse: string): { title: string; content: string }
   return { title, content };
 }
 
+function parseFormattingResponse(
+  provider: FormattingProvider,
+  fullResponse: string
+): ParsedFormatResponse {
+  return parseOpenAIResponse(fullResponse);
+}
+
 /**
  * Call OpenAI API to format the transcript
  */
@@ -226,24 +284,100 @@ async function callOpenAI(
   prompt: string
 ): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: OPENAI_SUMMARY_MODEL,
     messages: [
       {
         role: "system",
-        content: `당신은 녹취록을 분석해 실무에서 다시 참고할 수 있는 구조화 문서로 정리하는 전문가입니다.
-과도하게 압축하지 말고, 긴 녹취와 전문 지식 설명은 충분히 상세하게 정리하세요.
-사용자가 제공하는 프롬프트의 지시사항을 정확히 따라 [TITLE]과 [CONTENT] 형식으로 응답하세요.`,
+        content: buildFormattingSystemPrompt(),
       },
       {
         role: "user",
         content: prompt,
       },
     ],
-    max_tokens: 4000,
+    max_tokens: FORMATTING_MAX_OUTPUT_TOKENS,
     temperature: 0.5,
   });
 
   return response.choices[0].message.content || "";
+}
+
+async function callGemini(prompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY not configured");
+  }
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    GEMINI_SUMMARY_MODEL
+  )}:generateContent?key=${apiKey}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(FORMATTING_REQUEST_TIMEOUT_MS),
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: buildFormattingSystemPrompt() }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.5,
+        maxOutputTokens: FORMATTING_MAX_OUTPUT_TOKENS,
+        thinkingConfig: {
+          thinkingLevel: GEMINI_SUMMARY_THINKING_LEVEL,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Gemini API failed (${response.status}): ${body}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          text?: string;
+        }>;
+      };
+    }>;
+  };
+
+  const text = (data.candidates?.[0]?.content?.parts || [])
+    .map((part) => part.text || "")
+    .filter(Boolean)
+    .join("\n");
+
+  if (!text) {
+    throw new Error("Gemini returned empty response");
+  }
+
+  return text;
+}
+
+async function callFormattingModel(
+  provider: FormattingProvider,
+  prompt: string,
+  openai: OpenAI | null
+): Promise<string> {
+  if (provider === "gemini") {
+    return callGemini(prompt);
+  }
+
+  if (!openai) {
+    throw new Error("OPENAI_API_KEY not configured");
+  }
+
+  return callOpenAI(openai, prompt);
 }
 
 function buildCustomPromptWithTranscript(
@@ -290,8 +424,11 @@ export async function formatDocument(
   _format?: string,
   customPrompt?: string
 ): Promise<FormatResult> {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY not configured");
+  const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY?.trim());
+  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+  if (!hasOpenAIKey && !hasGeminiKey) {
+    throw new Error("No summary model API keys configured");
   }
 
   // Handle empty or whitespace-only transcripts
@@ -305,11 +442,22 @@ export async function formatDocument(
     };
   }
 
-  console.log("[Formatting] Starting OpenAI formatting...");
+  const provider = getFormattingProvider();
+  if (provider === "openai" && !hasOpenAIKey) {
+    throw new Error("OPENAI_API_KEY not configured");
+  }
 
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+  console.log(
+    `[Formatting] Starting ${provider} formatting (cutoff=${new Date(
+      GEMINI_SUMMARY_CUTOFF_AT_MS
+    ).toISOString()})...`
+  );
+
+  const openai = hasOpenAIKey
+    ? new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      })
+    : null;
 
   // Build prompt
   let prompt: string;
@@ -320,23 +468,16 @@ export async function formatDocument(
       transcriptInjectedFallback,
     } = buildCustomPromptWithTranscript(customPrompt, trimmedTranscript);
 
-    // 커스텀 프롬프트에도 [TITLE]/[CONTENT] 형식 안내를 추가
     prompt = `${promptWithTranscript}
 
-## 응답 형식 (반드시 준수)
-아래 형식으로 응답하세요. 태그는 반드시 포함해야 합니다.
-
-[TITLE]
-맥락을 반영한 제목 (한 줄)
-[/TITLE]
-[CONTENT]
-정리된 내용 (마크다운 형식)
-[/CONTENT]`;
+${buildResponseFormatInstructions(provider)}`;
     console.log(
       `[Formatting] Using custom format (custom_prompt_has_transcript_placeholder=${hasTranscriptPlaceholder}, transcript_injected_fallback=${transcriptInjectedFallback})`
     );
   } else {
-    prompt = buildUniversalPrompt(trimmedTranscript);
+    prompt = `${buildUniversalPrompt(trimmedTranscript)}
+
+${buildResponseFormatInstructions(provider)}`;
     console.log("[Formatting] Using universal prompt");
   }
 
@@ -348,29 +489,34 @@ export async function formatDocument(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       console.log(
-        `[Formatting] Attempt ${attempt}/${MAX_RETRIES}...`
+        `[Formatting] Attempt ${attempt}/${MAX_RETRIES} via ${provider}...`
       );
 
       // Create timeout promise (90 seconds)
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(
-          () => reject(new Error("Formatting timed out after 90 seconds")),
-          90000
+          () =>
+            reject(
+              new Error(
+                `Formatting timed out after ${FORMATTING_REQUEST_TIMEOUT_MS}ms`
+              )
+            ),
+          FORMATTING_REQUEST_TIMEOUT_MS
         );
       });
 
-      // Call OpenAI with timeout
+      // Call the active formatting model with timeout
       const fullResponse = await Promise.race([
-        callOpenAI(openai, attemptPrompt),
+        callFormattingModel(provider, attemptPrompt, openai),
         timeoutPromise,
       ]);
 
       if (!fullResponse) {
-        throw new Error("OpenAI returned empty response");
+        throw new Error(`${provider} returned empty response`);
       }
 
       // Parse response
-      const { title, content } = parseResponse(fullResponse);
+      const { title, content } = parseFormattingResponse(provider, fullResponse);
 
       if (!title || !content) {
         throw new Error("Failed to parse title or content from response");
@@ -410,7 +556,7 @@ export async function formatDocument(
       }
 
       // Success!
-      console.log("[Formatting] OpenAI formatting succeeded");
+      console.log(`[Formatting] ${provider} formatting succeeded`);
       console.log(`[Formatting] Title: ${title}`);
       return { title, content };
     } catch (error) {

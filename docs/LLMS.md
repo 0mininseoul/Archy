@@ -56,7 +56,7 @@ lib/
     groq-key-router.ts
     groq-audio-budget.ts
     whisper.ts            # Groq STT
-    openai.ts             # gpt-4o-mini formatting
+    openai.ts             # Gemini 3.1 Pro Preview formatting -> 2026-05-06 KST 이후 gpt-4o-mini 복귀
     recording-processor.ts
     notion.ts             # page/db 생성 + markdown 변환
     notion-save-targets.ts# fast/deep 탐색/검색
