@@ -89,6 +89,31 @@ export const en = {
         title: "Start capturing your ideas today",
         description: "Join thousands of professionals who save hours every week with automated documentation.",
       },
+      faq: {
+        title: "Frequently Asked Questions",
+        items: [
+          {
+            question: "What is Archy?",
+            answer: "Archy is an AI-powered voice documentation service that automatically converts audio recordings into structured, formatted documents. Record meetings, lectures, or interviews, and Archy transcribes the audio using Groq Whisper AI, then formats the transcript into professional documents with summaries and action items. Documents are automatically saved to Notion, Google Docs, and shared via Slack.",
+          },
+          {
+            question: "Is Archy free to use?",
+            answer: "Yes, Archy offers 350 free minutes of audio transcription per month. You can earn an additional 350 bonus minutes for each friend you refer — both you and your friend receive the bonus. No credit card is required to get started.",
+          },
+          {
+            question: "What languages does Archy support?",
+            answer: "Archy uses Groq Whisper Large V3 AI to accurately transcribe multilingual audio, including Korean and English. The interface is also fully available in both Korean and English.",
+          },
+          {
+            question: "How does Archy handle my audio recordings?",
+            answer: "Archy prioritizes your privacy. Recorded audio is immediately deleted after AI transcription and is never stored on our servers. Only text content — transcripts and formatted documents — is securely saved in the database.",
+          },
+          {
+            question: "How do I connect Notion, Google Docs, and Slack?",
+            answer: "You can connect Notion, Google Docs, and Slack from the Settings page with just a few clicks. Integration is handled securely through OAuth authentication. Once connected, your formatted documents are automatically saved to your linked services whenever a recording is completed.",
+          },
+        ],
+      },
       footer: {
         rights: "©2025 ARCHY · All rights reserved.",
         ceo: "ARCHY | CEO: Youngmin Park",

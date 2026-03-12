@@ -89,6 +89,31 @@ export const ko = {
         title: "녹음 버튼 하나만 누르면 됩니다.",
         description: "자동화된 문서화로 매주 몇 시간을 절약할 수 있어요!",
       },
+      faq: {
+        title: "자주 묻는 질문",
+        items: [
+          {
+            question: "Archy는 어떤 서비스인가요?",
+            answer: "Archy는 음성을 자동으로 문서화하는 AI 서비스입니다. 회의, 강의, 인터뷰 등을 녹음하면 AI가 자동으로 전사하고, 핵심 내용을 요약하여 깔끔한 문서로 정리해줍니다. 정리된 문서는 Notion, Google Docs에 자동 저장되고, Slack으로 알림을 받을 수 있습니다.",
+          },
+          {
+            question: "무료로 사용할 수 있나요?",
+            answer: "네, Archy는 매월 350분의 무료 녹음 시간을 제공합니다. 추가로 친구를 초대하면 초대한 사람과 초대받은 사람 모두 350분의 보너스 시간을 받을 수 있습니다. 별도의 결제 없이 바로 시작할 수 있습니다.",
+          },
+          {
+            question: "어떤 언어를 지원하나요?",
+            answer: "Archy는 Groq Whisper Large V3 AI를 사용하여 한국어와 영어를 포함한 다국어 음성을 정확하게 전사합니다. 인터페이스도 한국어와 영어를 모두 지원합니다.",
+          },
+          {
+            question: "녹음 파일은 어떻게 관리되나요?",
+            answer: "Archy는 프라이버시를 최우선으로 합니다. 녹음된 오디오는 AI 전사 후 즉시 삭제되며, 서버에 저장되지 않습니다. 텍스트(전사 내용과 정리된 문서)만 데이터베이스에 안전하게 보관됩니다.",
+          },
+          {
+            question: "Notion, Google Docs 연동은 어떻게 하나요?",
+            answer: "설정 페이지에서 Notion, Google Docs, Slack 계정을 간단히 연결할 수 있습니다. OAuth 인증을 통해 안전하게 연동되며, 녹음이 완료되면 정리된 문서가 연결된 서비스에 자동으로 저장됩니다.",
+          },
+        ],
+      },
       footer: {
         rights: "©2025 ARCHY · All rights reserved.",
         ceo: "ARCHY | CEO: Youngmin Park",

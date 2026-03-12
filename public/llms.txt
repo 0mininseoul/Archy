@@ -1,0 +1,44 @@
+# Archy
+
+> Archy is an automated voice documentation service that converts audio recordings into structured, formatted documents using AI. Users record meetings, lectures, or interviews, and Archy transcribes the audio with Groq Whisper AI, then formats the transcript into professional documents using large language models. Documents are automatically saved to Notion, Google Docs, and shared via Slack.
+
+## Key Facts
+- Website: https://www.archynotes.com
+- Category: Productivity, AI Note-Taking, Voice-to-Document
+- Free Tier: 350 minutes per month of audio transcription
+- Languages: Korean, English (multilingual AI transcription)
+- Platform: Progressive Web App (PWA) - works on mobile and desktop browsers
+- Integrations: Notion, Google Docs, Slack
+- Privacy: Audio is never stored; only transcribed text is saved
+
+## How Archy Works
+1. Record: One-click recording of meetings, lectures, interviews, or any spoken content
+2. Transcribe: AI-powered speech-to-text using Groq Whisper Large V3 converts audio to text in real-time
+3. Format: AI automatically structures the transcript into a clean document with title, summary, and organized sections
+4. Share: Formatted documents are saved to Notion or Google Docs, with Slack notifications
+
+## Features
+- Real-time audio recording with auto-save and cloud backup
+- AI transcription supporting Korean and English
+- Automatic document formatting with customizable templates
+- Notion integration for automatic page/database creation
+- Google Docs integration for document storage
+- Slack notifications when documents are ready
+- Web push notifications for processing completion
+- Custom format templates for different document types
+- Referral system: earn 350 bonus minutes per referral
+- GDPR-compliant account management
+
+## Use Cases
+- Meeting notes and minutes
+- Lecture transcription for students
+- Interview documentation
+- Conference and seminar notes
+- Brainstorming session capture
+- Client call summaries
+
+## Pages
+- /: Landing page with product overview
+- /privacy: Privacy policy
+- /terms: Terms of service
+- /use-of-user-data: Data usage policy

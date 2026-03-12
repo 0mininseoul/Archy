@@ -1,8 +1,29 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
 import { GoogleLoginButton } from "@/components/google-login-button";
 import { useI18n } from "@/lib/i18n";
+
+function FaqItem({ question, answer }: { question: string; answer: string }) {
+    const [isOpen, setIsOpen] = useState(false);
+    return (
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between p-4 sm:p-6 text-left hover:bg-slate-50 transition-colors"
+            >
+                <span className="text-sm sm:text-base font-semibold text-slate-900 pr-4">{question}</span>
+                <span className={`text-slate-400 text-xl transition-transform duration-200 flex-shrink-0 ${isOpen ? "rotate-45" : ""}`}>+</span>
+            </button>
+            {isOpen && (
+                <div className="px-4 pb-4 sm:px-6 sm:pb-6 -mt-1">
+                    <p className="text-sm sm:text-base text-slate-600 leading-relaxed">{answer}</p>
+                </div>
+            )}
+        </div>
+    );
+}
 
 export function LandingClient() {
     const { t } = useI18n();
@@ -209,6 +230,22 @@ export function LandingClient() {
                                 <h3 className="text-xs sm:text-lg font-bold text-slate-900">{integration.name}</h3>
                                 <p className="text-xs sm:text-sm text-slate-500 hidden sm:block mt-1">{integration.description}</p>
                             </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* FAQ Section - GEO 최적화 */}
+            <section id="faq" className="py-12 sm:py-24 bg-white px-5">
+                <div className="max-w-3xl mx-auto">
+                    <div className="text-center mb-8 sm:mb-12">
+                        <h2 className="text-xl sm:text-3xl font-bold text-slate-900 mb-2 sm:mb-4">
+                            {t.landing.faq.title}
+                        </h2>
+                    </div>
+                    <div className="space-y-3">
+                        {t.landing.faq.items.map((item: { question: string; answer: string }, idx: number) => (
+                            <FaqItem key={idx} question={item.question} answer={item.answer} />
                         ))}
                     </div>
                 </div>
