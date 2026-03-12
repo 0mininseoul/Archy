@@ -17,6 +17,7 @@ import { logSttDecision } from "@/lib/services/stt-observability";
 import { hasMeaningfulTranscript, sanitizeTranscriptText } from "@/lib/utils/transcript";
 import type { RecordingTranscriptionWarning } from "@/lib/services/recording-transcription-state";
 import { isTranscriptionStateSchemaError } from "@/lib/services/recording-transcription-state";
+import { captureExceptionWithScope } from "@/lib/monitoring/sentry";
 import {
   Recording,
   User,
@@ -121,6 +122,26 @@ function logError(recordingId: string, message: string, error?: unknown): void {
   console.error(`[${recordingId}] ${message}`, error);
 }
 
+function captureProcessingException(
+  recordingId: string,
+  step: string,
+  error: unknown,
+  options: {
+    extras?: Record<string, unknown>;
+    tags?: Record<string, string | number | boolean | null | undefined>;
+  } = {}
+): void {
+  captureExceptionWithScope(error, {
+    tags: {
+      archy_area: "recording_processing",
+      archy_error_step: step,
+      archy_recording_id: recordingId,
+      ...options.tags,
+    },
+    extras: options.extras,
+  });
+}
+
 // =============================================================================
 // Processing Steps
 // =============================================================================
@@ -171,6 +192,11 @@ async function stepTranscribe(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown transcription error";
     logError(recordingId, "Transcription failed:", errorMessage);
+    captureProcessingException(recordingId, "transcription", error, {
+      extras: {
+        audioSizeBytes: audioFile.size,
+      },
+    });
 
     await updateRecordingError(supabase, recordingId, "transcription", errorMessage, true);
     return { success: false, error: errorMessage };
@@ -279,6 +305,15 @@ async function stepFormat(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown formatting error";
     logError(recordingId, "Formatting failed after retries:", errorMessage);
+    captureProcessingException(recordingId, "formatting", error, {
+      tags: {
+        archy_format: format,
+        archy_user_id: userId,
+      },
+      extras: {
+        transcriptLength: transcript.length,
+      },
+    });
 
     // Propagate error to mark as failed
     return { success: false, error: errorMessage };
@@ -366,6 +401,15 @@ async function stepNotionSave(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown Notion error";
     logError(recordingId, "Notion creation failed:", errorMessage);
+    captureProcessingException(recordingId, "notion", error, {
+      tags: {
+        archy_user_id: userData.id,
+      },
+      extras: {
+        duration,
+        notionTargetType: userData.notion_save_target_type || "database",
+      },
+    });
 
     await updateRecordingError(
       supabase,
@@ -426,6 +470,14 @@ async function stepGoogleDocSave(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown Google error";
     logError(recordingId, "Google Doc creation failed:", errorMessage);
+    captureProcessingException(recordingId, "google", error, {
+      tags: {
+        archy_user_id: userData.id,
+      },
+      extras: {
+        hasGoogleFolderId: Boolean(userData.google_folder_id),
+      },
+    });
 
     // Check if there's already an error
     const { data: currentRecording } = await supabase
@@ -493,6 +545,15 @@ async function stepSlackNotify(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown Slack error";
     logError(recordingId, "Slack notification failed:", errorMessage);
+    captureProcessingException(recordingId, "slack", error, {
+      tags: {
+        archy_user_id: userData.id,
+      },
+      extras: {
+        hasGoogleDocUrl: Boolean(googleDocUrl),
+        hasNotionUrl: Boolean(notionUrl),
+      },
+    });
 
     const { data: currentRecording } = await supabase
       .from("recordings")
@@ -551,6 +612,16 @@ async function stepPushNotify(
     log(recordingId, "PWA push notification sent");
   } catch (error) {
     logError(recordingId, "PWA push notification failed:", error);
+    captureProcessingException(recordingId, "push", error, {
+      tags: {
+        archy_user_id: userData.id,
+      },
+      extras: {
+        hasGoogleDocUrl: Boolean(googleDocUrl),
+        hasNotionUrl: Boolean(notionUrl),
+        pushEnabled: Boolean(userData.push_enabled),
+      },
+    });
     // Push notification failure is not critical
   }
 }
@@ -856,6 +927,7 @@ export async function handleProcessingError(
   error: unknown
 ): Promise<void> {
   console.error(`[${recordingId}] Critical error in processRecording:`, error);
+  captureProcessingException(recordingId, "critical", error);
 
   try {
     const supabase = createProcessingClient();
@@ -871,5 +943,6 @@ export async function handleProcessingError(
       .eq("id", recordingId);
   } catch (updateError) {
     console.error(`[${recordingId}] Failed to update error status:`, updateError);
+    captureProcessingException(recordingId, "critical_status_update", updateError);
   }
 }

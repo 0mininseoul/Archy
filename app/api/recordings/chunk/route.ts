@@ -12,6 +12,7 @@ import {
   beginRecordingChunkAttempt,
   completeRecordingChunkAttempt,
 } from "@/lib/services/recording-transcription-state";
+import { captureExceptionWithScope } from "@/lib/monitoring/sentry";
 
 export const maxDuration = 60;
 const MAX_CHUNK_SIZE = 4 * 1024 * 1024;
@@ -378,6 +379,25 @@ export const POST = withAuth(
         }
       }
 
+      captureExceptionWithScope(error, {
+        tags: {
+          archy_area: "recordings_chunk",
+          archy_error_step: "transcription",
+          archy_provider_code: getProviderErrorCode(error),
+          archy_recording_id: sessionId || "none",
+          archy_retryable: getRetryableFlag(error),
+          archy_session_status: session?.status || "unknown",
+          archy_user_id: user.id,
+        },
+        extras: {
+          audioSizeBytes: audioChunk.size,
+          avgRms: avgRms ?? null,
+          chunkIndex,
+          durationSeconds,
+          peakRms: peakRms ?? null,
+          totalDuration,
+        },
+      });
       console.error(`${chunkLogPrefix} Transcription failed:`, error);
       return createChunkErrorResponse(error, {
         sessionStatus: session?.status,

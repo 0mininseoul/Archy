@@ -32,6 +32,9 @@ NEXT_PUBLIC_APP_URL=https://your-domain.com
 OPENAI_API_KEY=
 GROQ_API_KEY=
 CRON_SECRET=replace-with-a-random-16-plus-char-string
+NEXT_PUBLIC_SENTRY_DSN=
+SENTRY_DSN=
+SENTRY_AUTH_TOKEN=
 ```
 
 ### 2.2 STT 라우팅 / 안정화 옵션
@@ -70,6 +73,7 @@ VAPID_SUBJECT=mailto:you@example.com
 
 NEXT_PUBLIC_AMPLITUDE_API_KEY=
 NEXT_PUBLIC_KAKAO_JS_KEY=
+SENTRY_ENVIRONMENT=production
 
 POLAR_ACCESS_TOKEN=
 POLAR_SUCCESS_URL=https://your-domain.com/dashboard?checkout_id={CHECKOUT_ID}
@@ -81,6 +85,8 @@ ADMIN_EMAILS=you@example.com
 메모:
 - Slack runtime callback은 `NEXT_PUBLIC_APP_URL/api/auth/slack/callback`입니다.
 - `database/schema.sql`만 배포 전에 적용하면 불충분합니다. 최신 마이그레이션 전체를 반영해야 합니다.
+- Sentry는 클라이언트/browser 전송에 `NEXT_PUBLIC_SENTRY_DSN`, 서버 전송에 `SENTRY_DSN`을 사용합니다. 동일 DSN이면 두 값 모두 같은 값으로 넣으면 됩니다.
+- `SENTRY_AUTH_TOKEN`은 Vercel build 시 source map 업로드용입니다. 런타임 비밀은 아니지만 저장소에는 커밋하지 마세요.
 
 ## 3. Supabase 설정
 

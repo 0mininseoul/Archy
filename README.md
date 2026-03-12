@@ -87,6 +87,11 @@ STT 다중 키 라우팅(선택):
 - Google Docs/Drive: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 - Push: `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`
 - Analytics: `NEXT_PUBLIC_AMPLITUDE_API_KEY`
+- Monitoring(Sentry):
+  - Runtime: `NEXT_PUBLIC_SENTRY_DSN`
+  - Optional server override: `SENTRY_DSN` (`미설정 시 NEXT_PUBLIC_SENTRY_DSN fallback`)
+  - Source map upload(build): `SENTRY_AUTH_TOKEN`
+  - Optional environment label: `SENTRY_ENVIRONMENT`
 - Billing(Polar): `POLAR_ACCESS_TOKEN`, `POLAR_SUCCESS_URL`, `POLAR_WEBHOOK_SECRET`
 - Admin 통계: `ADMIN_EMAILS`
 - Kakao 공유: `NEXT_PUBLIC_KAKAO_JS_KEY`

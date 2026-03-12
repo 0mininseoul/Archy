@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ClientErrorReporter } from "@/components/client-error-reporter";
 import { AmplitudeAuthSync } from "@/components/amplitude-auth-sync";
 import { RegisterServiceWorker } from "./register-sw";
 
@@ -20,7 +19,6 @@ const PWAInstaller = dynamic(
 export function ClientProviders() {
     return (
         <>
-            <ClientErrorReporter />
             <RegisterServiceWorker />
             <AmplitudeAnalytics />
             <AmplitudeAuthSync />
