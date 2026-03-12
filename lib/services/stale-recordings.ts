@@ -4,6 +4,7 @@ import {
   appendTranscriptionWarnings,
   createTranscriptionWarning,
   isTranscriptionStateSchemaError,
+  loadRecordingChunkAssembly,
 } from "@/lib/services/recording-transcription-state";
 import { hasMeaningfulTranscript } from "@/lib/utils/transcript";
 
@@ -73,6 +74,20 @@ export async function cleanupStaleRecordings(
   const updatedRecordings: StaleRecordingCleanupRow[] = [];
 
   for (const recording of staleRecordings) {
+    let recoveryTranscript = recording.transcript ?? "";
+
+    if (!hasMeaningfulTranscript(recoveryTranscript)) {
+      const chunkAssembly = await loadRecordingChunkAssembly(recording.id);
+      if (chunkAssembly.error) {
+        console.warn(
+          `[StaleRecordings] Failed to load chunk assembly for ${recording.id}:`,
+          chunkAssembly.error
+        );
+      } else if (hasMeaningfulTranscript(chunkAssembly.transcript)) {
+        recoveryTranscript = chunkAssembly.transcript;
+      }
+    }
+
     const basePayload = {
       status: "failed" as const,
       processing_step: null,
@@ -82,16 +97,17 @@ export async function cleanupStaleRecordings(
       last_activity_at: nowIso,
     };
     const shouldFlagRecoveryCandidate =
-      hasMeaningfulTranscript(recording.transcript) && !recording.formatted_content;
+      hasMeaningfulTranscript(recoveryTranscript) && !recording.formatted_content;
     const metadataPayload = shouldFlagRecoveryCandidate
       ? {
           ...basePayload,
+          transcript: recoveryTranscript,
           transcription_quality_status: "degraded" as const,
           transcription_warnings: appendTranscriptionWarnings(
             recording.transcription_warnings,
             [
               createTranscriptionWarning("stale_timeout_recovery_candidate", {
-                transcriptLength: recording.transcript?.length ?? 0,
+                transcriptLength: recoveryTranscript.length,
               }),
             ]
           ),

@@ -1,4 +1,4 @@
-import { MONTHLY_MINUTES_LIMIT, Recording, User } from "@/lib/types/database";
+import { Recording, User } from "@/lib/types/database";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
   handleProcessingError,
@@ -13,7 +13,6 @@ import {
   type RecordingTranscriptionWarning,
   type TranscriptionQualityStatus,
 } from "@/lib/services/recording-transcription-state";
-import { hasUnlimitedUsage } from "@/lib/promo";
 import { loadUserWithUsageReset } from "@/lib/usage-cycle";
 import { hasMeaningfulTranscript, sanitizeTranscriptText } from "@/lib/utils/transcript";
 
@@ -119,13 +118,16 @@ async function waitForTranscriptToStabilize(
   return mergedTranscript;
 }
 
-function canRecoverFailedSession(session: FinalizeSessionRow): boolean {
+function canRecoverFailedSession(
+  session: FinalizeSessionRow,
+  transcript: string
+): boolean {
   if (session.status !== "failed" || session.formatted_content) {
     return false;
   }
 
   return (
-    hasMeaningfulTranscript(session.transcript) &&
+    hasMeaningfulTranscript(transcript) &&
     (
       session.termination_reason === "stale_timeout" ||
       session.termination_reason === "processing_error" ||
@@ -378,21 +380,6 @@ export async function finalizeRecordingSession(
   }
 
   const statusBefore = session.status;
-  const recoverFailedSession = canRecoverFailedSession(session);
-
-  if (statusBefore === "failed" && !recoverFailedSession) {
-    return {
-      recording: {
-        id: session.id,
-        title: session.title,
-        status: session.status,
-      },
-      idempotent: false,
-      statusBefore,
-      error: "Session already failed",
-      statusCode: 409,
-    };
-  }
 
   if (statusBefore === "processing" || statusBefore === "completed") {
     console.log(
@@ -410,23 +397,6 @@ export async function finalizeRecordingSession(
   }
 
   const durationMinutes = Math.ceil(totalDurationSeconds / 60);
-  if (!recoverFailedSession && !hasUnlimitedUsage(userData as User)) {
-    const totalMinutesAvailable =
-      MONTHLY_MINUTES_LIMIT + ((userData as User).bonus_minutes || 0);
-    if ((userData as User).monthly_minutes_used + durationMinutes > totalMinutesAvailable) {
-      return {
-        recording: {
-          id: session.id,
-          title: session.title,
-          status: session.status,
-        },
-        idempotent: false,
-        statusBefore,
-        error: "Monthly usage limit exceeded",
-        statusCode: 403,
-      };
-    }
-  }
 
   console.log(
     `[Finalize] Finalizing session ${recordingId}, duration=${totalDurationSeconds}s, last_chunk_index=${session.last_chunk_index}`
@@ -444,6 +414,22 @@ export async function finalizeRecordingSession(
 
   const mergedTranscript =
     sanitizeTranscriptText(chunkAssembly.transcript) || sanitizeTranscriptText(fallbackTranscript);
+  const recoverFailedSession = canRecoverFailedSession(session, mergedTranscript);
+
+  if (statusBefore === "failed" && !recoverFailedSession) {
+    return {
+      recording: {
+        id: session.id,
+        title: session.title,
+        status: session.status,
+      },
+      idempotent: false,
+      statusBefore,
+      error: "Session already failed",
+      statusCode: 409,
+    };
+  }
+
   const resolvedExpectedChunkCount =
     expectedChunkCount ?? session.expected_chunk_count ?? null;
   const warningAdditions = buildChunkWarningList(

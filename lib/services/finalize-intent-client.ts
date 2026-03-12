@@ -8,6 +8,9 @@ import {
 import type { Recording } from "@/lib/types/database";
 
 const PENDING_FINALIZE_STORAGE_KEY = "archy_pending_finalize_intent";
+const FINALIZE_RECOVERY_DELAY_MS = 15000;
+
+let pendingFinalizeRecoveryTimer: number | null = null;
 
 export interface PendingFinalizeIntent {
   expectedChunkCount?: number;
@@ -76,11 +79,62 @@ export function clearPendingFinalizeIntent(expectedSessionId?: string): void {
   });
 }
 
+function schedulePendingFinalizeRecovery(
+  delayMs: number = FINALIZE_RECOVERY_DELAY_MS
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (pendingFinalizeRecoveryTimer !== null) {
+    window.clearTimeout(pendingFinalizeRecoveryTimer);
+  }
+
+  pendingFinalizeRecoveryTimer = window.setTimeout(() => {
+    pendingFinalizeRecoveryTimer = null;
+    void flushPendingFinalizeIntent();
+  }, delayMs);
+}
+
+async function runFinalizeRecovery(
+  pendingIntent: PendingFinalizeIntent,
+  options?: { keepalive?: boolean }
+): Promise<boolean> {
+  try {
+    const response = await fetch("/api/recordings/finalize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: pendingIntent.sessionId,
+        totalDurationSeconds: pendingIntent.totalDurationSeconds,
+        expectedChunkCount: pendingIntent.expectedChunkCount,
+        format: pendingIntent.format,
+      }),
+      keepalive: options?.keepalive ?? false,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn("[FinalizeIntent] finalize recovery failed:", errorText);
+      return false;
+    }
+
+    clearPendingFinalizeIntent(pendingIntent.sessionId);
+    return true;
+  } catch (error) {
+    console.warn("[FinalizeIntent] finalize recovery failed:", error);
+    return false;
+  }
+}
+
 export async function submitFinalizeIntent(
   payload: Omit<PendingFinalizeIntent, "createdAt">,
   options?: { keepalive?: boolean }
 ): Promise<boolean> {
-  const pendingIntent = persistPendingFinalizeIntent(payload);
+  persistPendingFinalizeIntent(payload);
+  schedulePendingFinalizeRecovery();
 
   try {
     const response = await fetch("/api/recordings/finalize-intent", {
@@ -98,7 +152,6 @@ export async function submitFinalizeIntent(
       return false;
     }
 
-    clearPendingFinalizeIntent(pendingIntent.sessionId);
     return true;
   } catch (error) {
     console.warn("[FinalizeIntent] finalize-intent request failed:", error);
@@ -133,13 +186,5 @@ export async function flushPendingFinalizeIntent(): Promise<boolean> {
   const pendingIntent = loadPendingFinalizeIntent();
   if (!pendingIntent) return false;
 
-  return submitFinalizeIntent(
-    {
-      sessionId: pendingIntent.sessionId,
-      totalDurationSeconds: pendingIntent.totalDurationSeconds,
-      expectedChunkCount: pendingIntent.expectedChunkCount,
-      format: pendingIntent.format,
-    },
-    { keepalive: true }
-  );
+  return runFinalizeRecovery(pendingIntent, { keepalive: true });
 }
