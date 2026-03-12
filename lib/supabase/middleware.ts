@@ -10,7 +10,7 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const ONBOARDED_CACHE_MAX_AGE = 60 * 10; // 10 minutes
 const WITHDRAW_COMPLETE_PATH = "/dashboard/settings/contact/withdraw/complete";
-const PROTECTED_ROUTES = ["/dashboard", "/onboarding"];
+const PROTECTED_ROUTES = ["/dashboard", "/onboarding", "/admin"];
 
 // Detect locale based on country (Vercel provides x-vercel-ip-country header)
 function detectLocale(request: NextRequest): "ko" | "en" {
