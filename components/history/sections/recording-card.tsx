@@ -324,19 +324,6 @@ export function RecordingCard({
               </div>
             )}
 
-            {/* Completed - Notion error message */}
-            {recording.status === "completed" && recording.error_step === "notion" && (
-              <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded-lg">
-                <p className="text-xs text-amber-600">
-                  {getUserFriendlyProcessingErrorMessage(
-                    recording.error_step ?? undefined,
-                    recording.error_message ?? undefined,
-                    locale
-                  )}
-                </p>
-              </div>
-            )}
-
             {/* Completed - Actions */}
             {recording.status === "completed" && (
               <div className="flex items-center gap-2 mt-3" onClick={(e) => e.stopPropagation()}>

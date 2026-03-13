@@ -256,6 +256,11 @@ export const en = {
           notConnected: "Auto-save to Notion",
           configure: "Configure",
           connect: "Connect Notion",
+          saveTargetCallout: {
+            title: "Choose where Archy should save to Notion",
+            description: "New recordings will not be saved to Notion until you pick a save location. Select a page or database shared with Archy to resume saving.",
+            action: "Choose save location",
+          },
           troubleshoot: "Having trouble connecting Notion?",
           dropdown: {
             loading: "Loading Notion items. This can take up to about 10 seconds.",

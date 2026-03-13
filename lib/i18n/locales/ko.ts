@@ -257,6 +257,11 @@ export const ko = {
           notConnected: "Notion에 자동 저장",
           configure: "설정",
           connect: "Notion 연결",
+          saveTargetCallout: {
+            title: "Notion 저장 위치를 선택해주세요",
+            description: "저장 위치를 정하지 않으면 새 녹음이 Notion에 저장되지 않습니다. Archy와 공유된 페이지나 데이터베이스를 선택하면 바로 저장을 다시 시작할 수 있어요.",
+            action: "저장 위치 선택",
+          },
           troubleshoot: "Notion 연동이 안 되시나요?",
           dropdown: {
             loading: "Notion 항목을 불러오는 중입니다. 최대 10초 정도 걸릴 수 있어요.",

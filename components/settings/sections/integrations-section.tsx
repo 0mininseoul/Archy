@@ -953,6 +953,7 @@ export function IntegrationsSection({
     notionOAuthErrorCode,
     t
   );
+  const showNotionSaveTargetCallout = notionConnected && !saveTarget;
 
   return (
     <div className="card p-4">
@@ -1004,6 +1005,23 @@ export function IntegrationsSection({
                   {t.settings.integrations.notion.oauthErrors.retry}
                 </button>
               )}
+            </div>
+          )}
+
+          {showNotionSaveTargetCallout && (
+            <div className="mt-3 px-3 py-3 rounded-xl border border-amber-200 bg-amber-50">
+              <p className="text-xs font-semibold text-amber-900">
+                {t.settings.integrations.notion.saveTargetCallout.title}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-800">
+                {t.settings.integrations.notion.saveTargetCallout.description}
+              </p>
+              <button
+                onClick={openSaveTargetDropdown}
+                className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900 text-xs font-medium hover:bg-amber-200 transition-colors"
+              >
+                {t.settings.integrations.notion.saveTargetCallout.action}
+              </button>
             </div>
           )}
 
