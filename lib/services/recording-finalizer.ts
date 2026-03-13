@@ -411,9 +411,12 @@ export async function finalizeRecordingSession(
   if (chunkAssembly.error) {
     console.error("[Finalize] Failed to load recording chunks:", chunkAssembly.error);
   }
-
-  const mergedTranscript =
-    sanitizeTranscriptText(chunkAssembly.transcript) || sanitizeTranscriptText(fallbackTranscript);
+  const stabilizedTranscript = sanitizeTranscriptText(fallbackTranscript);
+  const assembledChunkTranscript = sanitizeTranscriptText(chunkAssembly.transcript);
+  const mergedTranscript = assembledChunkTranscript || stabilizedTranscript;
+  console.log(
+    `[Finalize] Transcript sources for ${recordingId}: row_length=${stabilizedTranscript.length}, chunk_length=${assembledChunkTranscript.length}, merged_length=${mergedTranscript.length}`
+  );
   const recoverFailedSession = canRecoverFailedSession(session, mergedTranscript);
 
   if (statusBefore === "failed" && !recoverFailedSession) {

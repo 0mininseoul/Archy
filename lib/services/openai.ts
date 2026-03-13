@@ -193,12 +193,37 @@ function shouldFallbackToOpenAI(
     return false;
   }
 
+  const normalized = errorMessage.toLowerCase();
+
   return (
     errorMessage.includes("response_truncated") ||
     errorMessage.includes("missing_title_tags") ||
     errorMessage.includes("missing_content_tags") ||
-    errorMessage.includes("unclosed_code_fence")
+    errorMessage.includes("unclosed_code_fence") ||
+    normalized.includes("formatting timed out") ||
+    normalized.includes("aborterror") ||
+    normalized.includes("the operation was aborted") ||
+    normalized.includes("gemini api failed (429)") ||
+    normalized.includes("gemini api failed (500)") ||
+    normalized.includes("gemini api failed (502)") ||
+    normalized.includes("gemini api failed (503)") ||
+    normalized.includes("gemini api failed (504)") ||
+    normalized.includes('"status": "unavailable"') ||
+    normalized.includes('"status":"unavailable"')
   );
+}
+
+function buildFormattingAbortSignal(
+  externalSignal?: AbortSignal
+): AbortSignal {
+  if (!externalSignal) {
+    return AbortSignal.timeout(FORMATTING_REQUEST_TIMEOUT_MS);
+  }
+
+  return AbortSignal.any([
+    externalSignal,
+    AbortSignal.timeout(FORMATTING_REQUEST_TIMEOUT_MS),
+  ]);
 }
 
 function buildShortResponseRetryPrompt(
@@ -218,6 +243,40 @@ function buildShortResponseRetryPrompt(
 - 각 섹션에는 ${requirements.perSectionBulletCount}개의 구체 bullet 또는 그에 준하는 상세 설명을 포함하세요.
 - 일반적인 결론, 당위, 감상, 메타 코멘트로 분량을 채우지 말고 날짜, 수치, 규칙, 예시, 절차, 예외를 더 많이 보존하세요.
 - 강의/전문 설명이면 개념 정의, 원리, 단계, 계산 예시를 더 자세히 적고, 회의/브레인스토밍이면 결정 배경, 비용, 리스크, 다음 액션을 더 구체적으로 적으세요.`;
+}
+
+function getAcceptableShortResponse(
+  transcriptLength: number,
+  lastReason: string,
+  lastStructuredResponse:
+    | {
+      title: string;
+      content: string;
+      normalizedContentLength: number;
+    }
+    | null
+): FormatResult | null {
+  if (lastReason !== "too_short_for_transcript" || !lastStructuredResponse) {
+    return null;
+  }
+
+  const targetMinimumLength = getMinimumDetailedContentLength(transcriptLength);
+  const fallbackMinimumLength = getMinimumAcceptableShortResponseLength(
+    transcriptLength
+  );
+
+  if (lastStructuredResponse.normalizedContentLength < fallbackMinimumLength) {
+    return null;
+  }
+
+  console.warn(
+    `[Formatting] Accepting shorter-than-target response after retries (length=${lastStructuredResponse.normalizedContentLength}, target=${targetMinimumLength}, fallback_min=${fallbackMinimumLength})`
+  );
+
+  return {
+    title: lastStructuredResponse.title,
+    content: lastStructuredResponse.content,
+  };
 }
 
 /**
@@ -326,7 +385,8 @@ function parseFormattingResponse(
 async function callOpenAI(
   openai: OpenAI,
   prompt: string,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  signal?: AbortSignal
 ): Promise<FormattingModelResponse> {
   const response = await openai.chat.completions.create({
     model: OPENAI_SUMMARY_MODEL,
@@ -342,6 +402,9 @@ async function callOpenAI(
     ],
     max_tokens: maxOutputTokens,
     temperature: 0.5,
+  }, {
+    signal: buildFormattingAbortSignal(signal),
+    timeout: FORMATTING_REQUEST_TIMEOUT_MS,
   });
 
   return {
@@ -356,7 +419,8 @@ async function callOpenAI(
 
 async function callGemini(
   prompt: string,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  signal?: AbortSignal
 ): Promise<FormattingModelResponse> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
@@ -371,7 +435,7 @@ async function callGemini(
     headers: {
       "Content-Type": "application/json",
     },
-    signal: AbortSignal.timeout(FORMATTING_REQUEST_TIMEOUT_MS),
+    signal: buildFormattingAbortSignal(signal),
     body: JSON.stringify({
       systemInstruction: {
         parts: [{ text: buildFormattingSystemPrompt() }],
@@ -434,17 +498,18 @@ async function callFormattingModel(
   provider: FormattingProvider,
   prompt: string,
   openai: OpenAI | null,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  signal?: AbortSignal
 ): Promise<FormattingModelResponse> {
   if (provider === "gemini") {
-    return callGemini(prompt, maxOutputTokens);
+    return callGemini(prompt, maxOutputTokens, signal);
   }
 
   if (!openai) {
     throw new Error("OPENAI_API_KEY not configured");
   }
 
-  return callOpenAI(openai, prompt, maxOutputTokens);
+  return callOpenAI(openai, prompt, maxOutputTokens, signal);
 }
 
 function buildCustomPromptWithTranscript(
@@ -568,24 +633,12 @@ ${buildResponseFormatInstructions(provider)}`;
         `[Formatting] Attempt ${attempt}/${MAX_RETRIES} via ${activeProvider}...`
       );
 
-      // Create timeout promise (90 seconds)
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Formatting timed out after ${FORMATTING_REQUEST_TIMEOUT_MS}ms`
-              )
-            ),
-          FORMATTING_REQUEST_TIMEOUT_MS
-        );
-      });
-
-      // Call the active formatting model with timeout
-      const modelResponse = await Promise.race([
-        callFormattingModel(activeProvider, attemptPrompt, openai, maxOutputTokens),
-        timeoutPromise,
-      ]);
+      const modelResponse = await callFormattingModel(
+        activeProvider,
+        attemptPrompt,
+        openai,
+        maxOutputTokens
+      );
 
       const fullResponse = modelResponse.text;
       if (!fullResponse) {
@@ -628,7 +681,9 @@ ${buildResponseFormatInstructions(provider)}`;
         console.warn(
           `[Formatting] Attempt ${attempt} via ${activeProvider} returned problematic response: ${reason}`
         );
-        console.warn(`[Formatting] Title: ${title.substring(0, 50)}...`);
+        console.warn(
+          `[Formatting] Title: ${title.substring(0, 50)}... (content_length=${lastStructuredResponse.normalizedContentLength})`
+        );
         lastReason = reason;
 
         if (attempt < MAX_RETRIES) {
@@ -643,23 +698,14 @@ ${buildResponseFormatInstructions(provider)}`;
           await new Promise((resolve) => setTimeout(resolve, 2000));
           continue;
         } else {
-          if (reason === "too_short_for_transcript" && lastStructuredResponse) {
-            const targetMinimumLength = getMinimumDetailedContentLength(
-              trimmedTranscript.length
-            );
-            const fallbackMinimumLength = getMinimumAcceptableShortResponseLength(
-              trimmedTranscript.length
-            );
+          const acceptedShortResponse = getAcceptableShortResponse(
+            trimmedTranscript.length,
+            reason,
+            lastStructuredResponse
+          );
 
-            if (lastStructuredResponse.normalizedContentLength >= fallbackMinimumLength) {
-              console.warn(
-                `[Formatting] Accepting shorter-than-target response after ${MAX_RETRIES} attempts (length=${lastStructuredResponse.normalizedContentLength}, target=${targetMinimumLength}, fallback_min=${fallbackMinimumLength})`
-              );
-              return {
-                title: lastStructuredResponse.title,
-                content: lastStructuredResponse.content,
-              };
-            }
+          if (acceptedShortResponse) {
+            return acceptedShortResponse;
           }
 
           // All retries exhausted with problematic responses
@@ -702,6 +748,15 @@ ${buildResponseFormatInstructions(provider)}`;
   }
 
   // All retries exhausted
+  const acceptedShortResponse = getAcceptableShortResponse(
+    trimmedTranscript.length,
+    lastReason,
+    lastStructuredResponse
+  );
+  if (acceptedShortResponse) {
+    return acceptedShortResponse;
+  }
+
   const finalErrorMessage = lastReason
     ? `요약 생성에 실패했습니다: ${lastReason}`
     : lastError?.message || "Unknown formatting error";

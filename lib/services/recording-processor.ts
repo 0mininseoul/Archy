@@ -221,58 +221,26 @@ async function stepFormat(
   await updateProcessingStep(supabase, recordingId, "formatting");
 
   try {
-    // Retry logic for formatting (max 2 attempts)
+    log(recordingId, "Step 2: Formatting document (single pipeline with internal retries)...");
+
+    const { data: defaultFormat } = await supabase
+      .from("custom_formats")
+      .select("prompt")
+      .eq("user_id", userId)
+      .eq("is_default", true)
+      .single();
+
     let formatResult;
-    const MAX_RETRIES = 2;
-    const TIMEOUT_MS = 90000; // 90 seconds
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        log(recordingId, `Step 2: Formatting document (Attempt ${attempt}/${MAX_RETRIES})...`);
-
-        // Create a timeout promise
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Formatting timed out after 90 seconds")), TIMEOUT_MS);
-        });
-
-        // Check for custom format
-        const { data: defaultFormat } = await supabase
-          .from("custom_formats")
-          .select("prompt")
-          .eq("user_id", userId)
-          .eq("is_default", true)
-          .single();
-
-        let formatPromise;
-        if (defaultFormat?.prompt) {
-          log(recordingId, "Using custom format");
-          formatPromise = formatDocument(
-            transcript,
-            format, // format ignored internally but passed for compatibility
-            defaultFormat.prompt
-          );
-        } else {
-          log(recordingId, "Using universal format");
-          formatPromise = formatDocument(transcript);
-        }
-
-        // Race between formatting and timeout
-        formatResult = await Promise.race([formatPromise, timeoutPromise]);
-
-        // If successful, break the loop
-        break;
-
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        logError(recordingId, `Formatting attempt ${attempt} failed:`, errorMessage);
-
-        if (attempt === MAX_RETRIES) {
-          throw new Error(`All formatting attempts failed: ${errorMessage}`);
-        }
-
-        // Wait a bit before retrying
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+    if (defaultFormat?.prompt) {
+      log(recordingId, "Using custom format");
+      formatResult = await formatDocument(
+        transcript,
+        format,
+        defaultFormat.prompt
+      );
+    } else {
+      log(recordingId, "Using universal format");
+      formatResult = await formatDocument(transcript);
     }
 
     if (!formatResult) {
