@@ -732,10 +732,6 @@ export async function getNotionFastSaveTargets(
       ? pageResult.value.results.map(mapPageSummary)
       : [];
 
-  if (databases.length === 0 && pages.length === 0) {
-    throw new Error("Failed to fetch save targets");
-  }
-
   const combined = [
     ...databases.map((database) => ({ ...database, type: "database" as const })),
     ...pages.map((page) => ({ ...page, type: "page" as const })),
@@ -1155,10 +1151,6 @@ export async function getNotionDeepSaveTargetsTick(
 
   const pages = Array.from(stateData.pageMap.values());
   const databases = Array.from(stateData.databaseMap.values());
-
-  if (pages.length === 0 && databases.length === 0) {
-    throw new Error("Failed to fetch save targets");
-  }
 
   const partial =
     stateData.queue.length > 0 ||

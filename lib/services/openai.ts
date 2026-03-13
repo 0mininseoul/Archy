@@ -12,12 +12,27 @@ const TRANSCRIPT_PLACEHOLDER_DETECT_REGEX = /\{\{\s*transcript\s*\}\}/i;
 const OPENAI_SUMMARY_MODEL = "gpt-4o-mini";
 const GEMINI_SUMMARY_MODEL = "gemini-3.1-pro-preview";
 const GEMINI_SUMMARY_CUTOFF_AT_MS = Date.parse("2026-05-05T15:00:00.000Z"); // 2026-05-06 00:00:00 KST
-const FORMATTING_MAX_OUTPUT_TOKENS = 4000;
+const DEFAULT_FORMATTING_MAX_OUTPUT_TOKENS = 4000;
 const FORMATTING_REQUEST_TIMEOUT_MS = 90_000;
-const GEMINI_SUMMARY_THINKING_LEVEL = "high";
 
 type FormattingProvider = "openai" | "gemini";
-type ParsedFormatResponse = { title: string; content: string };
+type ParsedFormatResponse = {
+  title: string;
+  content: string;
+  hasTitleTag: boolean;
+  hasContentTag: boolean;
+  hasClosedContentTag: boolean;
+};
+type FormattingUsage = {
+  promptTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+};
+type FormattingModelResponse = {
+  text: string;
+  finishReason: string | null;
+  usage?: FormattingUsage;
+};
 
 // Patterns that indicate AI returned a problematic response
 const PROBLEMATIC_RESPONSE_PATTERNS = {
@@ -127,6 +142,65 @@ function getMinimumAcceptableShortResponseLength(transcriptLength: number): numb
   return Math.max(700, Math.floor(targetLength * 0.55));
 }
 
+function getFormattingMaxOutputTokens(transcriptLength: number): number {
+  if (transcriptLength >= 20_000) {
+    return 8_000;
+  }
+
+  if (transcriptLength >= 12_000) {
+    return 6_000;
+  }
+
+  return DEFAULT_FORMATTING_MAX_OUTPUT_TOKENS;
+}
+
+function hasUnclosedCodeFence(content: string): boolean {
+  return ((content.match(/```/g) || []).length % 2) === 1;
+}
+
+function getStructuralResponseIssue(parsed: ParsedFormatResponse): string | null {
+  if (!parsed.hasTitleTag) {
+    return "missing_title_tags";
+  }
+
+  if (!parsed.hasContentTag || !parsed.hasClosedContentTag) {
+    return "missing_content_tags";
+  }
+
+  if (hasUnclosedCodeFence(parsed.content)) {
+    return "unclosed_code_fence";
+  }
+
+  return null;
+}
+
+function isTruncatedFinishReason(finishReason: string | null | undefined): boolean {
+  if (!finishReason) return false;
+  const normalized = finishReason.trim().toLowerCase();
+  return (
+    normalized === "length" ||
+    normalized === "max_tokens" ||
+    normalized === "max_output_tokens"
+  );
+}
+
+function shouldFallbackToOpenAI(
+  provider: FormattingProvider,
+  errorMessage: string,
+  hasOpenAIKey: boolean
+): boolean {
+  if (provider !== "gemini" || !hasOpenAIKey) {
+    return false;
+  }
+
+  return (
+    errorMessage.includes("response_truncated") ||
+    errorMessage.includes("missing_title_tags") ||
+    errorMessage.includes("missing_content_tags") ||
+    errorMessage.includes("unclosed_code_fence")
+  );
+}
+
 function buildShortResponseRetryPrompt(
   basePrompt: string,
   transcriptLength: number,
@@ -227,56 +301,16 @@ function isProblematicResponse(
  * Parse title and content from AI response
  */
 function parseOpenAIResponse(fullResponse: string): ParsedFormatResponse {
-  let title = "";
-  let content = fullResponse;
+  const titleMatch = fullResponse.match(/\[TITLE\]\s*([\s\S]*?)\s*\[\/TITLE\]/i);
+  const contentMatch = fullResponse.match(/\[CONTENT\]\s*([\s\S]*?)\s*\[\/CONTENT\]/i);
 
-  // Try multiple patterns for title extraction
-  const titlePatterns = [
-    /\[TITLE\]\s*([\s\S]*?)\s*\[\/TITLE\]/i,
-    /\[TITLE\]([\s\S]*?)\[\/TITLE\]/i,
-  ];
-
-  for (const pattern of titlePatterns) {
-    const match = fullResponse.match(pattern);
-    if (match) {
-      title = match[1].trim();
-      break;
-    }
-  }
-
-  // Try multiple patterns for content extraction
-  const contentPatterns = [
-    /\[CONTENT\]\s*([\s\S]*?)\s*\[\/CONTENT\]/i,
-    /\[CONTENT\]([\s\S]*?)\[\/CONTENT\]/i,
-    /\[CONTENT\]\s*([\s\S]*)$/i, // Handle missing [/CONTENT] tag
-  ];
-
-  for (const pattern of contentPatterns) {
-    const match = fullResponse.match(pattern);
-    if (match) {
-      content = match[1].trim();
-      break;
-    }
-  }
-
-  // Post-processing: Remove any remaining tags
-  content = content
-    .replace(/^\[TITLE\][\s\S]*?\[\/TITLE\]\s*/i, "")
-    .replace(/\[TITLE\][\s\S]*?\[\/TITLE\]\s*/gi, "")
-    .replace(/^\[CONTENT\]\s*/i, "")
-    .replace(/\s*\[\/CONTENT\]$/i, "")
-    .trim();
-
-  // If content still starts with tags, extract just the content part
-  if (content.startsWith("[")) {
-    const contentHeadingMatch = content.match(/(^|\n)(##+\s+)/);
-    if (contentHeadingMatch && typeof contentHeadingMatch.index === "number") {
-      const contentStart = contentHeadingMatch.index + contentHeadingMatch[1].length;
-      content = content.substring(contentStart);
-    }
-  }
-
-  return { title, content };
+  return {
+    title: titleMatch?.[1]?.trim() || "",
+    content: contentMatch?.[1]?.trim() || "",
+    hasTitleTag: Boolean(titleMatch),
+    hasContentTag: /\[CONTENT\]/i.test(fullResponse),
+    hasClosedContentTag: /\[\/CONTENT\]/i.test(fullResponse),
+  };
 }
 
 function parseFormattingResponse(
@@ -291,8 +325,9 @@ function parseFormattingResponse(
  */
 async function callOpenAI(
   openai: OpenAI,
-  prompt: string
-): Promise<string> {
+  prompt: string,
+  maxOutputTokens: number
+): Promise<FormattingModelResponse> {
   const response = await openai.chat.completions.create({
     model: OPENAI_SUMMARY_MODEL,
     messages: [
@@ -305,14 +340,24 @@ async function callOpenAI(
         content: prompt,
       },
     ],
-    max_tokens: FORMATTING_MAX_OUTPUT_TOKENS,
+    max_tokens: maxOutputTokens,
     temperature: 0.5,
   });
 
-  return response.choices[0].message.content || "";
+  return {
+    text: response.choices[0].message.content || "",
+    finishReason: response.choices[0].finish_reason || null,
+    usage: {
+      promptTokens: response.usage?.prompt_tokens,
+      outputTokens: response.usage?.completion_tokens,
+    },
+  };
 }
 
-async function callGemini(prompt: string): Promise<string> {
+async function callGemini(
+  prompt: string,
+  maxOutputTokens: number
+): Promise<FormattingModelResponse> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY not configured");
@@ -339,10 +384,7 @@ async function callGemini(prompt: string): Promise<string> {
       ],
       generationConfig: {
         temperature: 0.5,
-        maxOutputTokens: FORMATTING_MAX_OUTPUT_TOKENS,
-        thinkingConfig: {
-          thinkingLevel: GEMINI_SUMMARY_THINKING_LEVEL,
-        },
+        maxOutputTokens,
       },
     }),
   });
@@ -354,12 +396,18 @@ async function callGemini(prompt: string): Promise<string> {
 
   const data = (await response.json()) as {
     candidates?: Array<{
+      finishReason?: string;
       content?: {
         parts?: Array<{
           text?: string;
         }>;
       };
     }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      thoughtsTokenCount?: number;
+    };
   };
 
   const text = (data.candidates?.[0]?.content?.parts || [])
@@ -371,23 +419,32 @@ async function callGemini(prompt: string): Promise<string> {
     throw new Error("Gemini returned empty response");
   }
 
-  return text;
+  return {
+    text,
+    finishReason: data.candidates?.[0]?.finishReason || null,
+    usage: {
+      promptTokens: data.usageMetadata?.promptTokenCount,
+      outputTokens: data.usageMetadata?.candidatesTokenCount,
+      reasoningTokens: data.usageMetadata?.thoughtsTokenCount,
+    },
+  };
 }
 
 async function callFormattingModel(
   provider: FormattingProvider,
   prompt: string,
-  openai: OpenAI | null
-): Promise<string> {
+  openai: OpenAI | null,
+  maxOutputTokens: number
+): Promise<FormattingModelResponse> {
   if (provider === "gemini") {
-    return callGemini(prompt);
+    return callGemini(prompt, maxOutputTokens);
   }
 
   if (!openai) {
     throw new Error("OPENAI_API_KEY not configured");
   }
 
-  return callOpenAI(openai, prompt);
+  return callOpenAI(openai, prompt, maxOutputTokens);
 }
 
 function buildCustomPromptWithTranscript(
@@ -453,6 +510,7 @@ export async function formatDocument(
   }
 
   const provider = getFormattingProvider();
+  const maxOutputTokens = getFormattingMaxOutputTokens(trimmedTranscript.length);
   if (provider === "openai" && !hasOpenAIKey) {
     throw new Error("OPENAI_API_KEY not configured");
   }
@@ -460,7 +518,7 @@ export async function formatDocument(
   console.log(
     `[Formatting] Starting ${provider} formatting (cutoff=${new Date(
       GEMINI_SUMMARY_CUTOFF_AT_MS
-    ).toISOString()})...`
+    ).toISOString()}, max_output_tokens=${maxOutputTokens})...`
   );
 
   const openai = hasOpenAIKey
@@ -495,6 +553,7 @@ ${buildResponseFormatInstructions(provider)}`;
   let lastError: Error | null = null;
   let lastReason = "";
   let attemptPrompt = prompt;
+  let activeProvider = provider;
   let lastStructuredResponse:
     | {
       title: string;
@@ -506,7 +565,7 @@ ${buildResponseFormatInstructions(provider)}`;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       console.log(
-        `[Formatting] Attempt ${attempt}/${MAX_RETRIES} via ${provider}...`
+        `[Formatting] Attempt ${attempt}/${MAX_RETRIES} via ${activeProvider}...`
       );
 
       // Create timeout promise (90 seconds)
@@ -523,17 +582,30 @@ ${buildResponseFormatInstructions(provider)}`;
       });
 
       // Call the active formatting model with timeout
-      const fullResponse = await Promise.race([
-        callFormattingModel(provider, attemptPrompt, openai),
+      const modelResponse = await Promise.race([
+        callFormattingModel(activeProvider, attemptPrompt, openai, maxOutputTokens),
         timeoutPromise,
       ]);
 
+      const fullResponse = modelResponse.text;
       if (!fullResponse) {
-        throw new Error(`${provider} returned empty response`);
+        throw new Error(`${activeProvider} returned empty response`);
+      }
+
+      if (isTruncatedFinishReason(modelResponse.finishReason)) {
+        throw new Error(
+          `response_truncated:${activeProvider}:${modelResponse.finishReason}`
+        );
       }
 
       // Parse response
-      const { title, content } = parseFormattingResponse(provider, fullResponse);
+      const parsedResponse = parseFormattingResponse(activeProvider, fullResponse);
+      const structuralIssue = getStructuralResponseIssue(parsedResponse);
+      if (structuralIssue) {
+        throw new Error(structuralIssue);
+      }
+
+      const { title, content } = parsedResponse;
 
       if (!title || !content) {
         throw new Error("Failed to parse title or content from response");
@@ -554,7 +626,7 @@ ${buildResponseFormatInstructions(provider)}`;
 
       if (isProblematic) {
         console.warn(
-          `[Formatting] Attempt ${attempt} returned problematic response: ${reason}`
+          `[Formatting] Attempt ${attempt} via ${activeProvider} returned problematic response: ${reason}`
         );
         console.warn(`[Formatting] Title: ${title.substring(0, 50)}...`);
         lastReason = reason;
@@ -598,7 +670,9 @@ ${buildResponseFormatInstructions(provider)}`;
       }
 
       // Success!
-      console.log(`[Formatting] ${provider} formatting succeeded`);
+      console.log(
+        `[Formatting] ${activeProvider} formatting succeeded (finishReason=${modelResponse.finishReason ?? "unknown"}, promptTokens=${modelResponse.usage?.promptTokens ?? "n/a"}, outputTokens=${modelResponse.usage?.outputTokens ?? "n/a"}, reasoningTokens=${modelResponse.usage?.reasoningTokens ?? "n/a"})`
+      );
       console.log(`[Formatting] Title: ${title}`);
       return { title, content };
     } catch (error) {
@@ -608,7 +682,17 @@ ${buildResponseFormatInstructions(provider)}`;
         `[Formatting] Attempt ${attempt} failed:`,
         errorMessage
       );
+      if (!lastReason) {
+        lastReason = errorMessage;
+      }
       lastError = error instanceof Error ? error : new Error(errorMessage);
+
+      if (shouldFallbackToOpenAI(activeProvider, errorMessage, Boolean(openai))) {
+        console.warn(
+          `[Formatting] Falling back from ${activeProvider} to openai after: ${errorMessage}`
+        );
+        activeProvider = "openai";
+      }
 
       if (attempt < MAX_RETRIES) {
         // Wait before retrying

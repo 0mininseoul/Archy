@@ -9,7 +9,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { transcribeAudio } from "@/lib/services/whisper";
 import { formatDocument } from "@/lib/services/openai";
-import { createNotionPage, getNotionDatabases, getNotionPages } from "@/lib/services/notion";
+import { createNotionPage, getNotionSaveTargets } from "@/lib/services/notion";
 import { sendSlackNotification } from "@/lib/services/slack";
 import { createGoogleDoc, getValidAccessToken } from "@/lib/services/google";
 import { sendPushNotification, PushSubscription } from "@/lib/services/push";
@@ -71,6 +71,9 @@ interface StepResult<T> {
   data?: T;
   error?: string;
 }
+
+const NOTION_NO_SAVE_TARGET_MESSAGE =
+  "Notion에 저장할 페이지나 데이터베이스를 찾지 못했습니다. Archy와 공유된 페이지나 데이터베이스를 선택해주세요.";
 
 function createProcessingClient(): SupabaseClient {
   return createServiceRoleClient();
@@ -339,35 +342,35 @@ async function stepNotionSave(
   }
 
   log(recordingId, "Step 3: Creating Notion page...");
+  let targetType = userData.notion_save_target_type || "database";
 
   try {
     let targetId = userData.notion_database_id;
-    let targetType = userData.notion_save_target_type || "database";
 
     // 저장 위치가 설정되지 않은 경우 자동 선택
     if (!targetId) {
       log(recordingId, "Notion save location not set, auto-selecting...");
+      const saveTargets = await getNotionSaveTargets(userData.notion_access_token, {
+        mode: "fast",
+        limit: 10,
+      });
+      const firstDatabase = saveTargets.databases[0];
+      const firstPage = saveTargets.pages[0];
 
-      // 1. 데이터베이스 우선 검색
-      const databases = await getNotionDatabases(userData.notion_access_token);
-      if (databases.length > 0) {
-        targetId = databases[0].id;
+      if (firstDatabase) {
+        targetId = firstDatabase.id;
         targetType = "database";
-        log(recordingId, `Auto-selected database: ${databases[0].title}`);
-      } else {
-        // 2. 데이터베이스 없으면 페이지 검색
-        const pages = await getNotionPages(userData.notion_access_token);
-        if (pages.length > 0) {
-          targetId = pages[0].id;
-          targetType = "page";
-          log(recordingId, `Auto-selected page: ${pages[0].title}`);
-        }
+        log(recordingId, `Auto-selected database: ${firstDatabase.title}`);
+      } else if (firstPage) {
+        targetId = firstPage.id;
+        targetType = "page";
+        log(recordingId, `Auto-selected page: ${firstPage.title}`);
       }
 
-      // 여전히 없으면 스킵
       if (!targetId) {
-        log(recordingId, "No accessible Notion pages or databases found, skipping...");
-        return { success: true, data: "" };
+        log(recordingId, NOTION_NO_SAVE_TARGET_MESSAGE);
+        await updateRecordingError(supabase, recordingId, "notion", NOTION_NO_SAVE_TARGET_MESSAGE);
+        return { success: false, error: NOTION_NO_SAVE_TARGET_MESSAGE };
       }
 
       // 자동 선택된 위치를 사용자 설정에 저장 (다음 녹음부터 재사용)
@@ -376,6 +379,8 @@ async function stepNotionSave(
         .update({
           notion_database_id: targetId,
           notion_save_target_type: targetType,
+          notion_save_target_title:
+            targetType === "database" ? firstDatabase?.title || null : firstPage?.title || null,
         })
         .eq("id", userData.id);
       log(recordingId, "Auto-selected location saved to user settings");
@@ -401,15 +406,17 @@ async function stepNotionSave(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown Notion error";
     logError(recordingId, "Notion creation failed:", errorMessage);
-    captureProcessingException(recordingId, "notion", error, {
-      tags: {
-        archy_user_id: userData.id,
-      },
-      extras: {
-        duration,
-        notionTargetType: userData.notion_save_target_type || "database",
-      },
-    });
+    if (errorMessage !== NOTION_NO_SAVE_TARGET_MESSAGE) {
+      captureProcessingException(recordingId, "notion", error, {
+        tags: {
+          archy_user_id: userData.id,
+        },
+        extras: {
+          duration,
+          notionTargetType: targetType,
+        },
+      });
+    }
 
     await updateRecordingError(
       supabase,
@@ -658,6 +665,23 @@ export async function processRecording(ctx: ProcessingContext): Promise<Processi
     userData.id,
     title
   );
+  if (!formatResult.success) {
+    await supabase
+      .from("recordings")
+      .update({
+        status: "failed",
+        error_step: "formatting",
+        error_message: formatResult.error,
+        termination_reason: "processing_error",
+        last_activity_at: new Date().toISOString(),
+      })
+      .eq("id", recordingId);
+
+    return {
+      success: false,
+      error: { step: "formatting", message: formatResult.error! },
+    };
+  }
   const formattedContent = formatResult.data!.content;
   const finalTitle = formatResult.data!.title;
   await updateProcessingStep(supabase, recordingId, "saving");

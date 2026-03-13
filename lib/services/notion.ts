@@ -62,6 +62,18 @@ interface NotionBlockTask {
   depth: number;
 }
 
+interface MarkdownToBlocksOptions {
+  maxListDepth?: number;
+}
+
+const DEFAULT_MARKDOWN_TO_BLOCKS_OPTIONS: Required<MarkdownToBlocksOptions> = {
+  maxListDepth: 1,
+};
+
+const SAFE_MARKDOWN_TO_BLOCKS_OPTIONS: Required<MarkdownToBlocksOptions> = {
+  maxListDepth: 0,
+};
+
 function getHeaders(accessToken: string): Record<string, string> {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -210,78 +222,93 @@ export async function createNotionPage(
   duration: number,
   targetType: "database" | "page" = "database"
 ): Promise<string> {
-  // Convert markdown content to Notion blocks
-  const blocks = convertMarkdownToBlocks(content);
+  const createWithOptions = async (
+    blockOptions: Required<MarkdownToBlocksOptions>
+  ): Promise<string> => {
+    const blocks = convertMarkdownToBlocks(content, blockOptions);
 
-  if (targetType === "page") {
-    // 페이지 하위에 새 페이지로 생성
-    const response = await fetch(`${NOTION_API_BASE}/pages`, {
-      method: "POST",
-      headers: getHeaders(accessToken),
-      body: JSON.stringify({
-        parent: { page_id: targetId },
-        properties: {
-          title: {
-            title: [{ text: { content: title } }],
+    if (targetType === "page") {
+      const response = await fetch(`${NOTION_API_BASE}/pages`, {
+        method: "POST",
+        headers: getHeaders(accessToken),
+        body: JSON.stringify({
+          parent: { page_id: targetId },
+          properties: {
+            title: {
+              title: [{ text: { content: title } }],
+            },
           },
-        },
-        children: blocks,
-      }),
-    });
+          children: blocks,
+        }),
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Notion API error: ${error.message || response.statusText}`);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Notion API error: ${error.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return `https://notion.so/${data.id.replace(/-/g, "")}`;
     }
 
-    const data = await response.json();
-    return `https://notion.so/${data.id.replace(/-/g, "")}`;
-  }
+    try {
+      const response = await fetch(`${NOTION_API_BASE}/pages`, {
+        method: "POST",
+        headers: getHeaders(accessToken),
+        body: JSON.stringify({
+          parent: { database_id: targetId },
+          properties: {
+            title: {
+              title: [{ text: { content: title } }],
+            },
+            format: {
+              select: { name: format },
+            },
+            duration: {
+              number: duration,
+            },
+            created: {
+              date: { start: new Date().toISOString() },
+            },
+          },
+          children: blocks,
+        }),
+      });
 
-  // 데이터베이스에 새 아이템으로 생성
-  // 먼저 전체 속성으로 시도하고, 실패하면 title만으로 재시도
-  try {
-    const response = await fetch(`${NOTION_API_BASE}/pages`, {
-      method: "POST",
-      headers: getHeaders(accessToken),
-      body: JSON.stringify({
-        parent: { database_id: targetId },
-        properties: {
-          title: {
-            title: [{ text: { content: title } }],
-          },
-          format: {
-            select: { name: format },
-          },
-          duration: {
-            number: duration,
-          },
-          created: {
-            date: { start: new Date().toISOString() },
-          },
-        },
-        children: blocks,
-      }),
-    });
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.message && error.message.includes("is not a property")) {
+          console.log("Database properties not found, retrying with title only...");
+          return await createNotionPageWithTitleOnly(accessToken, targetId, title, blocks);
+        }
+        throw new Error(`Notion API error: ${error.message || response.statusText}`);
+      }
 
-    if (!response.ok) {
-      const error = await response.json();
-      // 속성 관련 에러인 경우 title만으로 재시도
-      if (error.message && error.message.includes("is not a property")) {
+      const data = await response.json();
+      return `https://notion.so/${data.id.replace(/-/g, "")}`;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("is not a property")) {
         console.log("Database properties not found, retrying with title only...");
         return await createNotionPageWithTitleOnly(accessToken, targetId, title, blocks);
       }
-      throw new Error(`Notion API error: ${error.message || response.statusText}`);
+      throw error;
+    }
+  };
+
+  try {
+    return await createWithOptions(DEFAULT_MARKDOWN_TO_BLOCKS_OPTIONS);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes("body failed validation") ||
+        error.message.includes("children should be not present"))
+    ) {
+      console.warn(
+        "[Notion] Validation failed with default markdown conversion, retrying in safe mode..."
+      );
+      return createWithOptions(SAFE_MARKDOWN_TO_BLOCKS_OPTIONS);
     }
 
-    const data = await response.json();
-    return `https://notion.so/${data.id.replace(/-/g, "")}`;
-  } catch (error) {
-    // 속성 에러가 아닌 경우 재throw
-    if (error instanceof Error && error.message.includes("is not a property")) {
-      console.log("Database properties not found, retrying with title only...");
-      return await createNotionPageWithTitleOnly(accessToken, targetId, title, blocks);
-    }
     throw error;
   }
 }
@@ -371,12 +398,126 @@ function parseRichText(text: string): any[] {
   return parts.length > 0 ? parts : [{ text: { content: text } }];
 }
 
-function convertMarkdownToBlocks(markdown: string): any[] {
+function normalizeCodeLanguage(language: string): string {
+  const normalized = language.trim().toLowerCase();
+  if (!normalized) return "plain text";
+
+  const supportedLanguages = new Set([
+    "abap",
+    "arduino",
+    "bash",
+    "basic",
+    "c",
+    "clojure",
+    "coffeescript",
+    "c++",
+    "c#",
+    "css",
+    "dart",
+    "diff",
+    "docker",
+    "elixir",
+    "elm",
+    "erlang",
+    "flow",
+    "fortran",
+    "f#",
+    "gherkin",
+    "glsl",
+    "go",
+    "graphql",
+    "groovy",
+    "haskell",
+    "html",
+    "java",
+    "javascript",
+    "json",
+    "julia",
+    "kotlin",
+    "latex",
+    "less",
+    "lisp",
+    "livescript",
+    "lua",
+    "makefile",
+    "markdown",
+    "markup",
+    "matlab",
+    "mermaid",
+    "nix",
+    "objective-c",
+    "ocaml",
+    "pascal",
+    "perl",
+    "php",
+    "plain text",
+    "powershell",
+    "prolog",
+    "protobuf",
+    "python",
+    "r",
+    "reason",
+    "ruby",
+    "rust",
+    "sass",
+    "scala",
+    "scheme",
+    "scss",
+    "shell",
+    "sql",
+    "swift",
+    "typescript",
+    "vb.net",
+    "verilog",
+    "vhdl",
+    "visual basic",
+    "webassembly",
+    "xml",
+    "yaml",
+    "java/c/c++/c#",
+  ]);
+
+  return supportedLanguages.has(normalized) ? normalized : "plain text";
+}
+
+function createParagraphBlock(text: string): any {
+  return {
+    type: "paragraph",
+    paragraph: {
+      rich_text: parseRichText(text),
+    },
+  };
+}
+
+function createCodeBlock(code: string, language: string): any {
+  return {
+    type: "code",
+    code: {
+      rich_text: [
+        {
+          type: "text",
+          text: { content: code || " " },
+          annotations: { bold: false },
+        },
+      ],
+      language: normalizeCodeLanguage(language),
+    },
+  };
+}
+
+function convertMarkdownToBlocks(
+  markdown: string,
+  options: MarkdownToBlocksOptions = DEFAULT_MARKDOWN_TO_BLOCKS_OPTIONS
+): any[] {
   const lines = markdown.split("\n");
   const blocks: any[] = [];
-  const listStack: Array<{ indent: number; block: any }> = [];
+  const listStack: Array<{ depth: number; block: any }> = [];
   let inTable = false;
   let tableRows: any[] = [];
+  let inCodeBlock = false;
+  let codeBlockLanguage = "";
+  let codeBlockLines: string[] = [];
+  const maxListDepth = Math.max(0, options.maxListDepth ?? DEFAULT_MARKDOWN_TO_BLOCKS_OPTIONS.maxListDepth);
 
   const getIndentWidth = (rawLine: string): number => {
     const leadingWhitespace = rawLine.match(/^[\t ]*/)?.[0] || "";
@@ -409,11 +550,14 @@ function convertMarkdownToBlocks(markdown: string): any[] {
   };
 
   const appendListBlock = (block: any, indent: number) => {
-    while (listStack.length > 0 && indent <= listStack[listStack.length - 1].indent) {
+    const rawDepth = Math.max(0, Math.floor(indent / 4));
+    const depth = Math.min(rawDepth, maxListDepth);
+
+    while (listStack.length > 0 && depth <= listStack[listStack.length - 1].depth) {
       listStack.pop();
     }
 
-    if (listStack.length === 0) {
+    if (listStack.length === 0 || depth === 0) {
       blocks.push(block);
     } else {
       const parent = listStack[listStack.length - 1].block;
@@ -424,14 +568,36 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       parentPayload.children.push(block);
     }
 
-    listStack.push({ indent, block });
+    listStack.push({ depth, block });
   };
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
+    if (line.startsWith("```")) {
+      if (inTable) flushTable();
+      if (!inCodeBlock) {
+        listStack.length = 0;
+        inCodeBlock = true;
+        codeBlockLanguage = line.slice(3).trim();
+        codeBlockLines = [];
+      } else {
+        appendNonListBlock(createCodeBlock(codeBlockLines.join("\n"), codeBlockLanguage));
+        inCodeBlock = false;
+        codeBlockLanguage = "";
+        codeBlockLines = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(rawLine.replace(/\r$/, ""));
+      continue;
+    }
+
     if (!line) {
       if (inTable) flushTable();
+      listStack.length = 0;
       continue;
     }
 
@@ -533,12 +699,11 @@ function convertMarkdownToBlocks(markdown: string): any[] {
       continue;
     }
 
-    appendNonListBlock({
-      type: "paragraph",
-      paragraph: {
-        rich_text: parseRichText(line),
-      },
-    });
+    appendNonListBlock(createParagraphBlock(line));
+  }
+
+  if (inCodeBlock) {
+    appendNonListBlock(createCodeBlock(codeBlockLines.join("\n"), codeBlockLanguage));
   }
 
   if (inTable) flushTable();
@@ -577,10 +742,6 @@ async function getFastNotionSaveTargets(
   } else {
     partial = true;
     console.warn("[Notion] Fast page search failed:", pageSearchResult.reason);
-  }
-
-  if (databaseMap.size === 0 && pageMap.size === 0) {
-    throw new Error("Failed to fetch save targets");
   }
 
   const combined = [
@@ -716,10 +877,6 @@ async function getDeepNotionSaveTargets(
 
   const databases = sortByLastEditedDesc(Array.from(databaseMap.values()));
   const pages = sortByLastEditedDesc(Array.from(pageMap.values()));
-
-  if (databases.length === 0 && pages.length === 0) {
-    throw new Error("Failed to fetch save targets");
-  }
 
   return {
     databases,

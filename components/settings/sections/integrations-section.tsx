@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
+import { useUserStore } from "@/lib/stores/user-store";
 import Image from "next/image";
 
 interface NotionDatabase {
@@ -663,6 +664,9 @@ export function IntegrationsSection({
         setSaveTarget(target);
         setShowSaveTargetDropdown(false);
         setSaveTargetSearch("");
+        const store = useUserStore.getState();
+        store.invalidate();
+        await store.fetchUserData();
       }
     } catch (error) {
       console.error("Failed to set save target:", error);
@@ -686,6 +690,9 @@ export function IntegrationsSection({
         setNotionDeepProgress(null);
         setNotionSyncToken(null);
         onNotionDisconnect();
+        const store = useUserStore.getState();
+        store.invalidate();
+        await store.fetchUserData();
       }
     } catch (error) {
       console.error("Failed to disconnect Notion:", error);
@@ -720,6 +727,9 @@ export function IntegrationsSection({
         setShowManualModal(false);
         setManualToken("");
         setManualPageUrl("");
+        const store = useUserStore.getState();
+        store.invalidate();
+        await store.fetchUserData();
       } else {
         // Handle specific error cases
         if (response.status === 401) {
