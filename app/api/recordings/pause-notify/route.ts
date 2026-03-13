@@ -19,6 +19,7 @@ export const POST = withAuth(async ({ user, supabase, request }) => {
     "visibility_hidden",
     "route_unmount",
     "manual_pause",
+    "system_interruption",
   ];
   const reason = reasonCandidates.includes(body.reason as PauseNotifyReason)
     ? (body.reason as PauseNotifyReason)

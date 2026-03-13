@@ -8,7 +8,8 @@ export const AUTO_PAUSE_NOTICE_EVENT = "archy:auto-pause-notice";
 export type PauseNotifyReason =
   | "visibility_hidden"
   | "route_unmount"
-  | "manual_pause";
+  | "manual_pause"
+  | "system_interruption";
 
 export type RecordingTerminationReason =
   | "user_stop"

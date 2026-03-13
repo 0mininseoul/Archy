@@ -23,6 +23,8 @@ import type { Recording } from "@/lib/types/database";
 // 청크 설정
 const CHUNK_DURATION_SECONDS = 20; // 20초로 변경 (스마트 재개 시스템)
 const AUDIO_BITRATE = 64000; // 64kbps
+const SYSTEM_INTERRUPTION_ERROR_MESSAGE =
+  "iOS 시스템 알림으로 녹음이 일시정지되었습니다. 이어서 녹음을 눌러 계속하세요.";
 
 // 로컬 스토리지 키
 const SESSION_STORAGE_KEY = "archy_recording_session";
@@ -145,6 +147,24 @@ export function getFileExtension(mimeType: string): string {
   return "webm";
 }
 
+function isLikelyIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function isStandaloneMode(): boolean {
+  if (typeof window === "undefined") return false;
+
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
 export function useChunkedRecorder(): UseChunkedRecorderReturn {
   // 기본 상태
   const [isRecording, setIsRecording] = useState(false);
@@ -200,6 +220,11 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
   const isBackgroundTransitioningRef = useRef<boolean>(false);
   const resumeContextRef = useRef<RecordingSession | null>(null);
   const autoFinalizeSessionIdsRef = useRef<Set<string>>(new Set());
+  const streamInterruptionCleanupRef = useRef<(() => void) | null>(null);
+  const interruptionHandlingRef = useRef<boolean>(false);
+  const handleSystemInterruptionRef = useRef<(source: string) => void | Promise<void>>(
+    () => {}
+  );
 
   // iOS 감지 (MP4를 사용하는 경우)
   const isIOSRef = useRef<boolean>(false);
@@ -401,9 +426,16 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         }
         if (recorderRuntimeStateRef.current === "stopping") {
           setRuntimeState("idle", "state_sync");
-        } else {
-          syncRuntimeStateFromRecorder("state_sync");
+          setIsControlBusy(false);
+          return;
         }
+
+        if (sessionIdRef.current && (isRecordingRef.current || isPausedRef.current)) {
+          void handleSystemInterruptionRef.current("media_recorder_stop");
+          return;
+        }
+
+        syncRuntimeStateFromRecorder("state_sync");
         setIsControlBusy(false);
       });
     },
@@ -434,6 +466,13 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       } catch (err) {
         console.warn("[WakeLock] Failed to release:", err);
       }
+    }
+  }, []);
+
+  const cleanupStreamInterruptionListeners = useCallback(() => {
+    if (streamInterruptionCleanupRef.current) {
+      streamInterruptionCleanupRef.current();
+      streamInterruptionCleanupRef.current = null;
     }
   }, []);
 
@@ -659,12 +698,80 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     []
   );
 
+  const reportRecorderInterruption = useCallback((source: string) => {
+    if (typeof window === "undefined") return;
+
+    const visibilityState = document.visibilityState;
+    const pageHadFocus =
+      typeof document.hasFocus === "function" ? document.hasFocus() : null;
+    const isIOS = isLikelyIOSDevice();
+    const possibleAlertLikeSource = [
+      "media_recorder_stop",
+      "media_recorder_error",
+      "media_recorder_restart_error",
+      "audio_track_ended",
+      "audio_track_muted",
+      "media_stream_inactive",
+      "visibility_visible_reconcile",
+      "window_focus_reconcile",
+      "window_pageshow_reconcile",
+    ].includes(source);
+    const interruptionClassification =
+      isIOS && visibilityState === "visible" && pageHadFocus !== false && possibleAlertLikeSource
+        ? "possible_ios_system_alert"
+        : isIOS
+          ? "ios_system_interruption"
+          : "system_interruption";
+    const message =
+      interruptionClassification === "possible_ios_system_alert"
+        ? "Recorder interrupted by an iOS system alert while the page remained visible. This may correspond to an emergency or safety alert, but the Web API does not expose the exact trigger."
+        : "Recorder interrupted by a system-level audio/session interruption.";
+
+    const payload = {
+      type: "error" as const,
+      category: "recorder_interruption" as const,
+      message,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      href: window.location.href,
+      userAgent: navigator.userAgent,
+      isStandalone: isStandaloneMode(),
+      sampled: true,
+      sessionId: sessionIdRef.current,
+      interruptionSource: source,
+      interruptionClassification,
+      interruptionConfidence: "heuristic" as const,
+      visibilityState,
+      pageHadFocus,
+      pageWasVisible: visibilityState === "visible",
+      isIOS,
+      recorderRuntimeState: recorderRuntimeStateRef.current,
+      mediaRecorderState: mediaRecorderRef.current?.state ?? null,
+      action: lastRecorderActionRef.current,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      void fetch("/api/client-errors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch (error) {
+      console.warn("[ChunkedRecorder] Failed to report recorder interruption:", error);
+    }
+  }, []);
+
   const resetRecorderState = useCallback(async () => {
+    cleanupStreamInterruptionListeners();
+
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
 
+    sessionIdRef.current = null;
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== "inactive") {
       try {
@@ -703,8 +810,8 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     lastChunkTimeRef.current = 0;
     pausedTimeRef.current = 0;
     resumeContextRef.current = null;
-    sessionIdRef.current = null;
     isBackgroundTransitioningRef.current = false;
+    interruptionHandlingRef.current = false;
     isRecordingRef.current = false;
     isPausedRef.current = false;
 
@@ -722,7 +829,12 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     setIsControlBusy(false);
     await releaseWakeLock();
     setRuntimeState("idle", "state_sync");
-  }, [clearSessionFromStorage, releaseWakeLock, setRuntimeState]);
+  }, [
+    cleanupStreamInterruptionListeners,
+    clearSessionFromStorage,
+    releaseWakeLock,
+    setRuntimeState,
+  ]);
 
   const reconcileStoredSession = useCallback(
     async (session: RecordingSession): Promise<RecordingSession | null> => {
@@ -830,6 +942,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         timerRef.current = null;
       }
       void releaseWakeLock();
+      cleanupStreamInterruptionListeners();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -849,6 +962,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }
     };
   }, [
+    cleanupStreamInterruptionListeners,
     createSessionSnapshot,
     notifyAutoPause,
     publishRecorderContext,
@@ -968,6 +1082,42 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     setPendingChunks(chunkManagerRef.current?.getPendingCount() || 0);
   }, []);
 
+  const flushCurrentChunkForAutoPause = useCallback(
+    async (source: string) => {
+      if (currentChunkDataRef.current.length === 0) {
+        currentChunkRmsSamplesRef.current = [];
+        currentChunkPeakRmsRef.current = 0;
+        return;
+      }
+
+      const chunkIndex = currentChunkIndexRef.current;
+      const mimeType = mimeTypeRef.current || "audio/webm";
+      const chunkBlob = new Blob(currentChunkDataRef.current, { type: mimeType });
+      const chunkDuration = Date.now() - chunkStartTimeRef.current;
+      const durationSeconds = Math.floor(chunkDuration / 1000);
+      const signalMetrics = consumeCurrentChunkSignalMetrics();
+
+      currentChunkDataRef.current = [];
+      chunkStartTimeRef.current = Date.now();
+
+      if (!isChunkUploadable(chunkBlob, chunkIndex, durationSeconds)) {
+        return;
+      }
+
+      currentChunkIndexRef.current++;
+
+      try {
+        await uploadChunkBlob(chunkBlob, chunkIndex, durationSeconds, signalMetrics);
+      } catch (error) {
+        console.warn(
+          `[ChunkedRecorder] Failed to upload auto-paused chunk (${source}):`,
+          error
+        );
+      }
+    },
+    [consumeCurrentChunkSignalMetrics, isChunkUploadable, uploadChunkBlob]
+  );
+
   /**
    * iOS용: MediaRecorder를 재시작하여 완전한 MP4 청크 생성
    */
@@ -1031,6 +1181,10 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       newRecorder.onerror = (event) => {
         console.error("[ChunkedRecorder] MediaRecorder error:", event);
+        if (sessionIdRef.current) {
+          void handleSystemInterruptionRef.current("media_recorder_restart_error");
+          return;
+        }
         setRuntimeState("error", "chunk_restart");
         setError("녹음 중 오류가 발생했습니다.");
       };
@@ -1108,6 +1262,136 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
     uploadChunkBlob,
   ]);
 
+  const handleSystemInterruption = useCallback(
+    async (source: string) => {
+      if (!sessionIdRef.current || skipUnmountCleanupRef.current) return;
+      if (interruptionHandlingRef.current || isBackgroundTransitioningRef.current) return;
+
+      interruptionHandlingRef.current = true;
+
+      try {
+        console.warn(`[ChunkedRecorder] System interruption detected: ${source}`);
+        setIsControlBusy(true);
+
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+
+        if (startTimeRef.current > 0) {
+          pausedTimeRef.current = Math.max(
+            pausedTimeRef.current,
+            Date.now() - startTimeRef.current
+          );
+        }
+
+        if (mediaRecorderRef.current?.state === "recording") {
+          safeRequestData("background_transition");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          safePause("background_transition");
+        }
+
+        await flushCurrentChunkForAutoPause(source);
+
+        if (audioContextRef.current?.state === "running") {
+          await audioContextRef.current.suspend().catch((error) => {
+            console.warn("[ChunkedRecorder] Failed to suspend AudioContext:", error);
+          });
+        }
+
+        const session = persistPausedSession();
+        await releaseWakeLock();
+
+        if (session) {
+          notifyAutoPause("system_interruption");
+          sendPauseNotify(session, "system_interruption");
+        }
+
+        reportRecorderInterruption(source);
+        setError(SYSTEM_INTERRUPTION_ERROR_MESSAGE);
+      } finally {
+        interruptionHandlingRef.current = false;
+        setIsControlBusy(false);
+      }
+    },
+    [
+      flushCurrentChunkForAutoPause,
+      notifyAutoPause,
+      persistPausedSession,
+      releaseWakeLock,
+      reportRecorderInterruption,
+      safePause,
+      safeRequestData,
+      sendPauseNotify,
+    ]
+  );
+  handleSystemInterruptionRef.current = handleSystemInterruption;
+
+  const attachStreamInterruptionListeners = useCallback(
+    (stream: MediaStream) => {
+      cleanupStreamInterruptionListeners();
+
+      const handleTrackEnded = () => {
+        void handleSystemInterruption("audio_track_ended");
+      };
+
+      const handleTrackMute = () => {
+        window.setTimeout(() => {
+          const recorderState = mediaRecorderRef.current?.state ?? "inactive";
+          const hasLiveAudioTrack =
+            stream
+              .getAudioTracks()
+              .some((track) => track.readyState === "live") ?? false;
+
+          if (recorderState === "inactive" || !hasLiveAudioTrack) {
+            void handleSystemInterruption("audio_track_muted");
+          }
+        }, 250);
+      };
+
+      const handleStreamInactive = () => {
+        void handleSystemInterruption("media_stream_inactive");
+      };
+
+      stream.getAudioTracks().forEach((track) => {
+        track.addEventListener("ended", handleTrackEnded);
+        track.addEventListener("mute", handleTrackMute);
+      });
+      stream.addEventListener("inactive", handleStreamInactive);
+
+      streamInterruptionCleanupRef.current = () => {
+        stream.getAudioTracks().forEach((track) => {
+          track.removeEventListener("ended", handleTrackEnded);
+          track.removeEventListener("mute", handleTrackMute);
+        });
+        stream.removeEventListener("inactive", handleStreamInactive);
+      };
+    },
+    [cleanupStreamInterruptionListeners, handleSystemInterruption]
+  );
+
+  const reconcileForegroundRecorderState = useCallback(
+    async (source: string) => {
+      const recorderState = mediaRecorderRef.current?.state ?? "inactive";
+      const hasLiveAudioTrack =
+        streamRef.current?.getAudioTracks().some((track) => track.readyState === "live") ??
+        false;
+
+      if (
+        sessionIdRef.current &&
+        isRecordingRef.current &&
+        !isPausedRef.current &&
+        (recorderState === "inactive" || !hasLiveAudioTrack)
+      ) {
+        await handleSystemInterruption(source);
+        return true;
+      }
+
+      return false;
+    },
+    [handleSystemInterruption]
+  );
+
   // 백그라운드 전환 시 즉시 청크 추출 및 세션 저장
   const handleBackgroundTransition = useCallback(
     async (reason: PauseNotifyReason = "visibility_hidden") => {
@@ -1173,8 +1457,12 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
           await handleBackgroundTransition("visibility_hidden");
         }
       } else if (document.visibilityState === "visible") {
+        const interrupted = await reconcileForegroundRecorderState(
+          "visibility_visible_reconcile"
+        );
+
         // 포그라운드로 복귀
-        if (isRecording && !isPaused) {
+        if (!interrupted && isRecording && !isPaused) {
           await requestWakeLock();
         }
 
@@ -1191,15 +1479,29 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }
     };
 
+    const handleWindowFocus = () => {
+      void reconcileForegroundRecorderState("window_focus_reconcile");
+    };
+
+    const handleWindowPageShow = () => {
+      void reconcileForegroundRecorderState("window_pageshow_reconcile");
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("pageshow", handleWindowPageShow);
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("pageshow", handleWindowPageShow);
     };
   }, [
     handleBackgroundTransition,
     isPaused,
     isRecording,
     loadSessionFromStorage,
+    reconcileForegroundRecorderState,
     reconcileStoredSession,
     requestWakeLock,
   ]);
@@ -1228,6 +1530,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         timerRef.current = null;
       }
 
+      cleanupStreamInterruptionListeners();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -1252,6 +1555,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         },
       });
       streamRef.current = stream;
+      attachStreamInterruptionListeners(stream);
 
       let activeSessionId = resumeContext?.sessionId ?? null;
       if (!activeSessionId) {
@@ -1329,6 +1633,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }
 
       // 청킹 상태 초기화
+      interruptionHandlingRef.current = false;
       const resumeDurationSeconds = resumeContext?.duration ?? 0;
       currentChunkDataRef.current = [];
       currentChunkRmsSamplesRef.current = [];
@@ -1378,6 +1683,10 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
 
       mediaRecorder.onerror = (event) => {
         console.error("[ChunkedRecorder] MediaRecorder error:", event);
+        if (sessionIdRef.current) {
+          void handleSystemInterruptionRef.current("media_recorder_error");
+          return;
+        }
         setRuntimeState("error", "start");
         setIsControlBusy(false);
         setError("녹음 중 오류가 발생했습니다.");
@@ -1443,7 +1752,9 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }
     }
   }, [
+    attachStreamInterruptionListeners,
     attachRecorderLifecycleListeners,
+    cleanupStreamInterruptionListeners,
     clearSessionFromStorage,
     extractAndUploadChunk,
     handleTerminalSessionTermination,
@@ -1613,6 +1924,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
         }
 
         // 스트림 정리
+        cleanupStreamInterruptionListeners();
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
@@ -1673,6 +1985,7 @@ export function useChunkedRecorder(): UseChunkedRecorderReturn {
       }, 100);
     });
   }, [
+    cleanupStreamInterruptionListeners,
     clearSessionFromStorage,
     consumeCurrentChunkSignalMetrics,
     duration,

@@ -15,9 +15,21 @@ interface ClientErrorPayload {
   timestamp?: string;
   trace?: string | null;
   fingerprint?: string;
-  category?: "recorder_state" | "external_extension" | "client_runtime";
+  category?:
+    | "recorder_state"
+    | "external_extension"
+    | "client_runtime"
+    | "recorder_interruption";
   origin?: "app" | "external_extension";
   sampled?: boolean;
+  sessionId?: string | null;
+  interruptionSource?: string | null;
+  interruptionClassification?: string | null;
+  interruptionConfidence?: "heuristic" | "confirmed" | null;
+  visibilityState?: DocumentVisibilityState | null;
+  pageHadFocus?: boolean | null;
+  pageWasVisible?: boolean | null;
+  isIOS?: boolean | null;
   recorderRuntimeState?:
     | "idle"
     | "starting"
@@ -65,6 +77,14 @@ export async function POST(request: NextRequest) {
       category,
       origin: body?.origin || "app",
       sampled: body?.sampled ?? true,
+      sessionId: body?.sessionId ?? null,
+      interruptionSource: body?.interruptionSource ?? null,
+      interruptionClassification: body?.interruptionClassification ?? null,
+      interruptionConfidence: body?.interruptionConfidence ?? null,
+      visibilityState: body?.visibilityState ?? null,
+      pageHadFocus: body?.pageHadFocus ?? null,
+      pageWasVisible: body?.pageWasVisible ?? null,
+      isIOS: body?.isIOS ?? null,
       recorderRuntimeState: body?.recorderRuntimeState ?? null,
       mediaRecorderState: body?.mediaRecorderState ?? null,
       action: body?.action ?? null,
